@@ -1,7 +1,17 @@
+pub mod agent;
+pub mod api;
+pub mod auth;
+pub mod config;
+pub mod error;
+pub mod models;
+pub mod rag;
+pub mod repositories;
+pub mod state;
+
 use std::net::SocketAddr;
 
 use axum::body::Body;
-use axum::extract::Request;
+use axum::extract::{Request, State};
 use axum::http::{header, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -11,7 +21,10 @@ use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
+use crate::state::AppState;
+
 pub async fn run() -> anyhow::Result<()> {
+    dotenvy::dotenv().ok();
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -19,17 +32,19 @@ pub async fn run() -> anyhow::Result<()> {
         )
         .init();
 
-    let host = std::env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let port = std::env::var("SERVER_PORT")
-        .ok()
-        .and_then(|value| value.parse::<u16>().ok())
-        .unwrap_or(5555);
+    let config = config::load_config()?;
+    let host = config.server_host.clone();
+    let port = config.server_port;
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
+
+    let state = state::build_state(config)?;
 
     let app = Router::new()
         .route("/api/health", get(health))
         .route("/api/config", get(config_snapshot))
+        .merge(api::conversations_router())
         .fallback(static_or_spa)
+        .with_state(state)
         .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
         .layer(TraceLayer::new_for_http());
 
@@ -47,17 +62,24 @@ async fn health() -> impl IntoResponse {
     }))
 }
 
-async fn config_snapshot() -> impl IntoResponse {
+async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
+    let cfg = &state.config;
     Json(json!({
-        "tenant": "Acme Knowledge",
-        "role": "tenant_admin",
+        "tenant": cfg.default_tenant_id.to_string(),
+        "role": cfg.default_role,
         "auth": "disabled",
         "embedding": "bge-large-zh-v1.5",
         "retrieval": {
             "strategy": "hybrid",
-            "topK": 8,
-            "rerankTopK": 5,
-            "threshold": 0.32
+            "topK": cfg.rag.retrieval.effective_top_k,
+            "rerankTopK": cfg.rag.retrieval.rrf_top_k,
+            "threshold": cfg.rag.rerank.min_score
+        },
+        "agent": {
+            "default_tone": cfg.agent.default_tone,
+            "proactive_followup": cfg.agent.proactive_followup,
+            "max_followup_suggestions": cfg.agent.max_followup_suggestions,
+            "allow_analyst_mode": cfg.agent.allow_analyst_mode,
         }
     }))
 }

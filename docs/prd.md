@@ -49,6 +49,12 @@ DocuMind
 │   ├── 答案溯源（原文引用高亮）
 │   ├── 多轮对话（上下文记忆）
 │   └── 反馈机制（赞/踩 + 修正）
+├── Agent 智能体
+│   ├── 角色人格与对话气质
+│   ├── 灵活回答模式（直接回答 / 澄清 / 总结 / 对比 / 引导）
+│   ├── Prompt 策略与版本管理
+│   ├── 工具调用规划（改写 / 检索 / 精排 / 生成）
+│   └── 可信边界与防幻觉约束
 ├── 知识库管理
 │   ├── 知识库 CRUD
 │   ├── 文档上传（Word / PPT / PDF）
@@ -70,7 +76,7 @@ DocuMind
 ### 2.3 关键红线
 
 - **宁愿答不出，绝不瞎编。** 检索不到相关文档时明确告知，不做无依据生成
-- 不做通用聊天、写文案、写代码
+- 不做无边界通用聊天、写文案、写代码；但允许围绕文档内容进行有温度的解释、追问、总结和引导
 - 所有回答必须附带原文引用（chunk_id → document_id → 原文段落）
 - 全流程留痕、可追溯
 
@@ -381,7 +387,7 @@ Context:
 | **中文分词** | ES ik / jieba 插件 | BM25 关键词检索的中文分词 |
 | **缓存/会话** | Redis 7 (redis-rs 0.25) | 会话状态、LLM 请求去重、热点问答缓存 |
 | **消息队列** | RabbitMQ (lapin / amqprs) | 文档解析、向量化、索引重建等异步任务 |
-| **LLM Adapter** | Rig 0.37 (`rig-core`) | Rust 生态的 LLM 抽象层，兼容 OpenAI 协议 |
+| **LLM Adapter** | Rig (`rig-core`) + OpenAI-compatible adapter | Rust 生态的 LLM 抽象层，兼容 DashScope / OpenAI / 内网模型 |
 | **Embedding** | ONNX Runtime (`ort` crate) | 本地推理 bge-large-zh-v1.5，无外网依赖 |
 | **文档解析** | `pdf-extract` + `docx-rs` + OpenXML | 纯 Rust 解析，无 Python 依赖 |
 | **中文分词** | jieba-rs | BM25 关键词提取与分词 |

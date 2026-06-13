@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { ConfigChunking } from "@/components/views/config-chunking";
 
 export default function ChunkingPage() {
-  return <DocuMindApp view="chunking" />;
+  return <ConfigChunking />;
 }

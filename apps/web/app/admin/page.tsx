@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { AdminOverview } from "@/components/views/admin-overview";
 
 export default function AdminPage() {
-  return <DocuMindApp view="admin" />;
+  return <AdminOverview />;
 }

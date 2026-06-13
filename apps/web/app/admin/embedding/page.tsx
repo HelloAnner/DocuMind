@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { ConfigEmbedding } from "@/components/views/config-embedding";
 
 export default function EmbeddingPage() {
-  return <DocuMindApp view="embedding" />;
+  return <ConfigEmbedding />;
 }

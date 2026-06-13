@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { ChatWorkspace } from "@/components/views/chat-workspace";
 
 export default function ChatPage() {
-  return <DocuMindApp view="chat" />;
+  return <ChatWorkspace />;
 }

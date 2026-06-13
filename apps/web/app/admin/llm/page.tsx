@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { ConfigLlm } from "@/components/views/config-llm";
 
-export default function LlmConfigPage() {
-  return <DocuMindApp view="llm" />;
+export default function LlmPage() {
+  return <ConfigLlm />;
 }

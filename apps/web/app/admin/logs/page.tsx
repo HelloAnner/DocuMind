@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { AdminLogs } from "@/components/views/admin-logs";
 
 export default function LogsPage() {
-  return <DocuMindApp view="logs" />;
+  return <AdminLogs />;
 }

@@ -1,5 +1,5 @@
-import { DocuMindApp } from "@/components/documind-app";
+import { ConfigSearch } from "@/components/views/config-search";
 
-export default function SearchConfigPage() {
-  return <DocuMindApp view="search" />;
+export default function SearchPage() {
+  return <ConfigSearch />;
 }
