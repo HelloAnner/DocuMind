@@ -87,8 +87,8 @@ DocuMind
 │  Word/PPT/PDF → Parser → Cleaner → Chunker → Embedder        │
 │                                              │                │
 │                                              ▼                │
-│                                     Vector Store (PGVector)   │
-│                                     + Metadata Store (PG)     │
+│                                     Elasticsearch             │
+│                                     + Metadata Store (PostgreSQL) │
 └──────────────────────────────────────────────────────────────┘
 
 ┌──────────────────────────────────────────────────────────────┐
@@ -194,7 +194,7 @@ source_type: paragraph  # paragraph / table / slide_note
 **推荐默认**：`bge-large-zh-v1.5` 本地部署（ONNX Runtime + Rust `ort` crate），1024 维，FP16，单卡可吞吐 1000+ docs/min。
 
 **落地**：
-- 解析完成 → 入队 MQ → Embedding Worker 消费 → 写入 PGVector
+- 解析完成 → 入队 MQ → Embedding Worker 消费 → 写入 Elasticsearch
 - 支持失败重试、幂等（按 chunk_id 去重）
 - embedding 模型可热切换（重建索引）
 
@@ -250,12 +250,12 @@ LLM 轻量改写（小模型，~0.3s）
 ```
 
 **Dense Vector Search**：
-- 查询向量 → PGVector `ivfflat` 或 `hnsw` 索引 → cosine 相似度 Top-100
+- 查询向量 → Elasticsearch `dense_vector` HNSW 索引 → cosine 相似度 Top-100
 - 距离度量：`cosine`（对文档长度差异鲁棒）
 
 **Sparse BM25 Search**：
-- 使用 PostgreSQL 内置 `tsvector` + `tsquery` 做全文检索
-- 中文分词：`zhparser`（PG 插件）或 jieba-rs 分词后存 `tsvector`
+- 使用 Elasticsearch 原生 BM25 倒排索引做全文检索
+- 中文分词：ES `ik_max_word` 分词插件
 - 对专业术语、数字、日期等精确匹配场景补偿向量检索的短板
 
 **Metadata Filter**：
@@ -363,12 +363,12 @@ Context:
 │  └─────────────────────────────────────────────────┘ │
 └──────────────────────┬──────────────────────────────┘
                        │
-        ┌──────────────┼──────────────┐
-        ▼              ▼              ▼
-   ┌─────────┐  ┌──────────┐  ┌──────────┐
-   │PostgreSQL│  │  Redis 7  │  │ RabbitMQ │
-   │+PGVector │  │ (缓存/会话)│  │ (任务队列)│
-   └─────────┘  └──────────┘  └──────────┘
+        ┌──────────────┼──────────────┼──────────────┐
+        ▼              ▼              ▼              ▼
+   ┌───────────┐ ┌──────────────┐ ┌──────────┐ ┌──────────┐
+   │PostgreSQL │ │Elasticsearch │ │  Redis 7  │ │ RabbitMQ │
+   │(业务元数据)│ │(向量+检索)   │ │ (缓存/会话)│ │ (任务队列)│
+   └───────────┘ └──────────────┘ └──────────┘ └──────────┘
 ```
 
 ### 4.2 Rust 技术栈明细
@@ -376,9 +376,9 @@ Context:
 | 层 | 选型 | 理由 |
 |---|---|---|
 | **Web 框架** | Axum 0.7 + Tokio + Tower | 与 Northline 统一，async 生态成熟 |
-| **数据库** | SQLx 0.8 (PostgreSQL + PGVector) | 编译期 SQL 校验，支持 PGVector 扩展 |
-| **向量扩展** | PGVector (pgvector 0.7+) | 向量与元数据同库，无需额外集群；ivfflat/hnsw 索引 |
-| **全文检索** | PostgreSQL tsvector + zhparser | 利用已有 PG 做 BM25 关键词检索 |
+| **业务数据库** | SQLx 0.8 (PostgreSQL) | 编译期 SQL 校验，存储知识库/文档/用户/问答记录 |
+| **搜索引擎** | Elasticsearch 8.x | 向量检索 (kNN/HNSW) + BM25 全文检索，内置 hybrid search + RRF |
+| **中文分词** | ES ik / jieba 插件 | BM25 关键词检索的中文分词 |
 | **缓存/会话** | Redis 7 (redis-rs 0.25) | 会话状态、LLM 请求去重、热点问答缓存 |
 | **消息队列** | RabbitMQ (lapin / amqprs) | 文档解析、向量化、索引重建等异步任务 |
 | **LLM Adapter** | Rig 0.37 (`rig-core`) | Rust 生态的 LLM 抽象层，兼容 OpenAI 协议 |
@@ -448,10 +448,10 @@ Query Understanding
          ▼                                      ▼
    ┌──────────┐                         ┌──────────────┐
    │  BM25    │                         │ Vector Search│
-   │  PG FTS  │                         │  PGVector    │
+   │  ES      │                         │  ES kNN      │
    │          │                         │              │
-   │ tsquery  │                         │ cosine       │
-   │ zhparser │                         │ ivfflat/hnsw │
+   │ BM25     │                         │ cosine       │
+   │ ik分词   │                         │ HNSW         │
    │ Top-100  │                         │ Top-100      │
    └────┬─────┘                         └──────┬───────┘
         │                                      │
@@ -489,45 +489,62 @@ Query Understanding
             └──────────────┘
 ```
 
-### 5.2 向量索引设计
+### 5.2 ES 索引设计
 
-```sql
--- PGVector 建表
-CREATE EXTENSION IF NOT EXISTS vector;
-CREATE EXTENSION IF NOT EXISTS zhparser;
-
-CREATE TABLE chunks (
-  chunk_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  doc_id       UUID NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
-  kb_id        UUID NOT NULL REFERENCES knowledge_bases(kb_id),
-  chunk_index  INTEGER NOT NULL,
-  content      TEXT NOT NULL,
-  heading_path TEXT[],
-  page_range   INT4RANGE,
-  token_count  INTEGER,
-  source_type  VARCHAR(20),        -- 'paragraph' | 'table' | 'slide_note'
-  embedding    VECTOR(1024),       -- bge-large-zh 维度
-
-  -- 全文检索
-  content_tsv  TSVECTOR GENERATED ALWAYS AS (
-    to_tsvector('chinese_zh', content)
-  ) STORED,
-
-  created_at   TIMESTAMPTZ DEFAULT now()
-);
-
--- 向量索引 (HNSW 适合高精度，IVFFlat 适合大容量)
-CREATE INDEX ON chunks USING hnsw (embedding vector_cosine_ops)
-  WITH (m = 16, ef_construction = 200);
-
--- 全文检索索引
-CREATE INDEX ON chunks USING GIN (content_tsv);
-CREATE INDEX ON chunks USING GIN (heading_path);
-
--- 过滤字段索引
-CREATE INDEX ON chunks (kb_id, doc_id);
-CREATE INDEX ON chunks USING GIN (content_tsv) WHERE kb_id = $1;
+```json
+// PUT /chunks
+{
+  "settings": {
+    "number_of_shards": 3,
+    "number_of_replicas": 1,
+    "analysis": {
+      "analyzer": {
+        "chinese_analyzer": {
+          "type": "custom",
+          "tokenizer": "ik_max_word",
+          "filter": ["lowercase"]
+        }
+      }
+    }
+  },
+  "mappings": {
+    "properties": {
+      "chunk_id":    { "type": "keyword" },
+      "doc_id":      { "type": "keyword" },
+      "kb_id":       { "type": "keyword" },
+      "chunk_index": { "type": "integer" },
+      "content": {
+        "type": "text",
+        "analyzer": "chinese_analyzer",
+        "fields": {
+          "keyword": { "type": "keyword", "ignore_above": 256 }
+        }
+      },
+      "heading_path": { "type": "keyword" },
+      "page_range":   { "type": "integer_range" },
+      "token_count":  { "type": "integer" },
+      "source_type":  { "type": "keyword" },
+      "embedding": {
+        "type": "dense_vector",
+        "dims": 1024,
+        "index": true,
+        "similarity": "cosine",
+        "index_options": {
+          "type": "hnsw",
+          "m": 16,
+          "ef_construction": 200
+        }
+      },
+      "created_at": { "type": "date" }
+    }
+  }
+}
 ```
+
+- **向量字段** `embedding`：dense_vector(1024d)，HNSW 索引，cosine 相似度
+- **全文检索字段** `content`：ik_max_word 中文分词，BM25 倒排索引
+- **过滤字段**：kb_id / doc_id / source_type 为 keyword，page_range 为 integer_range
+- **hybrid search**：一次查询同时跑 kNN + BM25，ES 内置 RRF 融合
 
 ### 5.3 查询流程伪代码
 
@@ -536,19 +553,37 @@ async fn search(query: Query, kb_ids: Vec<Uuid>) -> Result<Vec<Chunk>> {
     // 1. Query Rewrite
     let rewritten = llm.rewrite_query(&query).await?;
 
-    // 2. 并行执行三路检索
-    let (dense, sparse) = tokio::join!(
-        vector_search(rewritten.embedding, kb_ids, top_k=100),
-        bm25_search(rewritten.keywords, kb_ids, top_k=100),
-    );
+    // 2. ES hybrid search（一次查询完成 kNN + BM25 + 元数据过滤 + RRF 融合）
+    let result = es_client
+        .search(SearchRequest {
+            index: "chunks",
+            query: HybridQuery {
+                knn: KnnClause {
+                    field: "embedding",
+                    query_vector: rewritten.embedding,
+                    k: 100,
+                    num_candidates: 200,
+                },
+                bm25: Bm25Clause {
+                    fields: vec!["content"],
+                    query: &rewritten.rewritten_query,
+                },
+                filter: FilterClause {
+                    kb_id: kb_ids,
+                    // source_type, time_range 等预过滤
+                },
+                rrf: RrfConfig { k: 60, window_size: 100 },
+            },
+            size: 20,
+        })
+        .await?;
 
-    // 3. RRF 融合
-    let fused = rrf_fuse(&dense, &sparse, k=60, top_n=20);
+    let candidates: Vec<Chunk> = result.hits.into();
 
-    // 4. Reranker 精排
-    let reranked = reranker.rerank(&query.text, fused, top_k=5).await?;
+    // 3. Reranker 精排
+    let reranked = reranker.rerank(&query.text, candidates, top_k=5).await?;
 
-    // 5. 阈值过滤
+    // 4. 阈值过滤
     let valid: Vec<_> = reranked
         .into_iter()
         .filter(|r| r.score >= 0.3)
@@ -607,7 +642,7 @@ feedback (feedback_id, qa_id, user_id, rating, correction, created_at)
 
 ### Phase 1 — 筑基（Weeks 1–4）
 
-- [x] 项目骨架：Axum + SQLx + PGVector + Redis + MQ 连接
+- [x] 项目骨架：Axum + SQLx + PostgreSQL + Elasticsearch + Redis + MQ 连接
 - [ ] 文档上传与解析（PDF / Word / PPT）
 - [ ] 切割 Pipeline（三级策略 + 异步 MQ 消费）
 - [ ] 向量化 Pipeline（本地 ONNX + bge-large-zh）
