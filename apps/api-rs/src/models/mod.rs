@@ -2,21 +2,16 @@ pub mod agent;
 pub mod citation;
 pub mod conversation;
 pub mod feedback;
+pub mod identity;
 pub mod message;
 pub mod rag;
 pub mod trace;
 
+pub use identity::{CurrentActor, *};
+pub type ActorScope = CurrentActor;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
-
-#[derive(Debug, Clone)]
-pub struct ActorScope {
-    pub tenant_id: Uuid,
-    pub user_id: Uuid,
-    pub role: String,
-    pub allowed_kb_ids: Vec<Uuid>,
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

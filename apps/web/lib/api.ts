@@ -1,3 +1,4 @@
+import { getAuthHeaders } from "./auth";
 import type {
   Conversation,
   CreateConversationRequest,
@@ -10,9 +11,9 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
-async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
+export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${input}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     ...init,
   });
   if (!response.ok) {
@@ -76,4 +77,21 @@ export async function submitFeedback(
     method: "POST",
     body: JSON.stringify(req),
   });
+}
+
+export interface KnowledgeBase {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description?: string;
+  status: string;
+  tags: string[];
+  doc_count: number;
+  chunk_count: number;
+  query_count: number;
+  updated_at: string;
+}
+
+export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
+  return fetchJson("/api/knowledge-bases");
 }

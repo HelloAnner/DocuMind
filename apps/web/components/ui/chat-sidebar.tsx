@@ -2,13 +2,17 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Folder, Plus, Settings } from "lucide-react";
+import { ChevronDown, Folder, History, MessageSquare, Plus, Settings, Users } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
+import { useAuth } from "@/components/providers/auth-provider";
 
 export function ChatSidebar() {
   const router = useRouter();
-  const { conversations, currentId, setCurrentId, createAndSelect } = useConversation();
+  const { me } = useAuth();
+  const { conversations, currentId, setCurrentId, createAndSelect, availableKbs, selectedKbIds, setSelectedKbIds } = useConversation();
+  const isAdmin = me?.roles.includes("tenant_admin") || me?.roles.includes("tenant_owner") || me?.roles.includes("super_admin");
+  const selectedKb = availableKbs.find((k) => k.id === (selectedKbIds[0] ?? ""));
 
   const handleSelect = (id: string) => {
     setCurrentId(id);
@@ -35,7 +39,17 @@ export function ChatSidebar() {
 
       <div className="dm-kb-selector">
         <Folder size={15} />
-        <span>产品文档库</span>
+        <select
+          value={selectedKbIds[0] ?? ""}
+          onChange={(e) => setSelectedKbIds([e.target.value])}
+          aria-label="选择知识库"
+        >
+          {availableKbs.map((kb) => (
+            <option key={kb.id} value={kb.id}>
+              {kb.name}
+            </option>
+          ))}
+        </select>
         <ChevronDown size={14} />
       </div>
 
@@ -61,10 +75,22 @@ export function ChatSidebar() {
         )}
       </div>
 
-      <Link className="dm-chat-admin-entry" href="/admin">
-        <Settings size={15} />
-        <span>管理后台</span>
-      </Link>
+      <div style={{ marginTop: "auto" }}>
+        <Link className="dm-chat-admin-entry" href="/knowledge">
+          <MessageSquare size={15} />
+          <span>我可访问的知识库</span>
+        </Link>
+        <Link className="dm-chat-admin-entry" href="/history">
+          <History size={15} />
+          <span>历史问答</span>
+        </Link>
+        {isAdmin && (
+          <Link className="dm-chat-admin-entry" href="/admin">
+            <Settings size={15} />
+            <span>管理后台</span>
+          </Link>
+        )}
+      </div>
     </aside>
   );
 }

@@ -19,7 +19,6 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { useConversation } from "@/components/providers/conversation-provider";
-import { AVAILABLE_KB_IDS } from "@/hooks/use-conversation-manager";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 
 const suggestions = [
@@ -36,6 +35,7 @@ export function ChatWorkspace() {
     stages,
     rightOpen,
     setRightOpen,
+    availableKbs,
     selectedKbIds,
     setSelectedKbIds,
     sendMessage,
@@ -192,7 +192,7 @@ export function ChatWorkspace() {
             disabled={!!streamingId}
             aria-label="选择知识库"
           >
-            {AVAILABLE_KB_IDS.map((kb) => (
+            {availableKbs.map((kb) => (
               <option key={kb.id} value={kb.id}>
                 {kb.name}
               </option>

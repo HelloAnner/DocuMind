@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use anyhow::Result;
+use sqlx::PgPool;
 
 use crate::agent::{
     AgentKernel, BuiltinPromptRegistry, MockAnswerGenerator, RuleBasedClaimVerifier,
@@ -21,16 +22,17 @@ pub struct AppState {
     pub repository: Arc<dyn crate::repositories::ConversationRepository>,
     pub agent_kernel: AgentKernel,
     pub cache: Arc<dyn AnswerCache>,
+    pub db_pool: Option<PgPool>,
 }
 
 pub async fn build_state(config: AppConfig) -> Result<AppState> {
-    let repository: Arc<dyn crate::repositories::ConversationRepository> = if let Some(ref url) =
+    let (repository, db_pool): (Arc<dyn crate::repositories::ConversationRepository>, Option<PgPool>) = if let Some(ref url) =
         config.database_url
     {
         let pool = sqlx::PgPool::connect(url).await?;
-        Arc::new(SqlxConversationRepository::new(pool))
+        (Arc::new(SqlxConversationRepository::new(pool.clone())), Some(pool))
     } else {
-        Arc::new(InMemoryConversationRepository::new())
+        (Arc::new(InMemoryConversationRepository::new()), None)
     };
 
     let cache: Arc<dyn AnswerCache> = if let Some(ref url) = config.redis_url {
@@ -71,5 +73,6 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         repository,
         agent_kernel,
         cache,
+        db_pool,
     })
 }

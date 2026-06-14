@@ -6,9 +6,11 @@ import {
   createConversation,
   getMessages,
   listConversations,
+  listKnowledgeBases,
   retryMessageStreamUrl,
   sendMessageStreamUrl,
   submitFeedback,
+  type KnowledgeBase,
 } from "@/lib/api";
 import { streamSse } from "@/lib/sse";
 import type {
@@ -21,14 +23,6 @@ import type {
   RetryMessageRequest,
   SendMessageRequest,
 } from "@/lib/types";
-
-const DEFAULT_KB_ID = "00000000-0000-0000-0000-000000000003";
-
-export const AVAILABLE_KB_IDS = [
-  { id: DEFAULT_KB_ID, name: "产品文档库" },
-  { id: "00000000-0000-0000-0000-000000000004", name: "合同制度库" },
-  { id: "00000000-0000-0000-0000-000000000005", name: "销售策略库" },
-];
 
 export type PipelineStage = {
   label: string;
@@ -57,7 +51,8 @@ export function useConversationManager() {
     { label: "生成答案", done: false },
   ]);
   const [rightOpen, setRightOpen] = useState(false);
-  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([DEFAULT_KB_ID]);
+  const [availableKbs, setAvailableKbs] = useState<KnowledgeBase[]>([]);
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
@@ -70,9 +65,22 @@ export function useConversationManager() {
     }
   }, []);
 
+  const loadKnowledgeBases = useCallback(async () => {
+    try {
+      const kbs = await listKnowledgeBases();
+      setAvailableKbs(kbs);
+      if (kbs.length > 0 && selectedKbIds.length === 0) {
+        setSelectedKbIds([kbs[0].id]);
+      }
+    } catch (e) {
+      console.error("failed to load knowledge bases", e);
+    }
+  }, [selectedKbIds.length]);
+
   useEffect(() => {
     loadConversations();
-  }, [loadConversations]);
+    loadKnowledgeBases();
+  }, [loadConversations, loadKnowledgeBases]);
 
   const loadMessages = useCallback(
     async (conversationId: string) => {
@@ -340,6 +348,7 @@ export function useConversationManager() {
     rightOpen,
     setRightOpen,
     setCurrentId,
+    availableKbs,
     selectedKbIds,
     setSelectedKbIds,
     createAndSelect,

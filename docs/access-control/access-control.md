@@ -13,3 +13,7 @@
 ## 设计要点
 
 权限是横切面，不归属任一业务领域。API 层通过中间件统一 enforce，领域服务层通过 context 传递 actor 身份和 scope。
+
+## 详细设计
+
+- [用户角色认证与页面设计](./user-role-authentication.md)

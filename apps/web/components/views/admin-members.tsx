@@ -1,21 +1,51 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { Plus, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Topbar } from "@/components/ui/topbar";
+import { fetchJson } from "@/lib/api";
 
-const users = [
-  { name: "张三", email: "zhangsan@company.com", role: "知识库管理员", kbs: "全部", count: 156, status: "启用中", joined: "2025-01-15" },
-  { name: "李四", email: "lisi@company.com", role: "普通用户", kbs: "产品文档库、销售资料库", count: 89, status: "启用中", joined: "2025-02-20" },
-  { name: "王五", email: "wangwu@company.com", role: "普通用户", kbs: "人力资源库", count: 34, status: "启用中", joined: "2025-03-10" },
-  { name: "赵六", email: "zhaoliu@company.com", role: "普通用户", kbs: "研发规范库", count: 112, status: "待激活", joined: "2025-06-12" },
-  { name: "孙七", email: "sunqi@company.com", role: "普通用户", kbs: "产品文档库", count: 8, status: "已停用", joined: "2025-04-05" },
-];
+interface Member {
+  id: string;
+  email: string;
+  name?: string;
+  roles: string[];
+  allowed_kb_names: string[];
+  query_count: number;
+  status: string;
+}
+
+const roleLabel = (role: string) => {
+  switch (role) {
+    case "tenant_admin":
+    case "tenant_owner":
+      return "租户管理员";
+    case "end_user":
+      return "普通用户";
+    case "viewer":
+      return "只读用户";
+    default:
+      return role;
+  }
+};
 
 export function AdminMembers() {
+  const [members, setMembers] = useState<Member[]>([]);
+  const [query, setQuery] = useState("");
+
+  useEffect(() => {
+    fetchJson<Member[]>("/api/admin/members").then(setMembers).catch(console.error);
+  }, []);
+
+  const filtered = members.filter((m) =>
+    m.email.toLowerCase().includes(query.toLowerCase()) ||
+    (m.name ?? "").toLowerCase().includes(query.toLowerCase())
+  );
+
   return (
     <>
       <Topbar title="用户管理">
@@ -24,9 +54,9 @@ export function AdminMembers() {
 
       <div className="dm-admin-content">
         <div style={{ alignItems: "center", display: "flex", gap: 12, marginBottom: 16 }}>
-          <SearchInput placeholder="搜索用户..." />
+          <SearchInput placeholder="搜索用户..." value={query} onChange={(e) => setQuery(e.target.value)} />
           <div style={{ flex: 1 }} />
-          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 24 位用户</span>
+          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 位用户</span>
         </div>
 
         <Panel title="Users">
@@ -36,28 +66,26 @@ export function AdminMembers() {
             <span>可访问知识库</span>
             <span>问答数</span>
             <span>状态</span>
-            <span>加入时间</span>
           </div>
-          {users.map((user) => (
-            <div className="dm-user-row" key={user.email}>
+          {filtered.map((user) => (
+            <div className="dm-user-row" key={user.id}>
               <div className="dm-user-cell">
                 <span className="dm-avatar">
                   <User size={14} />
                 </span>
                 <span>
-                  <strong>{user.name}</strong>
+                  <strong>{user.name || user.email}</strong>
                   <small>{user.email}</small>
                 </span>
               </div>
-              <span>{user.role}</span>
-              <span>{user.kbs}</span>
-              <span>{user.count}</span>
+              <span>{user.roles.map(roleLabel).join(", ")}</span>
+              <span>{user.allowed_kb_names.join(", ") || "—"}</span>
+              <span>{user.query_count}</span>
               <span>
-                <Badge tone={user.status === "启用中" ? "success" : user.status === "待激活" ? "warning" : "neutral"}>
-                  {user.status}
+                <Badge tone={user.status === "active" ? "success" : "neutral"}>
+                  {user.status === "active" ? "启用中" : user.status}
                 </Badge>
               </span>
-              <span>{user.joined}</span>
             </div>
           ))}
         </Panel>

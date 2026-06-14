@@ -57,6 +57,12 @@ impl AppError {
             message: "LLM 生成超时".to_string(),
         }
     }
+    pub fn forbidden() -> Self {
+        Self::Forbidden {
+            code: "FORBIDDEN".to_string(),
+            message: "当前身份无权执行该操作".to_string(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
