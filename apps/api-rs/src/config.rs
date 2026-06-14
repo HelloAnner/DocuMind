@@ -7,6 +7,8 @@ use uuid::Uuid;
 pub struct AppConfig {
     pub server_host: String,
     pub server_port: u16,
+    pub database_url: Option<String>,
+    pub redis_url: Option<String>,
     pub default_tenant_id: Uuid,
     pub default_user_id: Uuid,
     pub default_role: String,
@@ -49,6 +51,9 @@ pub struct RerankConfig {
 #[derive(Debug, Clone)]
 pub struct GenerationConfig {
     pub model: String,
+    pub base_url: String,
+    pub api_key: String,
+    pub use_real_llm: bool,
     pub temperature: f64,
     pub max_output_tokens: u32,
 }
@@ -77,6 +82,8 @@ pub fn load_config() -> Result<AppConfig> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(5555);
+    let database_url = env::var("DATABASE_URL").ok();
+    let redis_url = env::var("REDIS_URL").ok();
 
     let default_tenant_id = env::var("DEFAULT_TENANT_ID")
         .ok()
@@ -145,6 +152,12 @@ pub fn load_config() -> Result<AppConfig> {
         },
         generation: GenerationConfig {
             model: env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-turbo".to_string()),
+            base_url: env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
+            api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "ollama".to_string()),
+            use_real_llm: env::var("USE_REAL_LLM")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(false),
             temperature: env::var("LLM_TEMPERATURE")
                 .ok()
                 .and_then(|v| v.parse().ok())
@@ -192,6 +205,8 @@ pub fn load_config() -> Result<AppConfig> {
     Ok(AppConfig {
         server_host,
         server_port,
+        database_url,
+        redis_url,
         default_tenant_id,
         default_user_id,
         default_role,

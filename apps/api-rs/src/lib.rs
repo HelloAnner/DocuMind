@@ -3,6 +3,7 @@ pub mod api;
 pub mod auth;
 pub mod config;
 pub mod error;
+pub mod llm;
 pub mod models;
 pub mod rag;
 pub mod repositories;
@@ -37,7 +38,7 @@ pub async fn run() -> anyhow::Result<()> {
     let port = config.server_port;
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
 
-    let state = state::build_state(config)?;
+    let state = state::build_state(config).await?;
 
     let app = Router::new()
         .route("/api/health", get(health))

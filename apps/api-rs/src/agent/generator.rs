@@ -1,7 +1,10 @@
+use std::sync::Arc;
+
 use anyhow::Result;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::agent::prompt::Prompt;
+use crate::agent::verifier::ClaimVerifier;
 use crate::models::agent::{AnswerStreamItem, CitationOutput, GenerationConfig};
 use crate::models::rag::EvidencePack;
 
@@ -13,8 +16,9 @@ pub trait AnswerGenerator: Send + Sync {
         &self,
         query: String,
         evidence: EvidencePack,
-        _prompt: Prompt,
-        _config: GenerationConfig,
+        prompt: Prompt,
+        config: GenerationConfig,
+        verifier: Arc<dyn ClaimVerifier>,
     ) -> Result<AnswerStream>;
 }
 
@@ -34,6 +38,7 @@ impl AnswerGenerator for MockAnswerGenerator {
         evidence: EvidencePack,
         _prompt: Prompt,
         _config: GenerationConfig,
+        verifier: Arc<dyn ClaimVerifier>,
     ) -> Result<AnswerStream> {
         let (tx, rx) = unbounded_channel();
         let answer = build_answer(&query, &evidence);
@@ -52,6 +57,12 @@ impl AnswerGenerator for MockAnswerGenerator {
             })
             .collect();
 
+        let report = verifier.verify(&answer, &evidence).await;
+        let confidence = report.confidence;
+        let issues = report.issues;
+        let usage_input = 512;
+        let usage_output = answer.len() as u32;
+
         tokio::spawn(async move {
             for segment in split_answer(&answer) {
                 let _ = tx.send(AnswerStreamItem::Delta { text: segment });
@@ -60,11 +71,17 @@ impl AnswerGenerator for MockAnswerGenerator {
             for citation in citations {
                 let _ = tx.send(AnswerStreamItem::Citation { citation });
             }
+            if !issues.is_empty() {
+                let note = format!("\n[校验提示] {}", issues.join("；"));
+                for segment in split_answer(&note) {
+                    let _ = tx.send(AnswerStreamItem::Delta { text: segment });
+                }
+            }
             let _ = tx.send(AnswerStreamItem::Completed {
-                confidence: crate::models::Confidence::High,
+                confidence,
                 usage: Some(crate::models::Usage {
-                    input_tokens: 512,
-                    output_tokens: answer.len() as u32,
+                    input_tokens: usage_input,
+                    output_tokens: usage_output + issues.len() as u32 * 10,
                 }),
             });
         });

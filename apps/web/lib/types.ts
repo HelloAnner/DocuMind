@@ -28,14 +28,25 @@ export interface Citation {
   quote: string;
 }
 
+export interface PromptVersions {
+  persona: string;
+  guardrail: string;
+  mode: string;
+  task: string;
+}
+
 export interface Message {
   message_id: UUID;
   role: MessageRole;
   content: string;
   status: MessageStatus;
   confidence?: Confidence;
+  no_answer_reason?: string;
+  agent_mode?: string;
+  prompt_versions?: PromptVersions;
   citations: Citation[];
   parent_message_id?: UUID;
+  retry_of_message_id?: UUID;
   created_at: string;
   completed_at?: string;
 }
@@ -49,6 +60,10 @@ export interface SendMessageRequest {
   content: string;
   kb_ids?: UUID[];
   client_request_id?: string;
+  stream?: boolean;
+}
+
+export interface RetryMessageRequest {
   stream?: boolean;
 }
 

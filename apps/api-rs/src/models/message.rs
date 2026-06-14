@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Confidence, MessageRole, MessageStatus, NoAnswerReason};
+use crate::models::agent::{AgentMode, PromptVersions};
 use crate::models::citation::Citation;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub struct ConversationMessage {
     pub no_answer_reason: Option<NoAnswerReason>,
     pub error_code: Option<String>,
     pub error_message: Option<String>,
+    pub agent_mode: Option<AgentMode>,
+    pub prompt_versions: Option<PromptVersions>,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
 }
@@ -32,7 +35,12 @@ pub struct MessageResponse {
     pub content: String,
     pub status: String,
     pub confidence: Option<String>,
+    pub no_answer_reason: Option<String>,
+    pub agent_mode: Option<String>,
+    pub prompt_versions: Option<PromptVersions>,
     pub citations: Vec<CitationResponse>,
+    pub parent_message_id: Option<Uuid>,
+    pub retry_of_message_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub completed_at: Option<DateTime<Utc>>,
 }

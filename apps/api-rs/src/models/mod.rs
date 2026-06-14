@@ -71,6 +71,20 @@ impl std::fmt::Display for NoAnswerReason {
     }
 }
 
+impl std::str::FromStr for NoAnswerReason {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "NO_RELEVANT_CHUNKS" => Ok(NoAnswerReason::NoRelevantChunks),
+            "NEEDS_CLARIFICATION" => Ok(NoAnswerReason::NeedsClarification),
+            "SCOPE_DENIED" => Ok(NoAnswerReason::ScopeDenied),
+            "PIPELINE_TIMEOUT" => Ok(NoAnswerReason::PipelineTimeout),
+            "LLM_TIMEOUT" => Ok(NoAnswerReason::LlmTimeout),
+            _ => Err(format!("unknown no answer reason: {s}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MessageRole {
@@ -148,6 +162,18 @@ impl std::fmt::Display for ConversationStatus {
             ConversationStatus::Active => write!(f, "active"),
             ConversationStatus::Archived => write!(f, "archived"),
             ConversationStatus::Deleted => write!(f, "deleted"),
+        }
+    }
+}
+
+impl std::str::FromStr for ConversationStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "active" => Ok(ConversationStatus::Active),
+            "archived" => Ok(ConversationStatus::Archived),
+            "deleted" => Ok(ConversationStatus::Deleted),
+            _ => Err(format!("unknown conversation status: {s}")),
         }
     }
 }

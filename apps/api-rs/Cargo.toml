@@ -11,8 +11,11 @@ axum.workspace = true
 chrono.workspace = true
 dotenvy.workspace = true
 futures.workspace = true
+redis = { version = "0.25", features = ["tokio-comp"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde.workspace = true
 serde_json.workspace = true
+sqlx = { version = "0.8", features = ["runtime-tokio", "postgres", "uuid", "chrono", "json"] }
 tokio.workspace = true
 tokio-stream.workspace = true
 tower-http.workspace = true

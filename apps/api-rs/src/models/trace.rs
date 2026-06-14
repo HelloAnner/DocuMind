@@ -46,6 +46,19 @@ impl std::fmt::Display for RetrievalSource {
     }
 }
 
+impl std::str::FromStr for RetrievalSource {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "dense" => Ok(RetrievalSource::Dense),
+            "bm25" => Ok(RetrievalSource::Bm25),
+            "rrf" => Ok(RetrievalSource::Rrf),
+            "rerank" => Ok(RetrievalSource::Rerank),
+            _ => Err(format!("unknown retrieval source: {s}")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RetrievalTrace {
     pub id: Uuid,
@@ -72,6 +85,17 @@ impl std::fmt::Display for PlanMode {
         match self {
             PlanMode::Single => write!(f, "single_query"),
             PlanMode::Multi => write!(f, "multi_query"),
+        }
+    }
+}
+
+impl std::str::FromStr for PlanMode {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "single_query" => Ok(PlanMode::Single),
+            "multi_query" => Ok(PlanMode::Multi),
+            _ => Err(format!("unknown plan mode: {s}")),
         }
     }
 }

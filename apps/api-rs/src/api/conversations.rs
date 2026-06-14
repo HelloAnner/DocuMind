@@ -51,8 +51,16 @@ pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
         .route("/api/conversations", axum::routing::post(create_conversation).get(list_conversations))
         .route(
+            "/api/conversations/:conversation_id",
+            axum::routing::get(get_conversation).delete(delete_conversation),
+        )
+        .route(
             "/api/conversations/:conversation_id/messages",
             axum::routing::get(get_messages).post(send_message),
+        )
+        .route(
+            "/api/conversations/:conversation_id/messages/:message_id/traces",
+            axum::routing::get(get_message_traces),
         )
         .route(
             "/api/conversations/:conversation_id/messages/:message_id/cancel",
@@ -159,7 +167,12 @@ async fn message_to_response(
         content: message.content.clone(),
         status: message.status.to_string(),
         confidence: message.confidence.as_ref().map(|c| c.to_string()),
+        no_answer_reason: message.no_answer_reason.as_ref().map(|r| r.to_string()),
+        agent_mode: message.agent_mode.as_ref().map(|m| m.to_string()),
+        prompt_versions: message.prompt_versions.clone(),
         citations: citation_resps,
+        parent_message_id: message.parent_message_id,
+        retry_of_message_id: message.retry_of_message_id,
         created_at: message.created_at,
         completed_at: message.completed_at,
     })
@@ -272,6 +285,8 @@ async fn send_message(
         no_answer_reason: None,
         error_code: None,
         error_message: None,
+        agent_mode: None,
+        prompt_versions: None,
         created_at: now(),
         completed_at: Some(now()),
     };
@@ -293,6 +308,8 @@ async fn send_message(
         no_answer_reason: None,
         error_code: None,
         error_message: None,
+        agent_mode: None,
+        prompt_versions: None,
         created_at: now(),
         completed_at: None,
     };
@@ -360,6 +377,8 @@ async fn run_agent_pipeline(
         trace = crate::models::agent::AgentTrace {
             mode_reason: "cache hit".to_string(),
             rewritten_query: rewritten_query.clone(),
+            keywords: vec![original_query.clone()],
+            resolved_refs: vec![],
             retrieval_plan: crate::models::trace::RetrievalPlan::default(),
             prompt_versions: crate::models::agent::PromptVersions {
                 persona: "persona-v1".to_string(),
@@ -480,6 +499,8 @@ async fn run_agent_pipeline(
     msg.status = MessageStatus::Completed;
     msg.confidence = Some(confidence);
     msg.no_answer_reason = no_answer_reason;
+    msg.agent_mode = Some(mode);
+    msg.prompt_versions = Some(trace.prompt_versions.clone());
     msg.completed_at = Some(now());
     repo.update_message(msg).await?;
 
@@ -489,14 +510,17 @@ async fn run_agent_pipeline(
         message_id: user_message_id,
         original_query: original_query.clone(),
         rewritten_query: rewritten_query.clone(),
-        keywords: vec![original_query.clone()],
+        keywords: trace.keywords.clone(),
         hypothetical_answer: None,
-        resolved_refs: vec![],
+        resolved_refs: trace.resolved_refs.clone(),
         effective_kb_ids: effective_kb_ids.clone(),
         rewrite_model: config.rag.rewrite.model.clone(),
         created_at: now(),
     };
     repo.save_query_trace(query_trace).await?;
+
+    // Save agent trace
+    repo.save_agent_trace(assistant_message_id, trace.clone()).await?;
 
     // Save citations
     let citation_models: Vec<Citation> = citations
@@ -735,6 +759,8 @@ async fn retry_message(
         no_answer_reason: None,
         error_code: None,
         error_message: None,
+        agent_mode: None,
+        prompt_versions: None,
         created_at: now(),
         completed_at: None,
     };
@@ -804,9 +830,102 @@ async fn submit_feedback(
         created_at: now(),
     };
     state.repository.save_feedback(feedback.clone()).await?;
+
+    // Negative feedback invalidates the cache key for this answer's query scope.
+    if feedback.rating == crate::models::feedback::Rating::Down {
+        if let Some(parent_id) = message.parent_message_id {
+            if let Some(Some(parent)) = state.repository.get_message(actor.tenant_id, parent_id).await.ok() {
+                let cache_key = cache_key(
+                    "v1",
+                    actor.tenant_id,
+                    &session.kb_ids,
+                    &parent.content,
+                    "stub-doc-version",
+                );
+                let _ = state.cache.delete(&cache_key).await;
+            }
+        }
+    }
+
     Ok(Json(FeedbackResponse {
         feedback_id: feedback.id,
         message_id,
         created_at: feedback.created_at,
     }))
+}
+
+async fn get_conversation(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(conversation_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let session = state
+        .repository
+        .get_session(actor.tenant_id, conversation_id)
+        .await?
+        .ok_or_else(AppError::conversation_not_found)?;
+    Ok(Json(json!({
+        "conversation_id": session.id,
+        "title": session.title,
+        "kb_ids": session.kb_ids,
+        "status": session.status.to_string(),
+        "summary": session.summary,
+        "created_at": session.created_at,
+        "updated_at": session.updated_at,
+    })))
+}
+
+async fn delete_conversation(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(conversation_id): Path<Uuid>,
+) -> Result<impl IntoResponse, AppError> {
+    let mut session = state
+        .repository
+        .get_session(actor.tenant_id, conversation_id)
+        .await?
+        .ok_or_else(AppError::conversation_not_found)?;
+    session.status = crate::models::ConversationStatus::Deleted;
+    session.updated_at = now();
+    state.repository.update_session(session).await?;
+    Ok(Json(json!({"conversation_id": conversation_id, "status": "deleted"})))
+}
+
+async fn get_message_traces(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<impl IntoResponse, AppError> {
+    let session = state
+        .repository
+        .get_session(actor.tenant_id, conversation_id)
+        .await?
+        .ok_or_else(AppError::conversation_not_found)?;
+    let message = state
+        .repository
+        .get_message(actor.tenant_id, message_id)
+        .await?
+        .ok_or_else(AppError::message_not_found)?;
+    if message.conversation_id != session.id {
+        return Err(AppError::message_not_found());
+    }
+
+    let agent_trace = state.repository.get_agent_trace(message_id).await?;
+    let query_trace = if let Some(parent_id) = message.parent_message_id {
+        state.repository.get_query_trace(parent_id).await?
+    } else {
+        None
+    };
+    let retrieval_traces = if let Some(parent_id) = message.parent_message_id {
+        state.repository.get_retrieval_traces(parent_id).await?
+    } else {
+        vec![]
+    };
+
+    Ok(Json(json!({
+        "message_id": message_id,
+        "agent_trace": agent_trace,
+        "query_trace": query_trace,
+        "retrieval_traces": retrieval_traces,
+    })))
 }

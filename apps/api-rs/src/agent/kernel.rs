@@ -163,6 +163,7 @@ impl AgentKernel {
                         evidence.clone(),
                         prompt,
                         req.options.generation.clone(),
+                        self.claim_verifier.clone(),
                     )
                     .await?;
             }
@@ -178,6 +179,8 @@ impl AgentKernel {
         let trace = AgentTrace {
             mode_reason,
             rewritten_query: Some(rewrite.rewritten_query.clone()),
+            keywords: rewrite.keywords.clone(),
+            resolved_refs: rewrite.resolved_refs.clone(),
             retrieval_plan: plan.clone(),
             prompt_versions,
             model: req.options.generation.model.clone(),

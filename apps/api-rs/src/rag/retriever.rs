@@ -71,32 +71,30 @@ impl MockRetriever {
 #[async_trait::async_trait]
 impl Retriever for MockRetriever {
     async fn retrieve(&self, input: RetrievalInput) -> Result<Vec<RetrievedChunk>> {
-        let query = input
-            .queries
-            .first()
-            .cloned()
-            .unwrap_or_default()
-            .to_lowercase();
-        let mut scored: Vec<(f64, &RetrievedChunk)> = self
-            .corpus
-            .iter()
-            .map(|chunk| {
-                let score = overlap_score(&query, &chunk.content);
-                (score, chunk)
-            })
-            .filter(|(s, _)| *s > 0.0)
-            .collect();
-        scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
-        let result: Vec<RetrievedChunk> = scored
+        let mut seen = std::collections::HashSet::new();
+        let mut all: Vec<(f64, RetrievedChunk)> = vec![];
+
+        for query in &input.queries {
+            let q = query.to_lowercase();
+            for chunk in &self.corpus {
+                let score = overlap_score(&q, &chunk.content);
+                if score > 0.0 && seen.insert(chunk.chunk_id) {
+                    let mut c = chunk.clone();
+                    c.score = score;
+                    all.push((score, c));
+                }
+            }
+        }
+
+        all.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
+        let result: Vec<RetrievedChunk> = all
             .into_iter()
             .take(input.top_k)
-            .map(|(s, chunk)| {
-                let mut c = chunk.clone();
-                c.score = s;
+            .map(|(_, mut c)| {
+                c.score = c.score;
                 c
             })
             .collect();
-        // If effective_kb_ids is empty, still return matches for demo.
         let _ = input.effective_kb_ids;
         Ok(result)
     }

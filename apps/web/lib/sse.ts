@@ -2,12 +2,14 @@ import type { SSEEvent } from "./types";
 
 export async function* streamSse(
   url: string,
-  body: unknown
+  body: unknown,
+  signal?: AbortSignal
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const response = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!response.ok) {

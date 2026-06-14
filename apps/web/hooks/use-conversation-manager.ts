@@ -6,6 +6,7 @@ import {
   createConversation,
   getMessages,
   listConversations,
+  retryMessageStreamUrl,
   sendMessageStreamUrl,
   submitFeedback,
 } from "@/lib/api";
@@ -17,10 +18,17 @@ import type {
   Message,
   MessageStatus,
   Rating,
+  RetryMessageRequest,
   SendMessageRequest,
 } from "@/lib/types";
 
 const DEFAULT_KB_ID = "00000000-0000-0000-0000-000000000003";
+
+export const AVAILABLE_KB_IDS = [
+  { id: DEFAULT_KB_ID, name: "产品文档库" },
+  { id: "00000000-0000-0000-0000-000000000004", name: "合同制度库" },
+  { id: "00000000-0000-0000-0000-000000000005", name: "销售策略库" },
+];
 
 export type PipelineStage = {
   label: string;
@@ -49,7 +57,9 @@ export function useConversationManager() {
     { label: "生成答案", done: false },
   ]);
   const [rightOpen, setRightOpen] = useState(false);
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([DEFAULT_KB_ID]);
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
 
   const loadConversations = useCallback(async () => {
     try {
@@ -90,7 +100,7 @@ export function useConversationManager() {
   const createAndSelect = useCallback(async (title?: string) => {
     try {
       const conv = await createConversation({
-        kb_ids: [DEFAULT_KB_ID],
+        kb_ids: selectedKbIds,
         title,
       });
       setConversations((prev) => [conv, ...prev]);
@@ -100,7 +110,7 @@ export function useConversationManager() {
       console.error("failed to create conversation", e);
       return null;
     }
-  }, []);
+  }, [selectedKbIds]);
 
   const updateMessage = useCallback((messageId: string, patch: Partial<Message>) => {
     setMessages((prev) =>
@@ -109,30 +119,51 @@ export function useConversationManager() {
   }, []);
 
   const processStream = useCallback(
-    async (conversationId: string, userContent: string, req: SendMessageRequest) => {
+    async (
+      conversationId: string,
+      userContent: string,
+      req: SendMessageRequest | RetryMessageRequest,
+      url: string,
+      controller: AbortController,
+      isRetry = false
+    ) => {
       const userTempId = `tmp-user-${Date.now()}`;
       const assistantTempId = `tmp-assistant-${Date.now()}`;
       pendingRef.current = { userTempId, assistantTempId };
 
-      setMessages((prev) => [
-        ...prev,
-        {
-          message_id: userTempId,
-          role: "user",
-          content: userContent,
-          status: "completed",
-          citations: [],
-          created_at: new Date().toISOString(),
-        },
-        {
-          message_id: assistantTempId,
-          role: "assistant",
-          content: "",
-          status: "answering",
-          citations: [],
-          created_at: new Date().toISOString(),
-        },
-      ]);
+      if (!isRetry) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            message_id: userTempId,
+            role: "user",
+            content: userContent,
+            status: "completed",
+            citations: [],
+            created_at: new Date().toISOString(),
+          },
+          {
+            message_id: assistantTempId,
+            role: "assistant",
+            content: "",
+            status: "answering",
+            citations: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            message_id: assistantTempId,
+            role: "assistant",
+            content: "",
+            status: "answering",
+            citations: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
 
       setStages([
         { label: "查询改写", done: false, running: true },
@@ -143,15 +174,21 @@ export function useConversationManager() {
 
       let assistantId = assistantTempId;
       try {
-        for await (const sse of streamSse(sendMessageStreamUrl(conversationId), req)) {
+        for await (const sse of streamSse(url, req, controller.signal)) {
+          if (controller.signal.aborted) {
+            break;
+          }
           if (sse.event === "message.created") {
             const data = sse.data as {
               user_message_id: string;
               assistant_message_id: string;
             };
-            updateMessage(userTempId, { message_id: data.user_message_id });
+            if (!isRetry) {
+              updateMessage(userTempId, { message_id: data.user_message_id });
+            }
             updateMessage(assistantTempId, { message_id: data.assistant_message_id });
             assistantId = data.assistant_message_id;
+            abortControllersRef.current.set(assistantId, controller);
             setStreamingId(assistantId);
             setStages([
               { label: "查询改写", done: true },
@@ -200,12 +237,17 @@ export function useConversationManager() {
           }
         }
       } catch (e) {
-        console.error("stream error", e);
-        updateMessage(assistantId, {
-          status: "failed",
-          content: "连接中断，请稍后重试。",
-        });
+        if ((e as Error).name === "AbortError") {
+          updateMessage(assistantId, { status: "cancelled" as MessageStatus });
+        } else {
+          console.error("stream error", e);
+          updateMessage(assistantId, {
+            status: "failed",
+            content: "连接中断，请稍后重试。",
+          });
+        }
       } finally {
+        abortControllersRef.current.delete(assistantId);
         setStreamingId(null);
         pendingRef.current = null;
         loadConversations();
@@ -225,11 +267,19 @@ export function useConversationManager() {
 
       const req: SendMessageRequest = {
         content,
+        kb_ids: selectedKbIds,
         client_request_id: `req-${Date.now()}`,
         stream: true,
       };
-
-      await processStream(conversationId, content, req);
+      const controller = new AbortController();
+      await processStream(
+        conversationId,
+        content,
+        req,
+        sendMessageStreamUrl(conversationId),
+        controller,
+        false
+      );
     },
     [currentId, createAndSelect, processStream]
   );
@@ -237,25 +287,21 @@ export function useConversationManager() {
   const retryMessage = useCallback(
     async (messageId: string) => {
       if (!currentId) return;
-      // Find the user message that this assistant message responded to.
-      const target = messages.find((m) => m.message_id === messageId);
-      if (!target || target.role !== "assistant" || !target.parent_message_id) return;
-      const parent = messages.find((m) => m.message_id === target.parent_message_id);
-      if (!parent) return;
-
-      const req: SendMessageRequest = {
-        content: parent.content,
-        client_request_id: `req-${Date.now()}`,
-        stream: true,
-      };
-      await processStream(currentId, parent.content, req);
+      const controller = new AbortController();
+      const url = retryMessageStreamUrl(currentId, messageId);
+      const req: RetryMessageRequest = { stream: true };
+      await processStream(currentId, "", req, url, controller, true);
     },
-    [currentId, messages, processStream]
+    [currentId, processStream]
   );
 
   const doCancelMessage = useCallback(
     async (messageId: string) => {
       if (!currentId) return;
+      const controller = abortControllersRef.current.get(messageId);
+      if (controller) {
+        controller.abort();
+      }
       try {
         const res = await cancelMessage(currentId, messageId);
         updateMessage(res.message_id, { status: "cancelled" as MessageStatus });
@@ -294,6 +340,8 @@ export function useConversationManager() {
     rightOpen,
     setRightOpen,
     setCurrentId,
+    selectedKbIds,
+    setSelectedKbIds,
     createAndSelect,
     sendMessage,
     retryMessage,

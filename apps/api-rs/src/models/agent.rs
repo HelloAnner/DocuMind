@@ -174,6 +174,8 @@ pub struct AgentRun {
 pub struct AgentTrace {
     pub mode_reason: String,
     pub rewritten_query: Option<String>,
+    pub keywords: Vec<String>,
+    pub resolved_refs: Vec<ResolvedRef>,
     pub retrieval_plan: RetrievalPlan,
     pub prompt_versions: PromptVersions,
     pub model: String,

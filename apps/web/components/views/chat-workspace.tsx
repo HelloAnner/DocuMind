@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { useConversation } from "@/components/providers/conversation-provider";
+import { AVAILABLE_KB_IDS } from "@/hooks/use-conversation-manager";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 
 const suggestions = [
@@ -35,6 +36,8 @@ export function ChatWorkspace() {
     stages,
     rightOpen,
     setRightOpen,
+    selectedKbIds,
+    setSelectedKbIds,
     sendMessage,
     retryMessage,
     cancelMessage,
@@ -182,7 +185,20 @@ export function ChatWorkspace() {
   return (
     <>
       <header className="dm-chat-topbar">
-        <span className="dm-chat-topbar-title">产品文档库</span>
+        <div className="dm-chat-topbar-kb">
+          <select
+            value={selectedKbIds[0] ?? ""}
+            onChange={(e) => setSelectedKbIds([e.target.value])}
+            disabled={!!streamingId}
+            aria-label="选择知识库"
+          >
+            {AVAILABLE_KB_IDS.map((kb) => (
+              <option key={kb.id} value={kb.id}>
+                {kb.name}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="dm-chat-topbar-actions">
           <IconButton aria-label="历史" onClick={() => setRightOpen(false)}>
             <History size={16} />

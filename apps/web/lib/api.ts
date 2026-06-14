@@ -60,15 +60,11 @@ export async function cancelMessage(
   });
 }
 
-export async function retryMessage(
+export function retryMessageStreamUrl(
   conversationId: string,
-  messageId: string,
-  stream = true
-): Promise<{ message_id: string; status: string }> {
-  return fetchJson(`/api/conversations/${conversationId}/messages/${messageId}/retry`, {
-    method: "POST",
-    body: JSON.stringify({ stream }),
-  });
+  messageId: string
+): string {
+  return `${BASE}/api/conversations/${conversationId}/messages/${messageId}/retry`;
 }
 
 export async function submitFeedback(

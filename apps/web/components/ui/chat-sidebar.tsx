@@ -1,12 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { ChevronDown, Folder, Plus, Settings } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
 
 export function ChatSidebar() {
+  const router = useRouter();
   const { conversations, currentId, setCurrentId, createAndSelect } = useConversation();
+
+  const handleSelect = (id: string) => {
+    setCurrentId(id);
+    router.push(`/chat/${id}`);
+  };
+
+  const handleCreate = async () => {
+    const id = await createAndSelect();
+    if (id) {
+      router.push(`/chat/${id}`);
+    }
+  };
 
   return (
     <aside className="dm-chat-sidebar">
@@ -14,7 +28,7 @@ export function ChatSidebar() {
         <Link className="dm-chat-logo" href="/chat">
           DocuMind
         </Link>
-        <IconButton aria-label="新建问答" onClick={() => createAndSelect()}>
+        <IconButton aria-label="新建问答" onClick={handleCreate}>
           <Plus size={16} />
         </IconButton>
       </div>
@@ -38,7 +52,7 @@ export function ChatSidebar() {
                 className={`dm-history-item ${item.conversation_id === currentId ? "active" : ""}`}
                 key={item.conversation_id}
                 type="button"
-                onClick={() => setCurrentId(item.conversation_id)}
+                onClick={() => handleSelect(item.conversation_id)}
               >
                 {item.title}
               </button>

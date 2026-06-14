@@ -71,19 +71,34 @@ impl QueryRewriter for RuleBasedQueryRewriter {
             }
         }
 
-        let keywords = rewritten
-            .split(|c: char| c.is_whitespace() || c == '？' || c == '?' || c == '，' || c == ',')
-            .filter(|s| !s.is_empty())
+        let keywords: Vec<String> = rewritten
+            .split(|c: char| c.is_whitespace() || c == '？' || c == '?' || c == '，' || c == ',' || c == '、')
+            .filter(|s| !s.is_empty() && s.chars().any(|c| !c.is_ascii_punctuation()))
             .map(|s| s.to_string())
             .collect();
+
+        let mut added_constraints = vec![];
+        let mut removed_constraints = vec![];
+        if !resolved_refs.is_empty() {
+            added_constraints.push("resolved pronoun from conversation history".to_string());
+        }
+        if rewritten != original_query {
+            // lightweight diff: if original had a pronoun and rewritten replaces it,
+            // that's tracked above; otherwise note the rewrite.
+            let original_pronouns = ["它", "这个", "那份", "上述", "上面"];
+            let had_pronoun = original_pronouns.iter().any(|p| original_query.contains(p));
+            if had_pronoun && resolved_refs.is_empty() {
+                removed_constraints.push("pronoun could not be resolved".to_string());
+            }
+        }
 
         Ok(RewriteOutput {
             rewritten_query: rewritten,
             keywords,
             hypothetical_answer: None,
             resolved_refs,
-            added_constraints: vec![],
-            removed_constraints: vec![],
+            added_constraints,
+            removed_constraints,
             needs_clarification,
             clarification_question,
         })

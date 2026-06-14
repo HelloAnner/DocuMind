@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
 use crate::models::conversation::{ConversationListResponse, ConversationSession};
 use crate::models::feedback::Feedback;
@@ -51,6 +52,9 @@ pub trait ConversationRepository: Send + Sync {
 
     async fn save_citations(&self, citations: Vec<Citation>) -> anyhow::Result<()>;
     async fn get_citations(&self, assistant_message_id: Uuid) -> anyhow::Result<Vec<Citation>>;
+
+    async fn save_agent_trace(&self, assistant_message_id: Uuid, trace: AgentTrace) -> anyhow::Result<()>;
+    async fn get_agent_trace(&self, assistant_message_id: Uuid) -> anyhow::Result<Option<AgentTrace>>;
 
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()>;
 }

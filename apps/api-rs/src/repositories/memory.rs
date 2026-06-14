@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use uuid::Uuid;
 
+use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
 use crate::models::conversation::{ConversationListItem, ConversationListResponse, ConversationSession};
 use crate::models::ConversationStatus;
@@ -20,6 +21,7 @@ pub struct InMemoryConversationRepository {
     query_traces: Arc<RwLock<HashMap<Uuid, QueryTrace>>>,
     retrieval_traces: Arc<RwLock<HashMap<Uuid, Vec<RetrievalTrace>>>>,
     citations: Arc<RwLock<HashMap<Uuid, Vec<Citation>>>>,
+    agent_traces: Arc<RwLock<HashMap<Uuid, AgentTrace>>>,
     feedback: Arc<RwLock<HashMap<Uuid, Feedback>>>,
 }
 
@@ -38,6 +40,7 @@ impl InMemoryConversationRepository {
             query_traces: Arc::new(RwLock::new(HashMap::new())),
             retrieval_traces: Arc::new(RwLock::new(HashMap::new())),
             citations: Arc::new(RwLock::new(HashMap::new())),
+            agent_traces: Arc::new(RwLock::new(HashMap::new())),
             feedback: Arc::new(RwLock::new(HashMap::new())),
         }
     }
@@ -209,6 +212,17 @@ impl ConversationRepository for InMemoryConversationRepository {
         Ok(ct.get(&assistant_message_id).cloned().unwrap_or_default())
     }
 
+    async fn save_agent_trace(&self, assistant_message_id: Uuid, trace: AgentTrace) -> anyhow::Result<()> {
+        let mut at = self.agent_traces.write().unwrap();
+        at.insert(assistant_message_id, trace);
+        Ok(())
+    }
+
+    async fn get_agent_trace(&self, assistant_message_id: Uuid) -> anyhow::Result<Option<AgentTrace>> {
+        let at = self.agent_traces.read().unwrap();
+        Ok(at.get(&assistant_message_id).cloned())
+    }
+
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {
         let mut fb = self.feedback.write().unwrap();
         fb.insert(feedback.id, feedback);
@@ -259,6 +273,8 @@ mod tests {
             no_answer_reason: None,
             error_code: None,
             error_message: None,
+            agent_mode: None,
+            prompt_versions: None,
             created_at: now(),
             completed_at: Some(now()),
         };

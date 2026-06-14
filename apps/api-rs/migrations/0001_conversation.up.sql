@@ -27,6 +27,8 @@ CREATE TABLE conversation_messages (
     no_answer_reason TEXT,
     error_code TEXT,
     error_message TEXT,
+    agent_mode TEXT,
+    prompt_versions JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     completed_at TIMESTAMPTZ
 );
@@ -73,6 +75,12 @@ CREATE TABLE conversation_citations (
     heading_path JSONB NOT NULL DEFAULT '[]',
     quote TEXT NOT NULL,
     score DOUBLE PRECISION NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE conversation_agent_traces (
+    assistant_message_id UUID PRIMARY KEY REFERENCES conversation_messages(id) ON DELETE CASCADE,
+    trace JSONB NOT NULL DEFAULT '{}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
