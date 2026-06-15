@@ -21,9 +21,16 @@ interface Member {
 
 const roleLabel = (role: string) => {
   switch (role) {
+    case "enterprise_admin":
     case "tenant_admin":
     case "tenant_owner":
-      return "租户管理员";
+      return "企业管理员";
+    case "team_admin":
+      return "团队管理员";
+    case "data_admin":
+      return "数据管理员";
+    case "user":
+    case "analyst":
     case "end_user":
       return "普通用户";
     case "viewer":

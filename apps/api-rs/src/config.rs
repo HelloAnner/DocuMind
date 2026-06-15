@@ -9,10 +9,22 @@ pub struct AppConfig {
     pub server_port: u16,
     pub database_url: Option<String>,
     pub redis_url: Option<String>,
+    pub jwt_secret: String,
+    pub auth_token_expire_hours: i64,
     pub default_tenant_id: Uuid,
     pub default_user_id: Uuid,
     pub default_role: String,
     pub default_kb_ids: Vec<Uuid>,
+    pub default_tenant_name: String,
+    pub default_tenant_slug: String,
+    pub super_admin_user_id: Uuid,
+    pub standard_user_id: Uuid,
+    pub super_admin_email: String,
+    pub super_admin_password: String,
+    pub enterprise_admin_email: String,
+    pub enterprise_admin_password: String,
+    pub standard_user_email: String,
+    pub standard_user_password: String,
     pub rag: RagConfig,
     pub agent: AgentConfig,
 }
@@ -84,6 +96,13 @@ pub fn load_config() -> Result<AppConfig> {
         .unwrap_or(5555);
     let database_url = env::var("DATABASE_URL").ok();
     let redis_url = env::var("REDIS_URL").ok();
+    let jwt_secret =
+        env::var("JWT_SECRET").unwrap_or_else(|_| "documind-dev-secret-change-me".to_string());
+    let auth_token_expire_hours = env::var("AUTH_TOKEN_EXPIRE_HOURS")
+        .or_else(|_| env::var("JWT_EXPIRE_HOURS"))
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(24);
 
     let default_tenant_id = env::var("DEFAULT_TENANT_ID")
         .ok()
@@ -95,7 +114,31 @@ pub fn load_config() -> Result<AppConfig> {
         .and_then(|v| Uuid::parse_str(&v).ok())
         .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap());
 
-    let default_role = env::var("DEFAULT_ROLE").unwrap_or_else(|_| "tenant_admin".to_string());
+    let default_role = env::var("DEFAULT_ROLE").unwrap_or_else(|_| "enterprise_admin".to_string());
+    let default_tenant_name =
+        env::var("DEFAULT_TENANT_NAME").unwrap_or_else(|_| "Acme Corp".to_string());
+    let default_tenant_slug =
+        env::var("DEFAULT_TENANT_SLUG").unwrap_or_else(|_| "acme".to_string());
+    let super_admin_user_id = env::var("SUPER_ADMIN_USER_ID")
+        .ok()
+        .and_then(|v| Uuid::parse_str(&v).ok())
+        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap());
+    let standard_user_id = env::var("STANDARD_USER_ID")
+        .ok()
+        .and_then(|v| Uuid::parse_str(&v).ok())
+        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap());
+    let super_admin_email =
+        env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "ops@documind.local".to_string());
+    let super_admin_password =
+        env::var("SUPER_ADMIN_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
+    let enterprise_admin_email =
+        env::var("ENTERPRISE_ADMIN_EMAIL").unwrap_or_else(|_| "admin@documind.local".to_string());
+    let enterprise_admin_password =
+        env::var("ENTERPRISE_ADMIN_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
+    let standard_user_email =
+        env::var("STANDARD_USER_EMAIL").unwrap_or_else(|_| "user@documind.local".to_string());
+    let standard_user_password =
+        env::var("STANDARD_USER_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
 
     let default_kb_ids: Vec<Uuid> = env::var("DEFAULT_KB_IDS")
         .ok()
@@ -104,9 +147,7 @@ pub fn load_config() -> Result<AppConfig> {
                 .filter_map(|s| Uuid::parse_str(s.trim()).ok())
                 .collect()
         })
-        .unwrap_or_else(|| {
-            vec![Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()]
-        });
+        .unwrap_or_else(|| vec![Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap()]);
 
     let rag = RagConfig {
         rewrite: RewriteConfig {
@@ -152,7 +193,8 @@ pub fn load_config() -> Result<AppConfig> {
         },
         generation: GenerationConfig {
             model: env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-turbo".to_string()),
-            base_url: env::var("LLM_BASE_URL").unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
+            base_url: env::var("LLM_BASE_URL")
+                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
             api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "ollama".to_string()),
             use_real_llm: env::var("USE_REAL_LLM")
                 .ok()
@@ -180,8 +222,7 @@ pub fn load_config() -> Result<AppConfig> {
     };
 
     let agent = AgentConfig {
-        default_tone: env::var("AGENT_DEFAULT_TONE")
-            .unwrap_or_else(|_| "concise_warm".to_string()),
+        default_tone: env::var("AGENT_DEFAULT_TONE").unwrap_or_else(|_| "concise_warm".to_string()),
         proactive_followup: env::var("AGENT_PROACTIVE_FOLLOWUP")
             .ok()
             .and_then(|v| v.parse().ok())
@@ -207,10 +248,22 @@ pub fn load_config() -> Result<AppConfig> {
         server_port,
         database_url,
         redis_url,
+        jwt_secret,
+        auth_token_expire_hours,
         default_tenant_id,
         default_user_id,
         default_role,
         default_kb_ids,
+        default_tenant_name,
+        default_tenant_slug,
+        super_admin_user_id,
+        standard_user_id,
+        super_admin_email,
+        super_admin_password,
+        enterprise_admin_email,
+        enterprise_admin_password,
+        standard_user_email,
+        standard_user_password,
         rag,
         agent,
     })

@@ -15,7 +15,14 @@ export default function AdminLayout({
 
   useEffect(() => {
     if (loading) return;
-    const canAccess = me && (me.roles.includes("tenant_admin") || me.roles.includes("tenant_owner") || me.roles.includes("super_admin"));
+    const canAccess = me && (
+      me.roles.includes("enterprise_admin") ||
+      me.roles.includes("team_admin") ||
+      me.roles.includes("data_admin") ||
+      me.roles.includes("tenant_admin") ||
+      me.roles.includes("tenant_owner") ||
+      me.roles.includes("super_admin")
+    );
     if (!canAccess) {
       router.replace("/");
     }

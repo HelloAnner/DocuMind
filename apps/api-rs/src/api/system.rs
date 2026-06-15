@@ -99,7 +99,7 @@ async fn list_users(
 
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String)>(
-            "SELECT id, email, name, status FROM app_user ORDER BY created_at DESC"
+            "SELECT id, email, name, status FROM app_user ORDER BY created_at DESC",
         )
         .fetch_all(pool)
         .await?;
@@ -110,7 +110,7 @@ async fn list_users(
                 "SELECT t.name || '(' || UNNEST(tm.roles) || ')'
                  FROM tenant_member tm
                  JOIN tenant t ON t.id = tm.tenant_id
-                 WHERE tm.user_id = $1"
+                 WHERE tm.user_id = $1",
             )
             .bind(id)
             .fetch_all(pool)
@@ -129,8 +129,22 @@ async fn list_users(
     }
 
     Ok(Json(vec![
-        SystemUserSummary { id: Uuid::new_v4(), email: "ops@documind.local".to_string(), name: Some("Ops".to_string()), status: "active".to_string(), tenants: vec!["system(super_admin)".to_string()], last_login_at: None },
-        SystemUserSummary { id: Uuid::new_v4(), email: "dev@documind.local".to_string(), name: Some("Dev".to_string()), status: "active".to_string(), tenants: vec!["Acme(admin)".to_string()], last_login_at: None },
+        SystemUserSummary {
+            id: Uuid::new_v4(),
+            email: "ops@documind.local".to_string(),
+            name: Some("Ops".to_string()),
+            status: "active".to_string(),
+            tenants: vec!["Acme(super_admin)".to_string()],
+            last_login_at: None,
+        },
+        SystemUserSummary {
+            id: Uuid::new_v4(),
+            email: "admin@documind.local".to_string(),
+            name: Some("Admin".to_string()),
+            status: "active".to_string(),
+            tenants: vec!["Acme(enterprise_admin)".to_string()],
+            last_login_at: None,
+        },
     ]))
 }
 

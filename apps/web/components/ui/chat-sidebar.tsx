@@ -11,7 +11,13 @@ export function ChatSidebar() {
   const router = useRouter();
   const { me } = useAuth();
   const { conversations, currentId, setCurrentId, createAndSelect, availableKbs, selectedKbIds, setSelectedKbIds } = useConversation();
-  const isAdmin = me?.roles.includes("tenant_admin") || me?.roles.includes("tenant_owner") || me?.roles.includes("super_admin");
+  const isAdmin =
+    me?.roles.includes("enterprise_admin") ||
+    me?.roles.includes("team_admin") ||
+    me?.roles.includes("data_admin") ||
+    me?.roles.includes("tenant_admin") ||
+    me?.roles.includes("tenant_owner") ||
+    me?.roles.includes("super_admin");
   const selectedKb = availableKbs.find((k) => k.id === (selectedKbIds[0] ?? ""));
 
   const handleSelect = (id: string) => {

@@ -8,9 +8,11 @@ license.workspace = true
 anyhow.workspace = true
 async-trait.workspace = true
 axum.workspace = true
+bcrypt = "0.15"
 chrono.workspace = true
 dotenvy.workspace = true
 futures.workspace = true
+jsonwebtoken = "9"
 redis = { version = "0.25", features = ["tokio-comp"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 serde.workspace = true

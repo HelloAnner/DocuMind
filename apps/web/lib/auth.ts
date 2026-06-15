@@ -1,4 +1,14 @@
-export type UserRole = "super_admin" | "tenant_owner" | "tenant_admin" | "end_user" | "viewer";
+export type UserRole =
+  | "super_admin"
+  | "enterprise_admin"
+  | "team_admin"
+  | "data_admin"
+  | "tenant_owner"
+  | "tenant_admin"
+  | "user"
+  | "analyst"
+  | "end_user"
+  | "viewer";
 
 export interface User {
   id: string;
@@ -24,26 +34,20 @@ export interface MeResponse {
   allowed_kb_ids: string[];
 }
 
-export interface DevLoginResponse {
-  user_id: string;
-  tenant_id: string;
-  email: string;
-  role: UserRole;
-  token: string;
-  headers: {
-    "x-user-id": string;
-    "x-tenant-id": string;
-    "x-role": string;
-  };
+export interface LoginResponse extends MeResponse {
+  access_token: string;
+  token_type: "bearer";
 }
 
+const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const AUTH_KEY = "documind-auth";
 
 export interface StoredAuth {
+  token: string;
   userId: string;
   tenantId: string;
   email: string;
-  role: UserRole;
+  roles: UserRole[];
 }
 
 export function getStoredAuth(): StoredAuth | null {
@@ -68,35 +72,47 @@ export function clearStoredAuth() {
 
 export function getAuthHeaders(): Record<string, string> {
   const auth = getStoredAuth();
-  if (!auth) return {};
+  if (!auth?.token) return {};
   return {
-    "x-user-id": auth.userId,
-    "x-tenant-id": auth.tenantId,
-    "x-role": auth.role,
+    Authorization: `Bearer ${auth.token}`,
   };
 }
 
 export async function getMe(): Promise<MeResponse> {
-  const res = await fetch("/api/me", { headers: getAuthHeaders() });
+  const res = await fetch(`${BASE}/api/v1/me`, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("获取当前用户失败");
   return res.json();
 }
 
-export async function devLogin(email: string, role: UserRole): Promise<MeResponse> {
-  const res = await fetch("/api/auth/login", {
+export async function loginWithPassword(username: string, password: string): Promise<MeResponse> {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, role }),
+    body: JSON.stringify({ username, password }),
   });
-  if (!res.ok) throw new Error("登录失败");
-  const data: DevLoginResponse = await res.json();
+  if (!res.ok) throw new Error("用户名或密码错误");
+  const data: LoginResponse = await res.json();
   setStoredAuth({
-    userId: data.user_id,
-    tenantId: data.tenant_id,
-    email: data.email,
-    role: data.role,
+    token: data.access_token,
+    userId: data.user.id,
+    tenantId: data.tenant.id,
+    email: data.user.email,
+    roles: data.roles,
   });
-  return getMe();
+  return data;
+}
+
+export async function logoutRequest() {
+  try {
+    await fetch(`${BASE}/api/v1/auth/logout`, {
+      method: "POST",
+      headers: getAuthHeaders(),
+    });
+  } catch {
+    // Local logout should still succeed if the network request fails.
+  } finally {
+    clearStoredAuth();
+  }
 }
 
 export function logout() {
@@ -108,13 +124,17 @@ export function defaultRouteForRole(role: UserRole): string {
   switch (role) {
     case "super_admin":
       return "/system";
+    case "enterprise_admin":
+    case "team_admin":
+    case "data_admin":
     case "tenant_owner":
     case "tenant_admin":
       return "/admin";
-    case "end_user":
-      return "/chat";
     case "viewer":
       return "/knowledge";
+    case "user":
+    case "analyst":
+    case "end_user":
     default:
       return "/chat";
   }

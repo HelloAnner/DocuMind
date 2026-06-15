@@ -23,20 +23,31 @@ pub struct AppState {
     pub agent_kernel: AgentKernel,
     pub cache: Arc<dyn AnswerCache>,
     pub db_pool: Option<PgPool>,
+    pub redis_client: Option<redis::Client>,
 }
 
 pub async fn build_state(config: AppConfig) -> Result<AppState> {
-    let (repository, db_pool): (Arc<dyn crate::repositories::ConversationRepository>, Option<PgPool>) = if let Some(ref url) =
-        config.database_url
-    {
+    let (repository, db_pool): (
+        Arc<dyn crate::repositories::ConversationRepository>,
+        Option<PgPool>,
+    ) = if let Some(ref url) = config.database_url {
         let pool = sqlx::PgPool::connect(url).await?;
-        (Arc::new(SqlxConversationRepository::new(pool.clone())), Some(pool))
+        crate::auth::seed_identity(&pool, &config).await?;
+        (
+            Arc::new(SqlxConversationRepository::new(pool.clone())),
+            Some(pool),
+        )
     } else {
         (Arc::new(InMemoryConversationRepository::new()), None)
     };
 
-    let cache: Arc<dyn AnswerCache> = if let Some(ref url) = config.redis_url {
-        let client = redis::Client::open(url.as_str())?;
+    let redis_client = if let Some(ref url) = config.redis_url {
+        Some(redis::Client::open(url.as_str())?)
+    } else {
+        None
+    };
+
+    let cache: Arc<dyn AnswerCache> = if let Some(client) = redis_client.clone() {
         Arc::new(RedisAnswerCache::new(client))
     } else {
         Arc::new(InMemoryAnswerCache::new())
@@ -74,5 +85,6 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         agent_kernel,
         cache,
         db_pool,
+        redis_client,
     })
 }

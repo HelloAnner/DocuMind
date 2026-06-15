@@ -55,7 +55,7 @@ async fn list_knowledge_bases(
                     kb.updated_at
              FROM knowledge_base kb
              WHERE kb.tenant_id = $1
-             ORDER BY kb.updated_at DESC"
+             ORDER BY kb.updated_at DESC",
         )
         .bind(actor.tenant_id)
         .fetch_all(pool)
@@ -64,9 +64,47 @@ async fn list_knowledge_bases(
     }
 
     Ok(Json(vec![
-        KnowledgeBaseSummary { id: state.config.default_kb_ids.get(0).copied().unwrap_or_else(|| Uuid::nil()), tenant_id: actor.tenant_id, name: "产品文档库".to_string(), description: Some("面向全公司的产品手册与白皮书集合".to_string()), status: "active".to_string(), tags: vec!["产品".to_string()], doc_count: 3201, chunk_count: 4832, query_count: 1204, updated_at: chrono::Utc::now() },
-        KnowledgeBaseSummary { id: Uuid::new_v4(), tenant_id: actor.tenant_id, name: "销售资料库".to_string(), description: Some("销售策略、报价单与合同模板".to_string()), status: "active".to_string(), tags: vec!["销售".to_string()], doc_count: 1044, chunk_count: 2156, query_count: 540, updated_at: chrono::Utc::now() },
-        KnowledgeBaseSummary { id: Uuid::new_v4(), tenant_id: actor.tenant_id, name: "人力资源库".to_string(), description: Some("员工手册、报销政策与规章制度".to_string()), status: "active".to_string(), tags: vec!["人事".to_string()], doc_count: 328, chunk_count: 890, query_count: 231, updated_at: chrono::Utc::now() },
+        KnowledgeBaseSummary {
+            id: state
+                .config
+                .default_kb_ids
+                .get(0)
+                .copied()
+                .unwrap_or_else(|| Uuid::nil()),
+            tenant_id: actor.tenant_id,
+            name: "产品文档库".to_string(),
+            description: Some("面向全公司的产品手册与白皮书集合".to_string()),
+            status: "active".to_string(),
+            tags: vec!["产品".to_string()],
+            doc_count: 3201,
+            chunk_count: 4832,
+            query_count: 1204,
+            updated_at: chrono::Utc::now(),
+        },
+        KnowledgeBaseSummary {
+            id: Uuid::new_v4(),
+            tenant_id: actor.tenant_id,
+            name: "销售资料库".to_string(),
+            description: Some("销售策略、报价单与合同模板".to_string()),
+            status: "active".to_string(),
+            tags: vec!["销售".to_string()],
+            doc_count: 1044,
+            chunk_count: 2156,
+            query_count: 540,
+            updated_at: chrono::Utc::now(),
+        },
+        KnowledgeBaseSummary {
+            id: Uuid::new_v4(),
+            tenant_id: actor.tenant_id,
+            name: "人力资源库".to_string(),
+            description: Some("员工手册、报销政策与规章制度".to_string()),
+            status: "active".to_string(),
+            tags: vec!["人事".to_string()],
+            doc_count: 328,
+            chunk_count: 890,
+            query_count: 231,
+            updated_at: chrono::Utc::now(),
+        },
     ]))
 }
 
@@ -94,7 +132,7 @@ async fn list_members(
                     0::bigint as query_count
              FROM app_user u
              JOIN tenant_member tm ON tm.user_id = u.id
-             WHERE tm.tenant_id = $1"
+             WHERE tm.tenant_id = $1",
         )
         .bind(actor.tenant_id)
         .fetch_all(pool)
@@ -125,9 +163,33 @@ async fn list_members(
     }
 
     Ok(Json(vec![
-        MemberSummary { id: Uuid::new_v4(), email: "zhangsan@company.com".to_string(), name: Some("张三".to_string()), roles: vec!["tenant_admin".to_string()], allowed_kb_names: vec!["全部".to_string()], query_count: 156, status: "active".to_string() },
-        MemberSummary { id: Uuid::new_v4(), email: "lisi@company.com".to_string(), name: Some("李四".to_string()), roles: vec!["end_user".to_string()], allowed_kb_names: vec!["产品文档库".to_string(), "销售资料库".to_string()], query_count: 89, status: "active".to_string() },
-        MemberSummary { id: Uuid::new_v4(), email: "wangwu@company.com".to_string(), name: Some("王五".to_string()), roles: vec!["end_user".to_string()], allowed_kb_names: vec!["人力资源库".to_string()], query_count: 34, status: "active".to_string() },
+        MemberSummary {
+            id: Uuid::new_v4(),
+            email: "admin@documind.local".to_string(),
+            name: Some("企业管理员".to_string()),
+            roles: vec!["enterprise_admin".to_string()],
+            allowed_kb_names: vec!["全部".to_string()],
+            query_count: 156,
+            status: "active".to_string(),
+        },
+        MemberSummary {
+            id: Uuid::new_v4(),
+            email: "user@documind.local".to_string(),
+            name: Some("普通用户".to_string()),
+            roles: vec!["user".to_string()],
+            allowed_kb_names: vec!["产品文档库".to_string(), "销售资料库".to_string()],
+            query_count: 89,
+            status: "active".to_string(),
+        },
+        MemberSummary {
+            id: Uuid::new_v4(),
+            email: "viewer@documind.local".to_string(),
+            name: Some("只读用户".to_string()),
+            roles: vec!["viewer".to_string()],
+            allowed_kb_names: vec!["人力资源库".to_string()],
+            query_count: 34,
+            status: "active".to_string(),
+        },
     ]))
 }
 
@@ -136,9 +198,33 @@ async fn list_logs(
 ) -> Result<Json<Vec<QaLogSummary>>, crate::error::AppError> {
     require_tenant_admin(&actor)?;
     Ok(Json(vec![
-        QaLogSummary { id: Uuid::new_v4(), question: "Q3 华东区的销售目标是多少？".to_string(), kb_name: "产品文档库".to_string(), user_name: "张三".to_string(), score: 0.92, feedback: Some("up".to_string()), created_at: chrono::Utc::now() },
-        QaLogSummary { id: Uuid::new_v4(), question: "采购合同中的违约责任怎么定义？".to_string(), kb_name: "销售资料库".to_string(), user_name: "李四".to_string(), score: 0.88, feedback: Some("up".to_string()), created_at: chrono::Utc::now() },
-        QaLogSummary { id: Uuid::new_v4(), question: "员工报销需要哪些材料？".to_string(), kb_name: "人力资源库".to_string(), user_name: "王五".to_string(), score: 0.76, feedback: Some("down".to_string()), created_at: chrono::Utc::now() },
+        QaLogSummary {
+            id: Uuid::new_v4(),
+            question: "Q3 华东区的销售目标是多少？".to_string(),
+            kb_name: "产品文档库".to_string(),
+            user_name: "张三".to_string(),
+            score: 0.92,
+            feedback: Some("up".to_string()),
+            created_at: chrono::Utc::now(),
+        },
+        QaLogSummary {
+            id: Uuid::new_v4(),
+            question: "采购合同中的违约责任怎么定义？".to_string(),
+            kb_name: "销售资料库".to_string(),
+            user_name: "李四".to_string(),
+            score: 0.88,
+            feedback: Some("up".to_string()),
+            created_at: chrono::Utc::now(),
+        },
+        QaLogSummary {
+            id: Uuid::new_v4(),
+            question: "员工报销需要哪些材料？".to_string(),
+            kb_name: "人力资源库".to_string(),
+            user_name: "王五".to_string(),
+            score: 0.76,
+            feedback: Some("down".to_string()),
+            created_at: chrono::Utc::now(),
+        },
     ]))
 }
 

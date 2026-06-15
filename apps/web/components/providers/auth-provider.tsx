@@ -2,12 +2,12 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { clearStoredAuth, defaultRouteForRole, devLogin, getMe, getStoredAuth, type MeResponse, type StoredAuth, type UserRole } from "@/lib/auth";
+import { defaultRouteForRole, getMe, getStoredAuth, loginWithPassword, logoutRequest, type MeResponse, type UserRole } from "@/lib/auth";
 
 interface AuthContextValue {
   me: MeResponse | null;
   loading: boolean;
-  login: (email: string, role: UserRole) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -41,18 +41,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(
-    async (email: string, role: UserRole) => {
-      const data = await devLogin(email, role);
+    async (username: string, password: string) => {
+      const data = await loginWithPassword(username, password);
       setMe(data);
-      router.replace(defaultRouteForRole(data.roles[0] ?? role));
+      router.replace(defaultRouteForRole(data.roles[0] ?? "user"));
     },
     [router]
   );
 
   const logout = useCallback(() => {
-    clearStoredAuth();
-    setMe(null);
-    router.replace("/login");
+    logoutRequest().finally(() => {
+      setMe(null);
+      router.replace("/login");
+    });
   }, [router]);
 
   return (

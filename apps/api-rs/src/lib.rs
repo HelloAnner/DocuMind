@@ -51,7 +51,12 @@ pub async fn run() -> anyhow::Result<()> {
         .merge(api::conversations_router())
         .fallback(static_or_spa)
         .with_state(state)
-        .layer(CorsLayer::new().allow_origin(Any).allow_methods(Any).allow_headers(Any))
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(TraceLayer::new_for_http());
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
@@ -73,7 +78,7 @@ async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
     Json(json!({
         "tenant": cfg.default_tenant_id.to_string(),
         "role": cfg.default_role,
-        "auth": "disabled",
+        "auth": "jwt",
         "embedding": "bge-large-zh-v1.5",
         "retrieval": {
             "strategy": "hybrid",

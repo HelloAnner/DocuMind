@@ -12,6 +12,7 @@ pub enum AppError {
     Timeout { code: String, message: String },
     Internal(anyhow::Error),
     BadRequest { code: String, message: String },
+    Unauthorized { code: String, message: String },
 }
 
 impl AppError {
@@ -63,22 +64,49 @@ impl AppError {
             message: "当前身份无权执行该操作".to_string(),
         }
     }
+    pub fn unauthorized() -> Self {
+        Self::Unauthorized {
+            code: "UNAUTHORIZED".to_string(),
+            message: "请先登录".to_string(),
+        }
+    }
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::BadRequest {
+            code: "BAD_REQUEST".to_string(),
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, code, message) = match &self {
-            AppError::NotFound { code, message } => (StatusCode::NOT_FOUND, code.clone(), message.clone()),
-            AppError::Forbidden { code, message } => (StatusCode::FORBIDDEN, code.clone(), message.clone()),
-            AppError::Conflict { code, message } => (StatusCode::CONFLICT, code.clone(), message.clone()),
-            AppError::InvalidState { code, message } => (StatusCode::CONFLICT, code.clone(), message.clone()),
-            AppError::Timeout { code, message } => (StatusCode::GATEWAY_TIMEOUT, code.clone(), message.clone()),
+            AppError::NotFound { code, message } => {
+                (StatusCode::NOT_FOUND, code.clone(), message.clone())
+            }
+            AppError::Forbidden { code, message } => {
+                (StatusCode::FORBIDDEN, code.clone(), message.clone())
+            }
+            AppError::Conflict { code, message } => {
+                (StatusCode::CONFLICT, code.clone(), message.clone())
+            }
+            AppError::InvalidState { code, message } => {
+                (StatusCode::CONFLICT, code.clone(), message.clone())
+            }
+            AppError::Timeout { code, message } => {
+                (StatusCode::GATEWAY_TIMEOUT, code.clone(), message.clone())
+            }
             AppError::Internal(e) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "INTERNAL_ERROR".to_string(),
                 format!("{e}"),
             ),
-            AppError::BadRequest { code, message } => (StatusCode::BAD_REQUEST, code.clone(), message.clone()),
+            AppError::BadRequest { code, message } => {
+                (StatusCode::BAD_REQUEST, code.clone(), message.clone())
+            }
+            AppError::Unauthorized { code, message } => {
+                (StatusCode::UNAUTHORIZED, code.clone(), message.clone())
+            }
         };
         let body = Json(json!({ "code": code, "message": message }));
         (status, body).into_response()
