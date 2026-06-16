@@ -11,6 +11,9 @@ pub struct AppConfig {
     pub redis_url: Option<String>,
     pub jwt_secret: String,
     pub auth_token_expire_hours: i64,
+    pub auth_login_mode: String,
+    pub portal_base_url: String,
+    pub portal_exchange_endpoint: String,
     pub default_tenant_id: Uuid,
     pub default_user_id: Uuid,
     pub default_role: String,
@@ -103,6 +106,18 @@ pub fn load_config() -> Result<AppConfig> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(24);
+    let legacy_portal_auth = env_bool("PORTAL_MANAGED", false) && env_bool("PORTAL_AUTH_ENABLED", false);
+    let auth_login_mode = normalize_auth_login_mode(&env::var("AUTH_LOGIN_MODE").unwrap_or_else(|_| {
+        if legacy_portal_auth {
+            "portal".to_string()
+        } else {
+            "local".to_string()
+        }
+    }));
+    let portal_base_url =
+        env::var("PORTAL_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
+    let portal_exchange_endpoint = env::var("PORTAL_EXCHANGE_ENDPOINT")
+        .unwrap_or_else(|_| "/api/auth/exchange-ticket".to_string());
 
     let default_tenant_id = env::var("DEFAULT_TENANT_ID")
         .ok()
@@ -250,6 +265,9 @@ pub fn load_config() -> Result<AppConfig> {
         redis_url,
         jwt_secret,
         auth_token_expire_hours,
+        auth_login_mode,
+        portal_base_url,
+        portal_exchange_endpoint,
         default_tenant_id,
         default_user_id,
         default_role,
@@ -267,4 +285,18 @@ pub fn load_config() -> Result<AppConfig> {
         rag,
         agent,
     })
+}
+
+fn env_bool(key: &str, default: bool) -> bool {
+    env::var(key)
+        .ok()
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(default)
+}
+
+fn normalize_auth_login_mode(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "portal" | "portal_sso" | "portal-managed" | "portal_managed" => "portal".to_string(),
+        _ => "local".to_string(),
+    }
 }

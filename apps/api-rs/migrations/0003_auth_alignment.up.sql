@@ -1,6 +1,9 @@
 -- Align DocuMind's seed identity model with the Northline-style role names
 -- while keeping legacy role ACLs readable for existing data.
 
+ALTER TABLE tenant_member
+ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
 UPDATE tenant_member
 SET roles = ARRAY['enterprise_admin'], updated_at = NOW()
 WHERE roles = ARRAY['tenant_admin'];

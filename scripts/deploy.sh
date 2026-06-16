@@ -26,6 +26,11 @@ if ! echo "$binary_info" | grep -qi 'ELF.*x86-64'; then
   echo "$binary_info"
   exit 1
 fi
+if echo "$binary_info" | grep -qi 'interpreter '; then
+  echo "Deploy binary must be fully static and must not require a dynamic loader:"
+  echo "$binary_info"
+  exit 1
+fi
 
 local_sha256="$(shasum -a 256 "$LOCAL_BINARY" | awk '{print $1}')"
 
@@ -81,12 +86,17 @@ ONNX_MODEL_PATH=$REMOTE_ROOT/shared/models/bge-large-zh-v1.5.onnx
 
 JWT_SECRET=$jwt_secret
 AUTH_TOKEN_EXPIRE_HOURS=24
+AUTH_LOGIN_MODE=portal
+PORTAL_MANAGED=true
+PORTAL_AUTH_ENABLED=true
+PORTAL_BASE_URL=http://127.0.0.1:7777
+PORTAL_EXCHANGE_ENDPOINT=/api/auth/exchange-ticket
 
-DEFAULT_TENANT_ID=10000000-0000-0000-0000-000000000001
-DEFAULT_USER_ID=10000000-0000-0000-0000-000000000002
+DEFAULT_TENANT_ID=00000000-0000-0000-0000-000000000001
+DEFAULT_USER_ID=00000000-0000-0000-0000-000000000002
 DEFAULT_ROLE=enterprise_admin
-DEFAULT_KB_IDS=10000000-0000-0000-0000-000000000003
-DEFAULT_TENANT_NAME=Acme Corp
+DEFAULT_KB_IDS=00000000-0000-0000-0000-000000000010
+DEFAULT_TENANT_NAME=AcmeCorp
 DEFAULT_TENANT_SLUG=acme
 SUPER_ADMIN_EMAIL=ops@documind.local
 SUPER_ADMIN_PASSWORD=documind123

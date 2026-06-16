@@ -22,4 +22,5 @@ cargo run
 
 - [产品定位与需求](docs/prd.md)
 - [技术架构](docs/tech.md)
+- [门户统一登录接入方案](docs/access-control/portal-sso-integration.md)
 - [设计系统](DESIGN.md)
