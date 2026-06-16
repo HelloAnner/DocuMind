@@ -2425,3 +2425,128 @@ a {
   background: var(--bg-secondary);
   color: var(--text-primary);
 }
+
+
+/* Filter bar & select */
+
+.dm-filter-bar {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.dm-filter-bar .dm-search-input {
+  width: 260px;
+}
+
+.dm-select {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 13px;
+  height: 32px;
+  min-width: 120px;
+  outline: 0;
+  padding: 0 10px;
+}
+
+.dm-select option {
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+}
+
+/* Tabs */
+
+.dm-tabs {
+  align-items: flex-end;
+  border-bottom: 1px solid var(--border-muted);
+  display: flex;
+  gap: 8px;
+  height: 44px;
+}
+
+.dm-tabs button {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  height: 44px;
+  padding: 0 12px;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.dm-tabs button.active {
+  border-bottom-color: var(--text-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* Permission / matrix rows */
+
+.dm-permission-row,
+.dm-matrix-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-faint);
+  display: grid;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 0;
+}
+
+.dm-permission-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 90px 100px;
+}
+
+.dm-matrix-row {
+  grid-template-columns: minmax(0, 1fr) repeat(4, 80px);
+}
+
+.dm-permission-row > span,
+.dm-matrix-row > span {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-permission-row > span:first-child,
+.dm-matrix-row > span:first-child {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+
+/* Vector index / audit rows */
+
+.dm-vector-index-row,
+.dm-audit-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-faint);
+  display: grid;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 0;
+}
+
+.dm-vector-index-row {
+  grid-template-columns: minmax(0, 1.2fr) 90px 80px 90px 100px 90px 100px;
+}
+
+.dm-audit-row {
+  grid-template-columns: 160px 90px minmax(0, 1fr) 120px minmax(0, 1fr) 110px;
+}
+
+.dm-vector-index-row > span,
+.dm-audit-row > span {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

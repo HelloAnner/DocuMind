@@ -4,13 +4,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   ArrowLeft,
-  BarChart3,
   Building2,
+  ClipboardList,
   Cpu,
   Database,
   LayoutDashboard,
-  ListTodo,
-  ScrollText,
+  ListChecks,
   Settings,
   Users,
 } from "lucide-react";
@@ -22,8 +21,8 @@ const nav = [
   { label: "用户", href: "/system/users", icon: Users },
   { label: "模型服务", href: "/system/models", icon: Cpu },
   { label: "向量索引", href: "/system/vector-indexes", icon: Database },
-  { label: "任务队列", href: "/system/jobs", icon: ListTodo },
-  { label: "审计", href: "/system/audit", icon: ScrollText },
+  { label: "任务队列", href: "/system/jobs", icon: ListChecks },
+  { label: "审计", href: "/system/audit", icon: ClipboardList },
   { label: "系统设置", href: "/system/settings", icon: Settings },
 ];
 

@@ -127,9 +127,10 @@ export function defaultRouteForRole(role: UserRole): string {
     case "enterprise_admin":
     case "team_admin":
     case "data_admin":
+      return "/admin";
     case "tenant_owner":
     case "tenant_admin":
-      return "/admin";
+      return "/tenant";
     case "viewer":
       return "/knowledge";
     case "user":

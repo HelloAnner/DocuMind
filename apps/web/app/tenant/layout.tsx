@@ -2,10 +2,10 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { AdminSidebar } from "@/components/ui/admin-sidebar";
+import { TenantSidebar } from "@/components/ui/tenant-sidebar";
 import { useAuth } from "@/components/providers/auth-provider";
 
-export default function AdminLayout({
+export default function TenantLayout({
   children,
 }: {
   children: React.ReactNode;
@@ -16,10 +16,8 @@ export default function AdminLayout({
   useEffect(() => {
     if (loading) return;
     const canAccess = me && (
-      me.roles.includes("enterprise_admin") ||
-      me.roles.includes("team_admin") ||
-      me.roles.includes("data_admin") ||
-      me.roles.includes("super_admin")
+      me.roles.includes("tenant_admin") ||
+      me.roles.includes("tenant_owner")
     );
     if (!canAccess) {
       router.replace("/");
@@ -29,7 +27,7 @@ export default function AdminLayout({
   if (loading || !me) {
     return (
       <main className="dm-shell">
-        <AdminSidebar />
+        <TenantSidebar />
         <section className="dm-workspace" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
           <span>加载中…</span>
         </section>
@@ -39,7 +37,7 @@ export default function AdminLayout({
 
   return (
     <main className="dm-shell">
-      <AdminSidebar />
+      <TenantSidebar />
       <section className="dm-workspace">{children}</section>
     </main>
   );

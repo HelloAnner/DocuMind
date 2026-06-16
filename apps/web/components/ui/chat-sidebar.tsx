@@ -2,23 +2,65 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronDown, Folder, History, MessageSquare, Plus, Settings, Users } from "lucide-react";
+import { ChevronDown, Folder, Plus, Settings } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
 import { useAuth } from "@/components/providers/auth-provider";
+import { defaultRouteForRole } from "@/lib/auth";
+
+function groupConversationsByDate<T extends { updated_at: string; title: string; conversation_id: string }>(
+  items: T[]
+) {
+  const groups = new Map<string, T[]>();
+  const today = new Date().toDateString();
+  const yesterday = new Date(Date.now() - 86400000).toDateString();
+
+  for (const item of items) {
+    const d = new Date(item.updated_at).toDateString();
+    let label: string;
+    if (d === today) label = "今天";
+    else if (d === yesterday) label = "昨天";
+    else label = new Date(item.updated_at).toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+    groups.set(label, [...(groups.get(label) || []), item]);
+  }
+
+  const preferredOrder = ["今天", "昨天"];
+  const sorted = Array.from(groups.entries()).sort(([a], [b]) => {
+    const ai = preferredOrder.indexOf(a);
+    const bi = preferredOrder.indexOf(b);
+    if (ai !== -1 && bi !== -1) return ai - bi;
+    if (ai !== -1) return -1;
+    if (bi !== -1) return 1;
+    return a.localeCompare(b);
+  });
+  return sorted;
+}
 
 export function ChatSidebar() {
   const router = useRouter();
   const { me } = useAuth();
-  const { conversations, currentId, setCurrentId, createAndSelect, availableKbs, selectedKbIds, setSelectedKbIds } = useConversation();
+  const {
+    conversations,
+    currentId,
+    setCurrentId,
+    createAndSelect,
+    availableKbs,
+    selectedKbIds,
+    setSelectedKbIds,
+  } = useConversation();
+
+  const isSuperAdmin = me?.roles.includes("super_admin");
   const isAdmin =
     me?.roles.includes("enterprise_admin") ||
     me?.roles.includes("team_admin") ||
-    me?.roles.includes("data_admin") ||
-    me?.roles.includes("tenant_admin") ||
-    me?.roles.includes("tenant_owner") ||
-    me?.roles.includes("super_admin");
+    me?.roles.includes("data_admin");
+  const isTenantAdmin = me?.roles.includes("tenant_admin") || me?.roles.includes("tenant_owner");
+
+  const adminHref = isSuperAdmin ? "/system" : isAdmin ? "/admin" : "/tenant";
+  const canAccessAdmin = isSuperAdmin || isAdmin || isTenantAdmin;
+
   const selectedKb = availableKbs.find((k) => k.id === (selectedKbIds[0] ?? ""));
+  const groups = groupConversationsByDate(conversations);
 
   const handleSelect = (id: string) => {
     setCurrentId(id);
@@ -65,33 +107,27 @@ export function ChatSidebar() {
             <div className="dm-history-group-title">暂无会话</div>
           </div>
         ) : (
-          <div className="dm-history-group">
-            <div className="dm-history-group-title">最近</div>
-            {conversations.map((item) => (
-              <button
-                className={`dm-history-item ${item.conversation_id === currentId ? "active" : ""}`}
-                key={item.conversation_id}
-                type="button"
-                onClick={() => handleSelect(item.conversation_id)}
-              >
-                {item.title}
-              </button>
-            ))}
-          </div>
+          groups.map(([label, items]) => (
+            <div className="dm-history-group" key={label}>
+              <div className="dm-history-group-title">{label}</div>
+              {items.map((item) => (
+                <button
+                  className={`dm-history-item ${item.conversation_id === currentId ? "active" : ""}`}
+                  key={item.conversation_id}
+                  type="button"
+                  onClick={() => handleSelect(item.conversation_id)}
+                >
+                  {item.title}
+                </button>
+              ))}
+            </div>
+          ))
         )}
       </div>
 
       <div style={{ marginTop: "auto" }}>
-        <Link className="dm-chat-admin-entry" href="/knowledge">
-          <MessageSquare size={15} />
-          <span>我可访问的知识库</span>
-        </Link>
-        <Link className="dm-chat-admin-entry" href="/history">
-          <History size={15} />
-          <span>历史问答</span>
-        </Link>
-        {isAdmin && (
-          <Link className="dm-chat-admin-entry" href="/admin">
+        {canAccessAdmin && (
+          <Link className="dm-chat-admin-entry" href={adminHref}>
             <Settings size={15} />
             <span>管理后台</span>
           </Link>
