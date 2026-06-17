@@ -92,7 +92,7 @@ DocuMind 默认连接外部组件：
 ```env
 # ── Server ──
 SERVER_HOST=0.0.0.0
-SERVER_PORT=5555
+SERVER_PORT=8089
 PUBLIC_BASE_URL=https://documind.example.com
 WEB_OUT_DIR=apps/web/out
 

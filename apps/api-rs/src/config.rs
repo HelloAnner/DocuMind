@@ -96,7 +96,7 @@ pub fn load_config() -> Result<AppConfig> {
     let server_port = env::var("SERVER_PORT")
         .ok()
         .and_then(|v| v.parse().ok())
-        .unwrap_or(5555);
+        .unwrap_or(8089);
     let database_url = env::var("DATABASE_URL").ok();
     let redis_url = env::var("REDIS_URL").ok();
     let jwt_secret =

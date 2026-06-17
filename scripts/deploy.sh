@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-DEPLOY_HOST="${DEPLOY_HOST:-northline}"
-DEPLOY_PORT="${DEPLOY_PORT:-5555}"
+DEPLOY_HOST="${DEPLOY_HOST:-documind}"
+DEPLOY_PORT="${DEPLOY_PORT:-8089}"
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/documind}"
 DEPLOY_TARGET="${DEPLOY_TARGET:-x86_64-unknown-linux-musl}"
 LOCAL_BINARY="${LOCAL_BINARY:-target/deploy-linux-x86_64-musl/$DEPLOY_TARGET/release/documind}"
 RELEASE_ID="${RELEASE_ID:-$(date +%Y%m%d-%H%M%S)}"
+REMOTE_PG_CONTAINER="${REMOTE_PG_CONTAINER:-documind-postgres}"
+REMOTE_REDIS_CONTAINER="${REMOTE_REDIS_CONTAINER:-documind-redis}"
+REMOTE_RABBITMQ_CONTAINER="${REMOTE_RABBITMQ_CONTAINER:-documind-rabbitmq}"
+REMOTE_PG_USER="${REMOTE_PG_USER:-documind}"
+REMOTE_PG_DATABASE="${REMOTE_PG_DATABASE:-documind_dev}"
+REMOTE_DATABASE_URL="${REMOTE_DATABASE_URL:-postgres://documind:documind@127.0.0.1:8100/documind_dev?options=-csearch_path%3Ddocumind%2Cpublic}"
+REMOTE_REDIS_URL="${REMOTE_REDIS_URL:-redis://127.0.0.1:8101/0}"
+REMOTE_RABBITMQ_URL="${REMOTE_RABBITMQ_URL:-amqp://guest:guest@127.0.0.1:8102/%2f}"
 
-if [[ "$DEPLOY_HOST" != "northline" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
+if [[ "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
-  echo "Set ALLOW_CUSTOM_DEPLOY_HOST=1 if you really want to override ssh northline."
+  echo "Set ALLOW_CUSTOM_DEPLOY_HOST=1 if you really want to override ssh documind."
   exit 1
 fi
 
@@ -61,9 +69,9 @@ cat > "$TMP_ENV" <<ENV
 SERVER_HOST=0.0.0.0
 SERVER_PORT=$DEPLOY_PORT
 
-DATABASE_URL=postgres://northline:northline@127.0.0.1:8100/northline_dev?options=-csearch_path%3Ddocumind%2Cnorthline%2Cpublic
-REDIS_URL=redis://127.0.0.1:8101/1
-RABBITMQ_URL=amqp://guest:guest@127.0.0.1:8102/%2f
+DATABASE_URL=$REMOTE_DATABASE_URL
+REDIS_URL=$REMOTE_REDIS_URL
+RABBITMQ_URL=$REMOTE_RABBITMQ_URL
 
 OBJECT_STORAGE_PROVIDER=minio
 OBJECT_STORAGE_ENDPOINT=http://127.0.0.1:9000
@@ -86,9 +94,9 @@ ONNX_MODEL_PATH=$REMOTE_ROOT/shared/models/bge-large-zh-v1.5.onnx
 
 JWT_SECRET=$jwt_secret
 AUTH_TOKEN_EXPIRE_HOURS=24
-AUTH_LOGIN_MODE=portal
-PORTAL_MANAGED=true
-PORTAL_AUTH_ENABLED=true
+AUTH_LOGIN_MODE=local
+PORTAL_MANAGED=false
+PORTAL_AUTH_ENABLED=false
 PORTAL_BASE_URL=http://127.0.0.1:7777
 PORTAL_EXCHANGE_ENDPOINT=/api/auth/exchange-ticket
 
@@ -160,56 +168,61 @@ remote_log='$REMOTE_LOG'
 remote_pid='$REMOTE_PID'
 deploy_port='$DEPLOY_PORT'
 local_sha256='$local_sha256'
+pg_container='$REMOTE_PG_CONTAINER'
+redis_container='$REMOTE_REDIS_CONTAINER'
+rabbitmq_container='$REMOTE_RABBITMQ_CONTAINER'
+pg_user='$REMOTE_PG_USER'
+pg_database='$REMOTE_PG_DATABASE'
 
 chmod 600 "\$remote_env"
 chmod +x "\$remote_release/bin/documind"
 remote_sha256="\$(sha256sum "\$remote_release/bin/documind" | awk '{print \$1}')"
 if [[ "\$remote_sha256" != "\$local_sha256" ]]; then
   echo "Uploaded binary checksum mismatch."
-  echo "local:  \$local_sha256"
+  echo "expected: \$local_sha256"
   echo "remote: \$remote_sha256"
   exit 1
 fi
 printf '%s  %s\n' "\$remote_sha256" "\$remote_release/bin/documind" > "\$remote_release/bin/documind.sha256"
 ln -sfn "\$remote_release" "\$remote_current"
 
-if ! docker ps --format '{{.Names}}' | grep -qx northline-postgres; then
-  echo "northline-postgres container is required but not running."
+if ! docker ps --format '{{.Names}}' | grep -qx "\$pg_container"; then
+  echo "\$pg_container container is required but not running."
   exit 1
 fi
-if ! docker ps --format '{{.Names}}' | grep -qx northline-redis; then
-  echo "northline-redis container is required but not running."
+if ! docker ps --format '{{.Names}}' | grep -qx "\$redis_container"; then
+  echo "\$redis_container container is required but not running."
   exit 1
 fi
-if ! docker ps --format '{{.Names}}' | grep -qx northline-rabbitmq; then
-  echo "northline-rabbitmq container is required but not running."
+if ! docker ps --format '{{.Names}}' | grep -qx "\$rabbitmq_container"; then
+  echo "\$rabbitmq_container container is required but not running."
   exit 1
 fi
 
-docker exec northline-postgres pg_isready -U northline -d northline_dev >/dev/null
-docker exec northline-redis redis-cli -n 1 ping >/dev/null
-docker exec northline-rabbitmq rabbitmq-diagnostics -q ping >/dev/null
+docker exec "\$pg_container" pg_isready -U "\$pg_user" -d "\$pg_database" >/dev/null
+docker exec "\$redis_container" redis-cli -n 0 ping >/dev/null
+docker exec "\$rabbitmq_container" rabbitmq-diagnostics -q ping >/dev/null
 
 printf '%s\n' \
-  'CREATE SCHEMA IF NOT EXISTS documind AUTHORIZATION northline;' \
+  "CREATE SCHEMA IF NOT EXISTS documind AUTHORIZATION \$pg_user;" \
   'CREATE EXTENSION IF NOT EXISTS "uuid-ossp";' \
   'CREATE TABLE IF NOT EXISTS documind._deploy_migrations (' \
   '    id TEXT PRIMARY KEY,' \
   '    applied_at TIMESTAMPTZ NOT NULL DEFAULT NOW()' \
   ');' \
-  | docker exec -i northline-postgres psql -U northline -d northline_dev >/dev/null
+  | docker exec -i "\$pg_container" psql -U "\$pg_user" -d "\$pg_database" >/dev/null
 
 for migration in "\$remote_release"/apps/api-rs/migrations/*.up.sql; do
   migration_id="\$(basename "\$migration")"
-  applied="\$(docker exec northline-postgres psql -At -U northline -d northline_dev -c "SELECT 1 FROM documind._deploy_migrations WHERE id = '\$migration_id'" || true)"
+  applied="\$(docker exec "\$pg_container" psql -At -U "\$pg_user" -d "\$pg_database" -c "SELECT 1 FROM documind._deploy_migrations WHERE id = '\$migration_id'" || true)"
   if [[ "\$applied" == "1" ]]; then
     continue
   fi
   {
-    echo "SET search_path TO documind, northline, public;"
+    echo "SET search_path TO documind, public;"
     cat "\$migration"
     echo "INSERT INTO documind._deploy_migrations(id) VALUES ('\$migration_id');"
-  } | docker exec -i northline-postgres psql -v ON_ERROR_STOP=1 -U northline -d northline_dev >/dev/null
+  } | docker exec -i "\$pg_container" psql -v ON_ERROR_STOP=1 -U "\$pg_user" -d "\$pg_database" >/dev/null
 done
 
 if [[ -f "\$remote_pid" ]]; then
