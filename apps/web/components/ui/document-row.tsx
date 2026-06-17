@@ -9,6 +9,7 @@ export function DocumentRow({
   name,
   type,
   size,
+  pages,
   chunks,
   tables,
   quality,
@@ -20,6 +21,7 @@ export function DocumentRow({
   name: string;
   type: string;
   size?: string;
+  pages?: number;
   chunks: number;
   tables?: number;
   quality?: number;
@@ -48,6 +50,7 @@ export function DocumentRow({
       </span>
       <span className="dm-document-cell">{type}</span>
       <span className="dm-document-cell">{size}</span>
+      <span className="dm-document-cell">{pages ?? "—"}</span>
       <span className="dm-document-cell">{status === "失败" ? "—" : chunks}</span>
       <span className="dm-document-cell">{tables ?? 0}</span>
       <span className="dm-document-cell">{quality == null ? "—" : `${Math.round(quality * 100)}%`}</span>

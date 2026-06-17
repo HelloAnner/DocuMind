@@ -1,26 +1,28 @@
 "use client";
 
 import { RefreshCw, X } from "lucide-react";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import type { AdminDocumentDetail } from "@/lib/api";
 import { Badge } from "./badge";
 import { Button } from "./button";
 import { IconButton } from "./icon-button";
 
-const tabs = ["文档信息", "解析块", "切片", "表格"];
+const tabs = ["文档信息", "原文预览", "切片列表", "表格", "解析块"];
 
 export function DocumentDrawer({
   detail,
   loading,
   onClose,
   onRetry,
+  actions,
 }: {
   detail?: AdminDocumentDetail;
   loading?: boolean;
   onClose: () => void;
   onRetry?: () => void;
+  actions?: ReactNode;
 }) {
-  const [activeTab, setActiveTab] = useState(0);
+  const [activeTab, setActiveTab] = useState(1);
   const doc = detail?.document;
   const job = detail?.latest_job;
 
@@ -57,6 +59,31 @@ export function DocumentDrawer({
 
         <div className="dm-drawer-body">
           {loading ? <div className="dm-empty-state">加载中...</div> : null}
+          {!loading && detail && activeTab === 1 ? (
+            <div className="dm-original-preview">
+              <div className="dm-original-preview-head">
+                <strong>{detail.preview.title || detail.document.title}</strong>
+                <span>
+                  {detail.preview.mode === "parsed_text"
+                    ? `${detail.preview.char_count.toLocaleString()} 字符`
+                    : detail.preview.mode === "failed"
+                    ? "解析失败"
+                    : "等待解析"}
+                </span>
+              </div>
+              {detail.preview.text ? (
+                <pre>{detail.preview.text}</pre>
+              ) : (
+                <div className="dm-empty-state">
+                  {detail.preview.mode === "failed" ? "解析失败，暂无可展示原文。" : "文档解析完成后展示原文预览。"}
+                </div>
+              )}
+              {detail.preview.truncated ? (
+                <div className="dm-preview-note">当前仅展示前 60,000 字符，完整内容仍保留在原始文件和解析结果中。</div>
+              ) : null}
+            </div>
+          ) : null}
+
           {!loading && detail && activeTab === 0 ? (
             <div className="dm-doc-inspector">
               <div>
@@ -93,13 +120,16 @@ export function DocumentDrawer({
                   <code>{JSON.stringify(job.warnings)}</code>
                 </div>
               ) : null}
-              <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={onRetry}>
-                重试解析
-              </Button>
+              {onRetry ? (
+                <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={onRetry}>
+                  重试解析
+                </Button>
+              ) : null}
+              {actions ? <div className="dm-drawer-action-stack">{actions}</div> : null}
             </div>
           ) : null}
 
-          {!loading && detail && activeTab === 1
+          {!loading && detail && activeTab === 4
             ? detail.blocks.map((block) => (
                 <div className="dm-chunk-row" key={block.block_id}>
                   <span>

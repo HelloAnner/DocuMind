@@ -1,7 +1,8 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, put};
 use axum::{Json, Router};
+use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
@@ -12,9 +13,24 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/admin/overview", get(overview))
-        .route("/api/admin/knowledge-bases", get(list_knowledge_bases))
+        .route(
+            "/api/admin/knowledge-bases",
+            get(list_knowledge_bases).post(create_knowledge_base),
+        )
+        .route(
+            "/api/admin/knowledge-bases/:kb_id",
+            put(update_knowledge_base).delete(delete_knowledge_base),
+        )
         .route("/api/admin/members", get(list_members))
         .route("/api/admin/logs", get(list_logs))
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeBaseUpsert {
+    name: String,
+    description: Option<String>,
+    status: Option<String>,
+    tags: Option<Vec<String>>,
 }
 
 async fn overview(
@@ -48,11 +64,17 @@ async fn list_knowledge_bases(
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, KnowledgeBaseSummaryRow>(
             "SELECT kb.id, kb.tenant_id, kb.name, kb.description, kb.status, kb.tags,
-                    0::bigint as doc_count,
-                    0::bigint as chunk_count,
+                    COALESCE(ds.doc_count, 0)::bigint as doc_count,
+                    COALESCE(ds.chunk_count, 0)::bigint as chunk_count,
                     0::bigint as query_count,
                     kb.updated_at
              FROM knowledge_base kb
+             LEFT JOIN (
+                 SELECT kb_id, COUNT(*)::bigint AS doc_count, COALESCE(SUM(chunk_count), 0)::bigint AS chunk_count
+                 FROM documents
+                 WHERE tenant_id = $1
+                 GROUP BY kb_id
+             ) ds ON ds.kb_id = kb.id
              WHERE kb.tenant_id = $1
              ORDER BY kb.updated_at DESC",
         )
@@ -105,6 +127,136 @@ async fn list_knowledge_bases(
             updated_at: chrono::Utc::now(),
         },
     ]))
+}
+
+async fn create_knowledge_base(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Json(req): Json<KnowledgeBaseUpsert>,
+) -> Result<Json<KnowledgeBaseSummary>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    let pool = state
+        .db_pool
+        .as_ref()
+        .ok_or_else(|| crate::error::AppError::bad_request("知识库管理需要启用 PostgreSQL"))?;
+    let name = normalize_kb_name(&req.name)?;
+    let status = normalize_kb_status(req.status.as_deref())?;
+    let tags = normalize_tags(req.tags.unwrap_or_default());
+
+    let mut tx = pool.begin().await?;
+    let row = sqlx::query_as::<_, KnowledgeBaseSummaryRow>(
+        r#"
+        INSERT INTO knowledge_base (tenant_id, name, description, status, tags, created_by, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, now())
+        RETURNING id, tenant_id, name, description, status, tags,
+                  0::bigint as doc_count, 0::bigint as chunk_count, 0::bigint as query_count,
+                  updated_at
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(name)
+    .bind(req.description.filter(|v| !v.trim().is_empty()))
+    .bind(status)
+    .bind(&tags)
+    .bind(actor.user_id)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    for role in &actor.roles {
+        sqlx::query(
+            r#"
+            INSERT INTO knowledge_base_acl (tenant_id, kb_id, subject_type, subject_id, permission, created_by)
+            VALUES ($1, $2, 'role', $3, 'manage', $4)
+            ON CONFLICT (tenant_id, kb_id, subject_type, subject_id, permission) DO NOTHING
+            "#,
+        )
+        .bind(actor.tenant_id)
+        .bind(row.id)
+        .bind(role)
+        .bind(actor.user_id)
+        .execute(&mut *tx)
+        .await?;
+    }
+
+    tx.commit().await?;
+    Ok(Json(row.into()))
+}
+
+async fn update_knowledge_base(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(kb_id): Path<Uuid>,
+    Json(req): Json<KnowledgeBaseUpsert>,
+) -> Result<Json<KnowledgeBaseSummary>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    let pool = state
+        .db_pool
+        .as_ref()
+        .ok_or_else(|| crate::error::AppError::bad_request("知识库管理需要启用 PostgreSQL"))?;
+    let name = normalize_kb_name(&req.name)?;
+    let status = normalize_kb_status(req.status.as_deref())?;
+    let tags = normalize_tags(req.tags.unwrap_or_default());
+
+    let row = sqlx::query_as::<_, KnowledgeBaseSummaryRow>(
+        r#"
+        WITH updated AS (
+            UPDATE knowledge_base
+            SET name = $3, description = $4, status = $5, tags = $6, updated_at = now()
+            WHERE tenant_id = $1 AND id = $2
+            RETURNING id, tenant_id, name, description, status, tags, updated_at
+        )
+        SELECT kb.id, kb.tenant_id, kb.name, kb.description, kb.status, kb.tags,
+               COALESCE(ds.doc_count, 0)::bigint as doc_count,
+               COALESCE(ds.chunk_count, 0)::bigint as chunk_count,
+               0::bigint as query_count,
+               kb.updated_at
+        FROM updated kb
+        LEFT JOIN (
+            SELECT kb_id, COUNT(*)::bigint AS doc_count, COALESCE(SUM(chunk_count), 0)::bigint AS chunk_count
+            FROM documents
+            WHERE tenant_id = $1 AND kb_id = $2
+            GROUP BY kb_id
+        ) ds ON ds.kb_id = kb.id
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(kb_id)
+    .bind(name)
+    .bind(req.description.filter(|v| !v.trim().is_empty()))
+    .bind(status)
+    .bind(&tags)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::NotFound {
+        code: "KB_NOT_FOUND".to_string(),
+        message: "知识库不存在或无权限".to_string(),
+    })?;
+
+    Ok(Json(row.into()))
+}
+
+async fn delete_knowledge_base(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(kb_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    let pool = state
+        .db_pool
+        .as_ref()
+        .ok_or_else(|| crate::error::AppError::bad_request("知识库管理需要启用 PostgreSQL"))?;
+    let result = sqlx::query("DELETE FROM knowledge_base WHERE tenant_id = $1 AND id = $2")
+        .bind(actor.tenant_id)
+        .bind(kb_id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(crate::error::AppError::NotFound {
+            code: "KB_NOT_FOUND".to_string(),
+            message: "知识库不存在或无权限".to_string(),
+        });
+    }
+    Ok(Json(json!({ "kb_id": kb_id, "status": "deleted" })))
 }
 
 async fn list_members(
@@ -244,6 +396,37 @@ impl From<KnowledgeBaseSummaryRow> for KnowledgeBaseSummary {
             updated_at: r.updated_at,
         }
     }
+}
+
+fn normalize_kb_name(value: &str) -> Result<String, crate::error::AppError> {
+    let name = value.trim();
+    if name.is_empty() {
+        return Err(crate::error::AppError::bad_request("知识库名称不能为空"));
+    }
+    if name.chars().count() > 128 {
+        return Err(crate::error::AppError::bad_request("知识库名称不能超过 128 个字符"));
+    }
+    Ok(name.to_string())
+}
+
+fn normalize_kb_status(value: Option<&str>) -> Result<&str, crate::error::AppError> {
+    let status = value.unwrap_or("active").trim();
+    match status {
+        "active" | "disabled" | "archived" => Ok(status),
+        _ => Err(crate::error::AppError::bad_request("知识库状态只能是 active / disabled / archived")),
+    }
+}
+
+fn normalize_tags(values: Vec<String>) -> Vec<String> {
+    let mut tags = values
+        .into_iter()
+        .map(|tag| tag.trim().to_string())
+        .filter(|tag| !tag.is_empty())
+        .take(20)
+        .collect::<Vec<_>>();
+    tags.sort();
+    tags.dedup();
+    tags
 }
 
 #[derive(sqlx::FromRow)]

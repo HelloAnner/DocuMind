@@ -1,12 +1,16 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { FileText, RefreshCw, Upload } from "lucide-react";
+import { Download, FileText, FolderInput, RefreshCw, Trash2, Upload } from "lucide-react";
 import {
+  deleteAdminDocument,
+  downloadAdminDocumentOriginal,
   getAdminDocument,
   listAdminDocuments,
-  listKnowledgeBases,
+  listAdminKnowledgeBases,
+  moveAdminDocument,
   retryAdminDocument,
+  retryAdminDocuments,
   uploadAdminDocument,
   type AdminDocument,
   type AdminDocumentDetail,
@@ -17,6 +21,7 @@ import { DocumentDrawer, formatSize, statusLabel } from "@/components/ui/documen
 import { DocumentRow } from "@/components/ui/document-row";
 import { Panel } from "@/components/ui/panel";
 import { Segmented } from "@/components/ui/segmented";
+import { SearchInput } from "@/components/ui/search-input";
 import { Topbar } from "@/components/ui/topbar";
 
 const filters = [
@@ -30,11 +35,15 @@ export function AdminDocuments() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<AdminDocument[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
-  const [selectedKb, setSelectedKb] = useState("");
+  const [selectedKb, setSelectedKb] = useState(() =>
+    typeof window === "undefined" ? "" : new URLSearchParams(window.location.search).get("kb_id") ?? ""
+  );
   const [selectedDocId, setSelectedDocId] = useState<string>();
   const [detail, setDetail] = useState<AdminDocumentDetail>();
   const [detailLoading, setDetailLoading] = useState(false);
   const [filter, setFilter] = useState<typeof filters[number]["value"]>("all");
+  const [query, setQuery] = useState("");
+  const [targetKbId, setTargetKbId] = useState("");
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string>();
 
@@ -46,17 +55,17 @@ export function AdminDocuments() {
 
   const refresh = async () => {
     const [kbRows, docRows] = await Promise.all([
-      listKnowledgeBases(),
-      listAdminDocuments({ status: filter }),
+      listAdminKnowledgeBases(),
+      listAdminDocuments({ kb_id: selectedKb || undefined, status: filter, q: query || undefined, limit: 200 }),
     ]);
     setKnowledgeBases(kbRows);
     setDocuments(docRows);
-    if (!selectedKb && kbRows[0]) setSelectedKb(kbRows[0].id);
+    setTargetKbId((current) => current || kbRows.find((kb) => kb.id !== selectedKb)?.id || kbRows[0]?.id || "");
   };
 
   useEffect(() => {
     refresh().catch((e) => setError(e instanceof Error ? e.message : String(e)));
-  }, [filter]);
+  }, [filter, selectedKb, query]);
 
   useEffect(() => {
     if (!selectedDocId) return;
@@ -94,6 +103,42 @@ export function AdminDocuments() {
     window.setTimeout(() => refresh().catch(console.error), 1200);
   };
 
+  const handleRetryFailed = async () => {
+    const failedIds = documents
+      .filter((doc) => doc.parse_status === "parse_failed" || doc.parse_status === "parse_low_confidence")
+      .map((doc) => doc.doc_id);
+    if (failedIds.length === 0) return;
+    setError(undefined);
+    await retryAdminDocuments(failedIds);
+    await refresh();
+    window.setTimeout(() => refresh().catch(console.error), 1200);
+  };
+
+  const handleDelete = async () => {
+    if (!detail) return;
+    const confirmed = window.confirm(`删除文档“${detail.document.file_name}”？该操作会删除解析块、切片和表格数据。`);
+    if (!confirmed) return;
+    setError(undefined);
+    await deleteAdminDocument(detail.document.doc_id);
+    setSelectedDocId(undefined);
+    setDetail(undefined);
+    await refresh();
+  };
+
+  const handleMove = async () => {
+    if (!detail || !targetKbId || targetKbId === detail.document.kb_id) return;
+    setError(undefined);
+    const moved = await moveAdminDocument(detail.document.doc_id, targetKbId);
+    await refresh();
+    setDetail(await getAdminDocument(moved.doc_id));
+  };
+
+  const handleDownload = async () => {
+    if (!detail) return;
+    setError(undefined);
+    await downloadAdminDocumentOriginal(detail.document.doc_id, detail.document.file_name);
+  };
+
   return (
     <>
       <Topbar title="文档管理">
@@ -126,11 +171,8 @@ export function AdminDocuments() {
                     </small>
                   </span>
                 </div>
-                <select
-                  className="dm-select"
-                  value={selectedKbId}
-                  onChange={(event) => setSelectedKb(event.target.value)}
-                >
+                <select className="dm-select" value={selectedKb} onChange={(event) => setSelectedKb(event.target.value)}>
+                  <option value="">全部知识库</option>
                   {knowledgeBases.map((kb) => (
                     <option key={kb.id} value={kb.id}>
                       {kb.name}
@@ -149,14 +191,36 @@ export function AdminDocuments() {
             />
           </Panel>
 
-          <Panel title="Documents" action={<Segmented options={filters} value={filter} onChange={setFilter} />}>
+          <Panel
+            title="Documents"
+            action={
+              <div className="dm-document-panel-actions">
+                <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={() => handleRetryFailed().catch(console.error)}>
+                  重试失败
+                </Button>
+                <Segmented options={filters} value={filter} onChange={setFilter} />
+              </div>
+            }
+          >
+            <div className="dm-document-toolbar">
+              <SearchInput placeholder="搜索文件名或标题..." value={query} onChange={(event) => setQuery(event.target.value)} />
+              <select className="dm-select" value={selectedKb} onChange={(event) => setSelectedKb(event.target.value)}>
+                <option value="">全部知识库</option>
+                {knowledgeBases.map((kb) => (
+                  <option key={kb.id} value={kb.id}>
+                    {kb.name}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div
               className="dm-table-head dm-document-table-head"
-              style={{ gridTemplateColumns: "minmax(260px, 1fr) 64px 80px 64px 64px 70px 86px 100px" }}
+              style={{ gridTemplateColumns: "minmax(260px, 1fr) 64px 80px 54px 64px 64px 70px 86px 100px" }}
             >
               <span>文件名</span>
               <span>类型</span>
               <span>大小</span>
+              <span>页数</span>
               <span>切片</span>
               <span>表格</span>
               <span>质量</span>
@@ -169,6 +233,7 @@ export function AdminDocuments() {
                 name={doc.file_name}
                 type={doc.file_type.toUpperCase()}
                 size={formatSize(doc.file_size)}
+                pages={doc.page_count}
                 chunks={doc.chunk_count}
                 tables={doc.table_count}
                 quality={doc.quality_score}
@@ -192,6 +257,31 @@ export function AdminDocuments() {
             setDetail(undefined);
           }}
           onRetry={handleRetry}
+          actions={
+            <>
+              <label className="dm-form-field">
+                <span>移动到知识库</span>
+                <select value={targetKbId} onChange={(event) => setTargetKbId(event.target.value)}>
+                  {knowledgeBases.map((kb) => (
+                    <option key={kb.id} value={kb.id}>
+                      {kb.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="dm-drawer-action-row">
+                <Button variant="secondary" icon={<FolderInput size={14} />} onClick={() => handleMove().catch(console.error)}>
+                  移动
+                </Button>
+                <Button variant="secondary" icon={<Download size={14} />} onClick={() => handleDownload().catch(console.error)}>
+                  下载原件
+                </Button>
+              </div>
+              <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => handleDelete().catch(console.error)}>
+                删除文档
+              </Button>
+            </>
+          }
         />
       )}
     </>

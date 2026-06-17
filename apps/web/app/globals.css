@@ -616,7 +616,7 @@ a {
   color: var(--text-tertiary);
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(260px, 1fr) 64px 80px 64px 64px 70px 86px 100px;
+  grid-template-columns: minmax(260px, 1fr) 64px 80px 54px 64px 64px 70px 86px 100px;
   min-height: 50px;
   padding: 8px 0;
   text-align: left;
@@ -665,11 +665,28 @@ a {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
+  color: inherit;
   display: flex;
   flex-direction: column;
   gap: 12px;
   min-width: 0;
   padding: 16px;
+  text-align: left;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+  width: 100%;
+}
+
+.dm-knowledge-card.clickable {
+  cursor: pointer;
+}
+
+.dm-knowledge-card.clickable:hover {
+  background: var(--hover-bg);
+}
+
+.dm-knowledge-card.active {
+  background: var(--bg-tertiary);
+  border-color: rgba(0, 0, 0, 0.12);
 }
 
 .dm-knowledge-card-head {
@@ -699,6 +716,21 @@ a {
   font-size: 11px;
   justify-content: space-between;
   margin-top: auto;
+}
+
+.dm-knowledge-card-actions {
+  align-items: center;
+  border-top: 1px solid var(--border-faint);
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+  padding-top: 10px;
+}
+
+.dm-knowledge-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 /* Chat */
@@ -1277,6 +1309,145 @@ a {
   padding: 16px 0;
 }
 
+.dm-original-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 24px;
+}
+
+.dm-original-preview-head {
+  border-bottom: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding-bottom: 10px;
+}
+
+.dm-original-preview-head strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dm-original-preview-head span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dm-original-preview pre {
+  color: var(--text-secondary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  line-height: 1.75;
+  margin: 0;
+  overflow: visible;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dm-preview-note {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+
+.dm-drawer-action-stack {
+  border-top: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.dm-drawer-action-row {
+  display: flex;
+  gap: 8px;
+}
+
+.dm-drawer-action-row .dm-button {
+  flex: 1;
+}
+
+.dm-modal-overlay {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.18);
+  bottom: 0;
+  display: flex;
+  justify-content: center;
+  left: 0;
+  padding: 24px;
+  position: fixed;
+  right: 0;
+  top: 0;
+  z-index: 120;
+}
+
+.dm-modal {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  max-width: 520px;
+  padding: 20px;
+  width: 100%;
+}
+
+.dm-modal-head {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.dm-modal-head h2 {
+  font-size: 17px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.dm-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dm-form-field span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dm-form-field input,
+.dm-form-field select,
+.dm-form-field textarea {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: inherit;
+  min-height: 36px;
+  outline: 0;
+  padding: 8px 10px;
+}
+
+.dm-form-field textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.dm-modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
 .dm-chunk-row {
   display: flex;
   flex-direction: column;
@@ -1391,6 +1562,26 @@ a {
   display: grid;
   gap: 16px;
   grid-template-columns: minmax(360px, 640px) minmax(320px, 1fr);
+}
+
+.dm-document-panel-actions,
+.dm-document-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.dm-document-toolbar {
+  margin-bottom: 12px;
+}
+
+.dm-document-toolbar .dm-search-input {
+  flex: 1;
+  min-width: 260px;
+}
+
+.dm-document-toolbar .dm-select {
+  width: 220px;
 }
 
 .dm-drop-zone {

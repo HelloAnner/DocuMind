@@ -1,4 +1,6 @@
 use axum::extract::{Multipart, Path, Query, State};
+use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
@@ -15,20 +17,37 @@ use crate::document::{self, ParsedBundle, PARSER_VERSION, SCHEMA_VERSION};
 use crate::error::AppError;
 use crate::state::AppState;
 
+const PREVIEW_CHAR_LIMIT: usize = 60_000;
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route(
             "/api/admin/documents",
             get(list_documents).post(upload_document),
         )
-        .route("/api/admin/documents/:doc_id", get(get_document))
+        .route("/api/admin/documents/:doc_id", get(get_document).delete(delete_document))
+        .route("/api/admin/documents/:doc_id/original", get(download_original))
+        .route("/api/admin/documents/:doc_id/move", post(move_document))
         .route("/api/admin/documents/:doc_id/retry", post(retry_parse))
+        .route("/api/admin/documents/retry", post(retry_documents))
 }
 
 #[derive(Debug, Deserialize)]
 struct DocumentListQuery {
     kb_id: Option<Uuid>,
     status: Option<String>,
+    q: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MoveDocumentRequest {
+    kb_id: Uuid,
+}
+
+#[derive(Debug, Deserialize)]
+struct RetryDocumentsRequest {
+    doc_ids: Vec<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -57,9 +76,20 @@ struct DocumentSummary {
 struct DocumentDetail {
     document: DocumentSummary,
     latest_job: Option<ParseJobSummary>,
+    preview: DocumentPreview,
     blocks: Vec<BlockSummary>,
     chunks: Vec<ChunkSummary>,
     tables: Vec<TableSummary>,
+}
+
+#[derive(Debug, Serialize)]
+struct DocumentPreview {
+    mode: String,
+    title: String,
+    text: String,
+    truncated: bool,
+    source: String,
+    char_count: i32,
 }
 
 #[derive(Debug, Serialize)]
@@ -127,6 +157,13 @@ async fn list_documents(
 ) -> Result<Json<Vec<DocumentSummary>>, AppError> {
     require_permission(&actor, "document.upload")?;
     let pool = db(&state)?;
+    let search = query
+        .q
+        .as_ref()
+        .map(|q| q.trim())
+        .filter(|q| !q.is_empty())
+        .map(|q| format!("%{q}%"));
+    let limit = query.limit.unwrap_or(200).clamp(1, 200);
 
     let rows = sqlx::query(
         r#"
@@ -140,13 +177,16 @@ async fn list_documents(
         WHERE d.tenant_id = $1
           AND ($2::uuid IS NULL OR d.kb_id = $2)
           AND ($3::text IS NULL OR $3 = 'all' OR d.parse_status = $3)
+          AND ($4::text IS NULL OR d.file_name ILIKE $4 OR d.title ILIKE $4)
         ORDER BY d.updated_at DESC
-        LIMIT 200
+        LIMIT $5
         "#,
     )
     .bind(actor.tenant_id)
     .bind(query.kb_id)
     .bind(query.status)
+    .bind(search)
+    .bind(limit)
     .fetch_all(pool)
     .await?;
 
@@ -265,9 +305,11 @@ async fn get_document(
     let blocks = fetch_blocks(pool, doc_id, document.latest_parse_job_id).await?;
     let chunks = fetch_chunks(pool, doc_id, document.latest_parse_job_id).await?;
     let tables = fetch_tables(pool, doc_id, document.latest_parse_job_id).await?;
+    let preview = render_document_preview(&document, latest_job.as_ref(), &blocks);
     Ok(Json(DocumentDetail {
         document,
         latest_job,
+        preview,
         blocks,
         chunks,
         tables,
@@ -280,7 +322,144 @@ async fn retry_parse(
     Path(doc_id): Path<Uuid>,
 ) -> Result<Json<DocumentSummary>, AppError> {
     require_permission(&actor, "document.reprocess")?;
-    let pool = db(&state)?.clone();
+    let summary = retry_document_by_id(&state, &actor, doc_id).await?;
+    Ok(Json(summary))
+}
+
+async fn retry_documents(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Json(req): Json<RetryDocumentsRequest>,
+) -> Result<Json<Value>, AppError> {
+    require_permission(&actor, "document.reprocess")?;
+    if req.doc_ids.is_empty() {
+        return Err(AppError::bad_request("请选择要重试的文档"));
+    }
+    if req.doc_ids.len() > 50 {
+        return Err(AppError::bad_request("一次最多重试 50 个文档"));
+    }
+
+    let mut retried = 0usize;
+    for doc_id in req.doc_ids {
+        retry_document_by_id(&state, &actor, doc_id).await?;
+        retried += 1;
+    }
+    Ok(Json(serde_json::json!({ "retried": retried })))
+}
+
+async fn delete_document(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(doc_id): Path<Uuid>,
+) -> Result<Json<Value>, AppError> {
+    require_permission(&actor, "document.delete")?;
+    let pool = db(&state)?;
+    let row = sqlx::query(
+        "SELECT storage_key FROM documents WHERE tenant_id = $1 AND doc_id = $2",
+    )
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound {
+        code: "DOCUMENT_NOT_FOUND".to_string(),
+        message: "文档不存在或无权限".to_string(),
+    })?;
+    let storage_key: String = row.get("storage_key");
+
+    sqlx::query("DELETE FROM documents WHERE tenant_id = $1 AND doc_id = $2")
+        .bind(actor.tenant_id)
+        .bind(doc_id)
+        .execute(pool)
+        .await?;
+
+    let _ = tokio::fs::remove_file(blob_path(&state, &storage_key)).await;
+    Ok(Json(serde_json::json!({ "doc_id": doc_id, "status": "deleted" })))
+}
+
+async fn move_document(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(doc_id): Path<Uuid>,
+    Json(req): Json<MoveDocumentRequest>,
+) -> Result<Json<DocumentSummary>, AppError> {
+    require_permission(&actor, "document.upload")?;
+    if !actor.allowed_kb_ids.contains(&req.kb_id) && !actor.has_permission("kb.manage") {
+        return Err(AppError::kb_scope_denied());
+    }
+    let pool = db(&state)?;
+    let mut tx = pool.begin().await?;
+    let updated = sqlx::query(
+        r#"
+        UPDATE documents
+        SET kb_id = $3, updated_at = now()
+        WHERE tenant_id = $1 AND doc_id = $2
+          AND EXISTS (SELECT 1 FROM knowledge_base WHERE tenant_id = $1 AND id = $3)
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .bind(req.kb_id)
+    .execute(&mut *tx)
+    .await?;
+    if updated.rows_affected() == 0 {
+        return Err(AppError::NotFound {
+            code: "DOCUMENT_NOT_FOUND".to_string(),
+            message: "文档或目标知识库不存在".to_string(),
+        });
+    }
+    sqlx::query("UPDATE chunks SET kb_id = $2 WHERE doc_id = $1")
+        .bind(doc_id)
+        .bind(req.kb_id)
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+
+    Ok(Json(fetch_document_summary(pool, actor.tenant_id, doc_id).await?))
+}
+
+async fn download_original(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(doc_id): Path<Uuid>,
+) -> Result<Response, AppError> {
+    require_permission(&actor, "document.upload")?;
+    let pool = db(&state)?;
+    let row = sqlx::query(
+        "SELECT file_name, mime_type, storage_key FROM documents WHERE tenant_id = $1 AND doc_id = $2",
+    )
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound {
+        code: "DOCUMENT_NOT_FOUND".to_string(),
+        message: "文档不存在或无权限".to_string(),
+    })?;
+    let file_name: String = row.get("file_name");
+    let mime_type: String = row.get("mime_type");
+    let storage_key: String = row.get("storage_key");
+    let bytes = read_blob(&state, &storage_key).await?;
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_str(&mime_type).unwrap_or_else(|_| HeaderValue::from_static("application/octet-stream")),
+    );
+    headers.insert(
+        header::CONTENT_DISPOSITION,
+        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", sanitize_file_name(&file_name)))
+            .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+    );
+    Ok((StatusCode::OK, headers, bytes).into_response())
+}
+
+async fn retry_document_by_id(
+    state: &AppState,
+    actor: &crate::models::identity::CurrentActor,
+    doc_id: Uuid,
+) -> Result<DocumentSummary, AppError> {
+    let pool = db(state)?.clone();
     let row = sqlx::query(
         "SELECT doc_id, kb_id, file_name, mime_type, storage_key FROM documents WHERE tenant_id = $1 AND doc_id = $2",
     )
@@ -297,7 +476,7 @@ async fn retry_parse(
     let file_name: String = row.get("file_name");
     let mime_type: String = row.get("mime_type");
     let storage_key: String = row.get("storage_key");
-    let bytes = read_blob(&state, &storage_key).await?;
+    let bytes = read_blob(state, &storage_key).await?;
     let parse_job_id = Uuid::new_v4();
     create_parse_job(&pool, parse_job_id, doc_id).await?;
     sqlx::query("UPDATE documents SET parse_status = 'uploaded', parse_version = parse_version + 1, updated_at = now() WHERE doc_id = $1")
@@ -315,7 +494,7 @@ async fn retry_parse(
         bytes,
     );
     let summary = fetch_document_summary(&pool, actor.tenant_id, doc_id).await?;
-    Ok(Json(summary))
+    Ok(summary)
 }
 
 fn spawn_parse(
@@ -841,6 +1020,101 @@ async fn fetch_tables(
             quality: row.get("quality"),
         })
         .collect())
+}
+
+fn render_document_preview(
+    document: &DocumentSummary,
+    latest_job: Option<&ParseJobSummary>,
+    blocks: &[BlockSummary],
+) -> DocumentPreview {
+    let char_count = latest_job
+        .and_then(|job| job.char_count)
+        .unwrap_or_else(|| blocks.iter().map(|b| b.text.chars().count() as i32).sum());
+
+    if blocks.is_empty() {
+        let mode = if document.parse_status == "parse_failed" {
+            "failed"
+        } else {
+            "pending"
+        };
+        return DocumentPreview {
+            mode: mode.to_string(),
+            title: document.title.clone(),
+            text: String::new(),
+            truncated: false,
+            source: "document_blocks".to_string(),
+            char_count,
+        };
+    }
+
+    let mut text = String::new();
+    let mut written = 0usize;
+    let mut truncated = false;
+
+    for block in blocks {
+        let rendered = render_preview_block(block);
+        if rendered.trim().is_empty() {
+            continue;
+        }
+        if !append_preview_text(&mut text, &rendered, &mut written) {
+            truncated = true;
+            break;
+        }
+        if !append_preview_text(&mut text, "\n\n", &mut written) {
+            truncated = true;
+            break;
+        }
+    }
+
+    DocumentPreview {
+        mode: "parsed_text".to_string(),
+        title: document.title.clone(),
+        text: text.trim_end().to_string(),
+        truncated,
+        source: "document_blocks".to_string(),
+        char_count,
+    }
+}
+
+fn render_preview_block(block: &BlockSummary) -> String {
+    let text = block.text.trim();
+    if text.is_empty() {
+        return String::new();
+    }
+
+    if let Some(level) = block.heading_level {
+        let level = level.clamp(1, 6) as usize;
+        return format!("{} {}", "#".repeat(level), text);
+    }
+
+    if block.block_type == "table" {
+        let heading = block
+            .heading_path
+            .last()
+            .map(String::as_str)
+            .unwrap_or("表格");
+        return format!("[表格: {heading}]\n{text}");
+    }
+
+    text.to_string()
+}
+
+fn append_preview_text(target: &mut String, value: &str, written: &mut usize) -> bool {
+    if *written >= PREVIEW_CHAR_LIMIT {
+        return false;
+    }
+
+    let available = PREVIEW_CHAR_LIMIT - *written;
+    let value_len = value.chars().count();
+    if value_len <= available {
+        target.push_str(value);
+        *written += value_len;
+        return true;
+    }
+
+    target.extend(value.chars().take(available));
+    *written = PREVIEW_CHAR_LIMIT;
+    false
 }
 
 fn db(state: &AppState) -> Result<&PgPool, AppError> {

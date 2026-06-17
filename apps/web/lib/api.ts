@@ -96,6 +96,35 @@ export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
   return fetchJson("/api/knowledge-bases");
 }
 
+export async function listAdminKnowledgeBases(): Promise<KnowledgeBase[]> {
+  return fetchJson("/api/admin/knowledge-bases");
+}
+
+export interface KnowledgeBaseUpsert {
+  name: string;
+  description?: string;
+  status?: string;
+  tags?: string[];
+}
+
+export async function createKnowledgeBase(req: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+  return fetchJson("/api/admin/knowledge-bases", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function updateKnowledgeBase(kbId: string, req: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+  return fetchJson(`/api/admin/knowledge-bases/${kbId}`, {
+    method: "PUT",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function deleteKnowledgeBase(kbId: string): Promise<{ kb_id: string; status: string }> {
+  return fetchJson(`/api/admin/knowledge-bases/${kbId}`, { method: "DELETE" });
+}
+
 export interface AdminDocument {
   doc_id: string;
   kb_id: string;
@@ -171,9 +200,19 @@ export interface DocumentTable {
   quality: unknown;
 }
 
+export interface DocumentPreview {
+  mode: "parsed_text" | "pending" | "failed" | string;
+  title: string;
+  text: string;
+  truncated: boolean;
+  source: string;
+  char_count: number;
+}
+
 export interface AdminDocumentDetail {
   document: AdminDocument;
   latest_job?: ParseJobSummary;
+  preview: DocumentPreview;
   blocks: DocumentBlock[];
   chunks: DocumentChunk[];
   tables: DocumentTable[];
@@ -182,10 +221,14 @@ export interface AdminDocumentDetail {
 export async function listAdminDocuments(params?: {
   kb_id?: string;
   status?: string;
+  q?: string;
+  limit?: number;
 }): Promise<AdminDocument[]> {
   const qs = new URLSearchParams();
   if (params?.kb_id) qs.set("kb_id", params.kb_id);
   if (params?.status) qs.set("status", params.status);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.limit) qs.set("limit", String(params.limit));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/admin/documents${suffix}`);
 }
@@ -196,6 +239,47 @@ export async function getAdminDocument(docId: string): Promise<AdminDocumentDeta
 
 export async function retryAdminDocument(docId: string): Promise<AdminDocument> {
   return fetchJson(`/api/admin/documents/${docId}/retry`, { method: "POST" });
+}
+
+export async function retryAdminDocuments(docIds: string[]): Promise<{ retried: number }> {
+  return fetchJson("/api/admin/documents/retry", {
+    method: "POST",
+    body: JSON.stringify({ doc_ids: docIds }),
+  });
+}
+
+export async function deleteAdminDocument(docId: string): Promise<{ doc_id: string; status: string }> {
+  return fetchJson(`/api/admin/documents/${docId}`, { method: "DELETE" });
+}
+
+export async function moveAdminDocument(docId: string, kbId: string): Promise<AdminDocument> {
+  return fetchJson(`/api/admin/documents/${docId}/move`, {
+    method: "POST",
+    body: JSON.stringify({ kb_id: kbId }),
+  });
+}
+
+export function adminDocumentOriginalUrl(docId: string): string {
+  return `${BASE}/api/admin/documents/${docId}/original`;
+}
+
+export async function downloadAdminDocumentOriginal(docId: string, fileName: string): Promise<void> {
+  const response = await fetch(adminDocumentOriginalUrl(docId), {
+    headers: getAuthHeaders(),
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "Unknown error");
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 export async function uploadAdminDocument(kbId: string, file: File): Promise<AdminDocument> {
