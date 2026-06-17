@@ -28,9 +28,7 @@ use crate::models::message::{
     SendMessageRequest,
 };
 use crate::models::trace::{QueryTrace, RetrievalSource, RetrievalTrace};
-use crate::models::{
-    now, ActorScope, Confidence, MessageRole, MessageStatus, NoAnswerReason,
-};
+use crate::models::{now, ActorScope, Confidence, MessageRole, MessageStatus, NoAnswerReason};
 use crate::repositories::cache_key;
 use crate::repositories::{AnswerCache, CachedAnswer, ConversationRepository};
 use crate::state::AppState;
@@ -49,7 +47,10 @@ fn default_limit() -> usize {
 
 pub fn router() -> axum::Router<AppState> {
     axum::Router::new()
-        .route("/api/conversations", axum::routing::post(create_conversation).get(list_conversations))
+        .route(
+            "/api/conversations",
+            axum::routing::post(create_conversation).get(list_conversations),
+        )
         .route(
             "/api/conversations/:conversation_id",
             axum::routing::get(get_conversation).delete(delete_conversation),
@@ -91,10 +92,7 @@ async fn create_conversation(
         effective_kb_ids
     };
 
-    let title = req
-        .title
-        .clone()
-        .unwrap_or_else(|| "新会话".to_string());
+    let title = req.title.clone().unwrap_or_else(|| "新会话".to_string());
     let session = ConversationSession {
         id: Uuid::new_v4(),
         tenant_id: actor.tenant_id,
@@ -217,7 +215,10 @@ impl SseEvent {
 
     fn data_json(&self) -> serde_json::Value {
         match self {
-            SseEvent::MessageCreated { user_message_id, assistant_message_id } => json!({
+            SseEvent::MessageCreated {
+                user_message_id,
+                assistant_message_id,
+            } => json!({
                 "user_message_id": user_message_id,
                 "assistant_message_id": assistant_message_id,
             }),
@@ -225,16 +226,27 @@ impl SseEvent {
                 "message_id": message_id,
                 "text": text,
             }),
-            SseEvent::CitationDelta { message_id, citation } => json!({
+            SseEvent::CitationDelta {
+                message_id,
+                citation,
+            } => json!({
                 "message_id": message_id,
                 "citation": citation,
             }),
-            SseEvent::AnswerCompleted { message_id, confidence, usage } => json!({
+            SseEvent::AnswerCompleted {
+                message_id,
+                confidence,
+                usage,
+            } => json!({
                 "message_id": message_id,
                 "confidence": confidence.to_string(),
                 "usage": usage,
             }),
-            SseEvent::AnswerFailed { message_id, code, message } => json!({
+            SseEvent::AnswerFailed {
+                message_id,
+                code,
+                message,
+            } => json!({
                 "message_id": message_id,
                 "code": code,
                 "message": message,
@@ -290,7 +302,10 @@ async fn send_message(
         created_at: now(),
         completed_at: Some(now()),
     };
-    state.repository.create_message(user_message.clone()).await?;
+    state
+        .repository
+        .create_message(user_message.clone())
+        .await?;
 
     let assistant_message_id = Uuid::new_v4();
     let assistant_message = ConversationMessage {
@@ -313,7 +328,10 @@ async fn send_message(
         created_at: now(),
         completed_at: None,
     };
-    state.repository.create_message(assistant_message.clone()).await?;
+    state
+        .repository
+        .create_message(assistant_message.clone())
+        .await?;
 
     let (tx, rx) = unbounded_channel::<Result<Event, Infallible>>();
     let tx2 = tx.clone();
@@ -330,8 +348,17 @@ async fn send_message(
 
     tokio::spawn(async move {
         if let Err(e) = run_agent_pipeline(
-            repo, cache, kernel, config, actor, session.id, user_message.id,
-            assistant_message_id, req.content, effective_kb_ids, tx2,
+            repo,
+            cache,
+            kernel,
+            config,
+            actor,
+            session.id,
+            user_message.id,
+            assistant_message_id,
+            req.content,
+            effective_kb_ids,
+            tx2,
         )
         .await
         {
@@ -392,7 +419,9 @@ async fn run_agent_pipeline(
         };
         let (tx2, rx2) = unbounded_channel();
         tokio::spawn(async move {
-            let _ = tx2.send(AnswerStreamItem::Delta { text: cached.answer.clone() });
+            let _ = tx2.send(AnswerStreamItem::Delta {
+                text: cached.answer.clone(),
+            });
             for c in cached.citations {
                 let _ = tx2.send(AnswerStreamItem::Citation { citation: c });
             }
@@ -448,7 +477,10 @@ async fn run_agent_pipeline(
                 }
                 .to_sse_event()));
             }
-            AnswerStreamItem::Completed { confidence: c, usage: u } => {
+            AnswerStreamItem::Completed {
+                confidence: c,
+                usage: u,
+            } => {
                 confidence = c;
                 usage = u;
             }
@@ -520,7 +552,8 @@ async fn run_agent_pipeline(
     repo.save_query_trace(query_trace).await?;
 
     // Save agent trace
-    repo.save_agent_trace(assistant_message_id, trace.clone()).await?;
+    repo.save_agent_trace(assistant_message_id, trace.clone())
+        .await?;
 
     // Save citations
     let citation_models: Vec<Citation> = citations
@@ -617,8 +650,10 @@ async fn build_history(
 ) -> Result<Vec<ConversationTurn>, AppError> {
     let messages = repo.get_messages(tenant_id, conversation_id).await?;
     let mut turns: Vec<ConversationTurn> = vec![];
-    let mut user_map: std::collections::HashMap<Uuid, ConversationMessage> = std::collections::HashMap::new();
-    let mut assistant_map: std::collections::HashMap<Uuid, ConversationMessage> = std::collections::HashMap::new();
+    let mut user_map: std::collections::HashMap<Uuid, ConversationMessage> =
+        std::collections::HashMap::new();
+    let mut assistant_map: std::collections::HashMap<Uuid, ConversationMessage> =
+        std::collections::HashMap::new();
 
     for m in &messages {
         if m.id == exclude_user_message_id {
@@ -741,7 +776,9 @@ async fn retry_message(
     if failed_msg.status != MessageStatus::Failed && failed_msg.status != MessageStatus::Cancelled {
         return Err(AppError::invalid_message_state());
     }
-    let parent_id = failed_msg.parent_message_id.ok_or_else(AppError::invalid_message_state)?;
+    let parent_id = failed_msg
+        .parent_message_id
+        .ok_or_else(AppError::invalid_message_state)?;
 
     let assistant_message_id = Uuid::new_v4();
     let assistant_message = ConversationMessage {
@@ -764,7 +801,10 @@ async fn retry_message(
         created_at: now(),
         completed_at: None,
     };
-    state.repository.create_message(assistant_message.clone()).await?;
+    state
+        .repository
+        .create_message(assistant_message.clone())
+        .await?;
 
     let user_message = state
         .repository
@@ -787,8 +827,17 @@ async fn retry_message(
 
     tokio::spawn(async move {
         if let Err(e) = run_agent_pipeline(
-            repo, cache, kernel, config, actor, session.id, parent_id,
-            assistant_message_id, user_message.content, effective_kb_ids, tx2,
+            repo,
+            cache,
+            kernel,
+            config,
+            actor,
+            session.id,
+            parent_id,
+            assistant_message_id,
+            user_message.content,
+            effective_kb_ids,
+            tx2,
         )
         .await
         {
@@ -834,7 +883,12 @@ async fn submit_feedback(
     // Negative feedback invalidates the cache key for this answer's query scope.
     if feedback.rating == crate::models::feedback::Rating::Down {
         if let Some(parent_id) = message.parent_message_id {
-            if let Some(Some(parent)) = state.repository.get_message(actor.tenant_id, parent_id).await.ok() {
+            if let Some(Some(parent)) = state
+                .repository
+                .get_message(actor.tenant_id, parent_id)
+                .await
+                .ok()
+            {
                 let cache_key = cache_key(
                     "v1",
                     actor.tenant_id,
@@ -888,7 +942,9 @@ async fn delete_conversation(
     session.status = crate::models::ConversationStatus::Deleted;
     session.updated_at = now();
     state.repository.update_session(session).await?;
-    Ok(Json(json!({"conversation_id": conversation_id, "status": "deleted"})))
+    Ok(Json(
+        json!({"conversation_id": conversation_id, "status": "deleted"}),
+    ))
 }
 
 async fn get_message_traces(

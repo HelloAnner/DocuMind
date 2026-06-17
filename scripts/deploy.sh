@@ -10,11 +10,20 @@ RELEASE_ID="${RELEASE_ID:-$(date +%Y%m%d-%H%M%S)}"
 REMOTE_PG_CONTAINER="${REMOTE_PG_CONTAINER:-documind-postgres}"
 REMOTE_REDIS_CONTAINER="${REMOTE_REDIS_CONTAINER:-documind-redis}"
 REMOTE_RABBITMQ_CONTAINER="${REMOTE_RABBITMQ_CONTAINER:-documind-rabbitmq}"
+REMOTE_ES_CONTAINER="${REMOTE_ES_CONTAINER:-documind-elasticsearch}"
+REMOTE_MINIO_CONTAINER="${REMOTE_MINIO_CONTAINER:-documind-minio}"
 REMOTE_PG_USER="${REMOTE_PG_USER:-documind}"
 REMOTE_PG_DATABASE="${REMOTE_PG_DATABASE:-documind_dev}"
 REMOTE_DATABASE_URL="${REMOTE_DATABASE_URL:-postgres://documind:documind@127.0.0.1:8100/documind_dev?options=-csearch_path%3Ddocumind%2Cpublic}"
 REMOTE_REDIS_URL="${REMOTE_REDIS_URL:-redis://127.0.0.1:8101/0}"
 REMOTE_RABBITMQ_URL="${REMOTE_RABBITMQ_URL:-amqp://guest:guest@127.0.0.1:8102/%2f}"
+REMOTE_ELASTICSEARCH_URL="${REMOTE_ELASTICSEARCH_URL:-http://127.0.0.1:8104}"
+REMOTE_MINIO_ENDPOINT="${REMOTE_MINIO_ENDPOINT:-http://127.0.0.1:9010}"
+REMOTE_POSTGRES_IMAGE="${REMOTE_POSTGRES_IMAGE:-m.daocloud.io/docker.io/library/postgres:16-alpine}"
+REMOTE_REDIS_IMAGE="${REMOTE_REDIS_IMAGE:-m.daocloud.io/docker.io/library/redis:7-alpine}"
+REMOTE_RABBITMQ_IMAGE="${REMOTE_RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/rabbitmq:3-management-alpine}"
+REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}"
+REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
 
 if [[ "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
@@ -72,9 +81,10 @@ SERVER_PORT=$DEPLOY_PORT
 DATABASE_URL=$REMOTE_DATABASE_URL
 REDIS_URL=$REMOTE_REDIS_URL
 RABBITMQ_URL=$REMOTE_RABBITMQ_URL
+ELASTICSEARCH_URL=$REMOTE_ELASTICSEARCH_URL
 
 OBJECT_STORAGE_PROVIDER=minio
-OBJECT_STORAGE_ENDPOINT=http://127.0.0.1:9000
+OBJECT_STORAGE_ENDPOINT=$REMOTE_MINIO_ENDPOINT
 OBJECT_STORAGE_REGION=us-east-1
 OBJECT_STORAGE_BUCKET=documind
 OBJECT_STORAGE_ACCESS_KEY=documind
@@ -82,6 +92,7 @@ OBJECT_STORAGE_SECRET_KEY=documind
 OBJECT_STORAGE_FORCE_PATH_STYLE=true
 OBJECT_STORAGE_TLS_VERIFY=false
 OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS=900
+BLOB_STORAGE_DIR=$REMOTE_ROOT/shared/objects
 
 LLM_BASE_URL=$llm_base_url
 LLM_API_KEY=$llm_api_key
@@ -108,8 +119,8 @@ DEFAULT_TENANT_NAME=AcmeCorp
 DEFAULT_TENANT_SLUG=acme
 SUPER_ADMIN_EMAIL=ops@documind.local
 SUPER_ADMIN_PASSWORD=documind123
-ENTERPRISE_ADMIN_EMAIL=admin@documind.local
-ENTERPRISE_ADMIN_PASSWORD=documind123
+ENTERPRISE_ADMIN_EMAIL=Anner
+ENTERPRISE_ADMIN_PASSWORD=1
 STANDARD_USER_EMAIL=user@documind.local
 STANDARD_USER_PASSWORD=documind123
 
@@ -171,8 +182,15 @@ local_sha256='$local_sha256'
 pg_container='$REMOTE_PG_CONTAINER'
 redis_container='$REMOTE_REDIS_CONTAINER'
 rabbitmq_container='$REMOTE_RABBITMQ_CONTAINER'
+es_container='$REMOTE_ES_CONTAINER'
+minio_container='$REMOTE_MINIO_CONTAINER'
 pg_user='$REMOTE_PG_USER'
 pg_database='$REMOTE_PG_DATABASE'
+postgres_image='$REMOTE_POSTGRES_IMAGE'
+redis_image='$REMOTE_REDIS_IMAGE'
+rabbitmq_image='$REMOTE_RABBITMQ_IMAGE'
+es_image='$REMOTE_ES_IMAGE'
+minio_image='$REMOTE_MINIO_IMAGE'
 
 chmod 600 "\$remote_env"
 chmod +x "\$remote_release/bin/documind"
@@ -186,22 +204,94 @@ fi
 printf '%s  %s\n' "\$remote_sha256" "\$remote_release/bin/documind" > "\$remote_release/bin/documind.sha256"
 ln -sfn "\$remote_release" "\$remote_current"
 
-if ! docker ps --format '{{.Names}}' | grep -qx "\$pg_container"; then
-  echo "\$pg_container container is required but not running."
-  exit 1
+mkdir -p \
+  "\$remote_shared/postgres" \
+  "\$remote_shared/redis" \
+  "\$remote_shared/rabbitmq" \
+  "\$remote_shared/elasticsearch" \
+  "\$remote_shared/minio" \
+  "\$remote_shared/objects"
+chown -R 1000:0 "\$remote_shared/elasticsearch"
+chmod -R g+rwX "\$remote_shared/elasticsearch"
+
+container_exists() {
+  docker container inspect "\$1" >/dev/null 2>&1
+}
+
+container_running() {
+  docker ps --format '{{.Names}}' | grep -qx "\$1"
+}
+
+if ! container_exists "\$pg_container"; then
+  docker run -d --name "\$pg_container" \
+    -e POSTGRES_USER=documind \
+    -e POSTGRES_PASSWORD=documind \
+    -e POSTGRES_DB="\$pg_database" \
+    -p 127.0.0.1:8100:5432 \
+    -v "\$remote_shared/postgres:/var/lib/postgresql/data" \
+    "\$postgres_image" >/dev/null
+elif ! container_running "\$pg_container"; then
+  docker start "\$pg_container" >/dev/null
 fi
-if ! docker ps --format '{{.Names}}' | grep -qx "\$redis_container"; then
-  echo "\$redis_container container is required but not running."
-  exit 1
+
+if ! container_exists "\$redis_container"; then
+  docker run -d --name "\$redis_container" \
+    -p 127.0.0.1:8101:6379 \
+    -v "\$remote_shared/redis:/data" \
+    "\$redis_image" redis-server --appendonly yes >/dev/null
+elif ! container_running "\$redis_container"; then
+  docker start "\$redis_container" >/dev/null
 fi
-if ! docker ps --format '{{.Names}}' | grep -qx "\$rabbitmq_container"; then
-  echo "\$rabbitmq_container container is required but not running."
-  exit 1
+
+if ! container_exists "\$rabbitmq_container"; then
+  docker run -d --name "\$rabbitmq_container" \
+    -p 127.0.0.1:8102:5672 \
+    -p 127.0.0.1:8103:15672 \
+    -v "\$remote_shared/rabbitmq:/var/lib/rabbitmq" \
+    "\$rabbitmq_image" >/dev/null
+elif ! container_running "\$rabbitmq_container"; then
+  docker start "\$rabbitmq_container" >/dev/null
+fi
+
+if ! container_exists "\$es_container"; then
+  docker run -d --name "\$es_container" \
+    -e discovery.type=single-node \
+    -e xpack.security.enabled=false \
+    -e ES_JAVA_OPTS='-Xms512m -Xmx512m' \
+    -p 127.0.0.1:8104:9200 \
+    -v "\$remote_shared/elasticsearch:/usr/share/elasticsearch/data" \
+    "\$es_image" >/dev/null
+elif ! container_running "\$es_container"; then
+  docker start "\$es_container" >/dev/null
+fi
+
+if ! container_exists "\$minio_container"; then
+  docker run -d --name "\$minio_container" \
+    -e MINIO_ROOT_USER=documind \
+    -e MINIO_ROOT_PASSWORD=documind \
+    -p 127.0.0.1:9010:9000 \
+    -p 127.0.0.1:9011:9001 \
+    -v "\$remote_shared/minio:/data" \
+    "\$minio_image" server /data --console-address ':9001' >/dev/null
+elif ! container_running "\$minio_container"; then
+  docker start "\$minio_container" >/dev/null
 fi
 
 docker exec "\$pg_container" pg_isready -U "\$pg_user" -d "\$pg_database" >/dev/null
 docker exec "\$redis_container" redis-cli -n 0 ping >/dev/null
 docker exec "\$rabbitmq_container" rabbitmq-diagnostics -q ping >/dev/null
+for _ in \$(seq 1 60); do
+  if curl -fsS http://127.0.0.1:8104 >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+curl -fsS http://127.0.0.1:8104 >/dev/null
+for _ in \$(seq 1 60); do
+  if curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null 2>&1; then break; fi
+  sleep 1
+done
+curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null
+docker exec "\$minio_container" sh -c \
+  "mc alias set local http://127.0.0.1:9000 documind documind >/dev/null && mc mb -p local/documind >/dev/null 2>&1 || true"
 
 printf '%s\n' \
   "CREATE SCHEMA IF NOT EXISTS documind AUTHORIZATION \$pg_user;" \

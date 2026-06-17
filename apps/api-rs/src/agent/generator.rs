@@ -118,7 +118,12 @@ fn build_answer(query: &str, evidence: &EvidencePack) -> String {
     }
 
     if let Some(c) = evidence.chunks.first() {
-        return format!("根据《{}》第{}页，{}[1]", c.chunk.doc_title, page_str(&c.chunk.page_range), c.chunk.content);
+        return format!(
+            "根据《{}》第{}页，{}[1]",
+            c.chunk.doc_title,
+            page_str(&c.chunk.page_range),
+            c.chunk.content
+        );
     }
     "文档中未找到与该问题直接相关的信息。".to_string()
 }

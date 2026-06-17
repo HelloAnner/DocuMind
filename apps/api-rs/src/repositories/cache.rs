@@ -47,7 +47,10 @@ impl InMemoryAnswerCache {
 impl AnswerCache for InMemoryAnswerCache {
     async fn get(&self, key: &str) -> anyhow::Result<Option<CachedAnswer>> {
         let inner = self.inner.read().unwrap();
-        Ok(inner.get(key).filter(|v| v.expires_at > Utc::now()).cloned())
+        Ok(inner
+            .get(key)
+            .filter(|v| v.expires_at > Utc::now())
+            .cloned())
     }
 
     async fn set(&self, key: &str, value: CachedAnswer) -> anyhow::Result<()> {

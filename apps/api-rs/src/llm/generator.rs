@@ -49,11 +49,18 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
         let prompt_text = prompt.full_text.clone();
         let mut text_rx = self
             .client
-            .stream_text(prompt.full_text, system, config.temperature, config.max_output_tokens)
+            .stream_text(
+                prompt.full_text,
+                system,
+                config.temperature,
+                config.max_output_tokens,
+            )
             .await?;
 
-        let (tx, rx): (tokio::sync::mpsc::UnboundedSender<AnswerStreamItem>, UnboundedReceiver<AnswerStreamItem>) =
-            unbounded_channel();
+        let (tx, rx): (
+            tokio::sync::mpsc::UnboundedSender<AnswerStreamItem>,
+            UnboundedReceiver<AnswerStreamItem>,
+        ) = unbounded_channel();
         let evidence_for_verify = evidence.clone();
         let verifier = verifier.clone();
 

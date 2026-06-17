@@ -83,7 +83,10 @@ impl OpenAiClient {
     }
 
     fn chat_url(&self) -> String {
-        format!("{}/chat/completions", self.config.base_url.trim_end_matches('/'))
+        format!(
+            "{}/chat/completions",
+            self.config.base_url.trim_end_matches('/')
+        )
     }
 
     fn auth_header(&self) -> String {
@@ -99,9 +102,15 @@ impl LlmClient for OpenAiClient {
     {
         let mut messages = vec![];
         if let Some(s) = system {
-            messages.push(ChatMessage { role: "system".to_string(), content: s });
+            messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: s,
+            });
         }
-        messages.push(ChatMessage { role: "user".to_string(), content: prompt });
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+        });
 
         let req = ChatCompletionRequest {
             model: self.config.model.clone(),
@@ -140,9 +149,15 @@ impl LlmClient for OpenAiClient {
     ) -> Result<tokio::sync::mpsc::UnboundedReceiver<String>> {
         let mut messages = vec![];
         if let Some(s) = system {
-            messages.push(ChatMessage { role: "system".to_string(), content: s });
+            messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: s,
+            });
         }
-        messages.push(ChatMessage { role: "user".to_string(), content: prompt });
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+        });
 
         let req = ChatCompletionRequest {
             model: self.config.model.clone(),
@@ -228,7 +243,9 @@ fn parse_sse_event(event_text: &str) -> Option<String> {
 fn strip_json_fences(text: &str) -> String {
     let trimmed = text.trim();
     if trimmed.starts_with("```json") && trimmed.ends_with("```") {
-        let inner = trimmed.trim_start_matches("```json").trim_end_matches("```");
+        let inner = trimmed
+            .trim_start_matches("```json")
+            .trim_end_matches("```");
         return inner.trim().to_string();
     }
     if trimmed.starts_with("```") && trimmed.ends_with("```") {

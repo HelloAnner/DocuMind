@@ -5,7 +5,9 @@ use uuid::Uuid;
 
 use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
-use crate::models::conversation::{ConversationListItem, ConversationListResponse, ConversationSession};
+use crate::models::conversation::{
+    ConversationListItem, ConversationListResponse, ConversationSession,
+};
 use crate::models::feedback::Feedback;
 use crate::models::message::ConversationMessage;
 use crate::models::trace::{QueryTrace, RetrievalSource, RetrievalTrace};
@@ -115,7 +117,11 @@ impl ConversationRepository for SqlxConversationRepository {
             user_id: r.try_get("user_id").unwrap(),
             title: r.try_get("title").unwrap(),
             kb_ids: opt_uuid_list(r.try_get("kb_ids").ok()),
-            status: r.try_get::<String, _>("status").unwrap().parse().unwrap_or(ConversationStatus::Active),
+            status: r
+                .try_get::<String, _>("status")
+                .unwrap()
+                .parse()
+                .unwrap_or(ConversationStatus::Active),
             summary: r.try_get("summary").ok(),
             created_at: r.try_get("created_at").unwrap(),
             updated_at: r.try_get("updated_at").unwrap(),
@@ -238,7 +244,11 @@ impl ConversationRepository for SqlxConversationRepository {
         .bind(message.error_code)
         .bind(message.error_message)
         .bind(message.agent_mode.map(|m| m.to_string()))
-        .bind(message.prompt_versions.map(|p| serde_json::to_value(p).unwrap()))
+        .bind(
+            message
+                .prompt_versions
+                .map(|p| serde_json::to_value(p).unwrap()),
+        )
         .bind(message.created_at)
         .bind(message.completed_at)
         .bind(message.id)
@@ -311,7 +321,11 @@ impl ConversationRepository for SqlxConversationRepository {
             rewritten_query: r.try_get("rewritten_query").ok(),
             keywords: opt_string_list(r.try_get("keywords").ok()),
             hypothetical_answer: r.try_get("hypothetical_answer").ok(),
-            resolved_refs: serde_json::from_value(r.try_get("resolved_refs").unwrap_or(serde_json::Value::Array(vec![]))).unwrap_or_default(),
+            resolved_refs: serde_json::from_value(
+                r.try_get("resolved_refs")
+                    .unwrap_or(serde_json::Value::Array(vec![])),
+            )
+            .unwrap_or_default(),
             effective_kb_ids: opt_uuid_list(r.try_get("effective_kb_ids").ok()),
             rewrite_model: r.try_get("rewrite_model").unwrap(),
             created_at: r.try_get("created_at").unwrap(),
@@ -361,10 +375,18 @@ impl ConversationRepository for SqlxConversationRepository {
                 message_id: row.try_get("message_id").unwrap(),
                 chunk_id: row.try_get("chunk_id").unwrap(),
                 doc_id: row.try_get("doc_id").unwrap(),
-                source: row.try_get::<String, _>("source").unwrap().parse().unwrap_or(RetrievalSource::Rerank),
+                source: row
+                    .try_get::<String, _>("source")
+                    .unwrap()
+                    .parse()
+                    .unwrap_or(RetrievalSource::Rerank),
                 rank: row.try_get("rank").unwrap(),
                 score: row.try_get("score").unwrap(),
-                heading_path: serde_json::from_value(row.try_get("heading_path").unwrap_or(serde_json::Value::Array(vec![]))).unwrap_or_default(),
+                heading_path: serde_json::from_value(
+                    row.try_get("heading_path")
+                        .unwrap_or(serde_json::Value::Array(vec![])),
+                )
+                .unwrap_or_default(),
                 page_range: opt_i32_list(row.try_get("page_range").ok()),
                 content_preview: row.try_get("content_preview").unwrap(),
             });
@@ -418,7 +440,11 @@ impl ConversationRepository for SqlxConversationRepository {
                 doc_id: row.try_get("doc_id").unwrap(),
                 doc_title: row.try_get("doc_title").unwrap(),
                 page_range: opt_i32_list(row.try_get("page_range").ok()),
-                heading_path: serde_json::from_value(row.try_get("heading_path").unwrap_or(serde_json::Value::Array(vec![]))).unwrap_or_default(),
+                heading_path: serde_json::from_value(
+                    row.try_get("heading_path")
+                        .unwrap_or(serde_json::Value::Array(vec![])),
+                )
+                .unwrap_or_default(),
                 quote: row.try_get("quote").unwrap(),
                 score: row.try_get("score").unwrap(),
             });
@@ -426,7 +452,11 @@ impl ConversationRepository for SqlxConversationRepository {
         Ok(citations)
     }
 
-    async fn save_agent_trace(&self, assistant_message_id: Uuid, trace: AgentTrace) -> anyhow::Result<()> {
+    async fn save_agent_trace(
+        &self,
+        assistant_message_id: Uuid,
+        trace: AgentTrace,
+    ) -> anyhow::Result<()> {
         let value = serde_json::to_value(trace)?;
         sqlx::query(
             "INSERT INTO conversation_agent_traces (assistant_message_id, trace, created_at)
@@ -441,7 +471,10 @@ impl ConversationRepository for SqlxConversationRepository {
         Ok(())
     }
 
-    async fn get_agent_trace(&self, assistant_message_id: Uuid) -> anyhow::Result<Option<AgentTrace>> {
+    async fn get_agent_trace(
+        &self,
+        assistant_message_id: Uuid,
+    ) -> anyhow::Result<Option<AgentTrace>> {
         let row = sqlx::query(
             "SELECT trace FROM conversation_agent_traces WHERE assistant_message_id = $1",
         )
@@ -484,17 +517,32 @@ fn parse_message(row: sqlx::postgres::PgRow) -> anyhow::Result<ConversationMessa
         conversation_id: row.try_get("conversation_id")?,
         tenant_id: row.try_get("tenant_id")?,
         user_id: row.try_get("user_id")?,
-        role: row.try_get::<String, _>("role")?.parse().unwrap_or(MessageRole::User),
+        role: row
+            .try_get::<String, _>("role")?
+            .parse()
+            .unwrap_or(MessageRole::User),
         content: row.try_get("content")?,
-        status: row.try_get::<String, _>("status")?.parse().unwrap_or(MessageStatus::Created),
+        status: row
+            .try_get::<String, _>("status")?
+            .parse()
+            .unwrap_or(MessageStatus::Created),
         parent_message_id: row.try_get("parent_message_id").ok(),
         retry_of_message_id: row.try_get("retry_of_message_id").ok(),
         client_request_id: row.try_get("client_request_id").ok(),
-        confidence: row.try_get::<String, _>("confidence").ok().and_then(|s| s.parse().ok()),
-        no_answer_reason: row.try_get::<String, _>("no_answer_reason").ok().and_then(|s| s.parse().ok()),
+        confidence: row
+            .try_get::<String, _>("confidence")
+            .ok()
+            .and_then(|s| s.parse().ok()),
+        no_answer_reason: row
+            .try_get::<String, _>("no_answer_reason")
+            .ok()
+            .and_then(|s| s.parse().ok()),
         error_code: row.try_get("error_code").ok(),
         error_message: row.try_get("error_message").ok(),
-        agent_mode: row.try_get::<String, _>("agent_mode").ok().and_then(|s| s.parse().ok()),
+        agent_mode: row
+            .try_get::<String, _>("agent_mode")
+            .ok()
+            .and_then(|s| s.parse().ok()),
         prompt_versions,
         created_at: row.try_get("created_at")?,
         completed_at: row.try_get("completed_at").ok(),

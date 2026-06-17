@@ -41,7 +41,8 @@ impl ClaimVerifier for RuleBasedClaimVerifier {
 
         // Check that claims are followed by citation markers
         for sentence in split_sentences(answer) {
-            if sentence.contains('。') && !sentence.contains('[') && sentence.chars().count() > 10 {
+            if sentence.contains('。') && !sentence.contains('[') && sentence.chars().count() > 10
+            {
                 issues.push(format!("无引用支撑的句子: {sentence}"));
             }
         }

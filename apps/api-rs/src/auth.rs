@@ -371,7 +371,10 @@ fn auth_session_key(session_id: &str) -> String {
     format!("documind:auth:session:{session_id}")
 }
 
-pub async fn create_auth_session(state: &AppState, actor: &CurrentActor) -> Result<String, AppError> {
+pub async fn create_auth_session(
+    state: &AppState,
+    actor: &CurrentActor,
+) -> Result<String, AppError> {
     let session_id = Uuid::new_v4().to_string();
     let Some(redis) = state.redis_client.as_ref() else {
         return Ok(session_id);

@@ -95,3 +95,121 @@ export interface KnowledgeBase {
 export async function listKnowledgeBases(): Promise<KnowledgeBase[]> {
   return fetchJson("/api/knowledge-bases");
 }
+
+export interface AdminDocument {
+  doc_id: string;
+  kb_id: string;
+  kb_name: string;
+  title: string;
+  file_name: string;
+  file_type: string;
+  mime_type: string;
+  file_size: number;
+  file_sha256: string;
+  parse_status: string;
+  parse_version: number;
+  latest_parse_job_id?: string;
+  quality_score?: number;
+  chunk_count: number;
+  table_count: number;
+  page_count?: number;
+  uploaded_at: string;
+  updated_at: string;
+}
+
+export interface ParseJobSummary {
+  parse_job_id: string;
+  status: string;
+  parser_version: string;
+  quality_score?: number;
+  page_count?: number;
+  block_count?: number;
+  table_count?: number;
+  char_count?: number;
+  warnings: unknown;
+  error_code?: string;
+  error_message?: string;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+}
+
+export interface DocumentBlock {
+  block_id: string;
+  block_index: number;
+  block_type: string;
+  text: string;
+  heading_level?: number;
+  heading_path: string[];
+  page_start?: number;
+  page_end?: number;
+  slide_index?: number;
+  table_id?: string;
+}
+
+export interface DocumentChunk {
+  chunk_id: string;
+  chunk_index: number;
+  source_type: string;
+  content: string;
+  heading_path: string[];
+  page_start?: number;
+  page_end?: number;
+  slide_start?: number;
+  slide_end?: number;
+  token_count: number;
+}
+
+export interface DocumentTable {
+  table_id: string;
+  table_index: number;
+  title?: string;
+  row_count: number;
+  col_count: number;
+  headers: string[];
+  markdown: string;
+  quality: unknown;
+}
+
+export interface AdminDocumentDetail {
+  document: AdminDocument;
+  latest_job?: ParseJobSummary;
+  blocks: DocumentBlock[];
+  chunks: DocumentChunk[];
+  tables: DocumentTable[];
+}
+
+export async function listAdminDocuments(params?: {
+  kb_id?: string;
+  status?: string;
+}): Promise<AdminDocument[]> {
+  const qs = new URLSearchParams();
+  if (params?.kb_id) qs.set("kb_id", params.kb_id);
+  if (params?.status) qs.set("status", params.status);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return fetchJson(`/api/admin/documents${suffix}`);
+}
+
+export async function getAdminDocument(docId: string): Promise<AdminDocumentDetail> {
+  return fetchJson(`/api/admin/documents/${docId}`);
+}
+
+export async function retryAdminDocument(docId: string): Promise<AdminDocument> {
+  return fetchJson(`/api/admin/documents/${docId}/retry`, { method: "POST" });
+}
+
+export async function uploadAdminDocument(kbId: string, file: File): Promise<AdminDocument> {
+  const form = new FormData();
+  form.set("kb_id", kbId);
+  form.set("file", file);
+  const response = await fetch(`${BASE}/api/admin/documents`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "Unknown error");
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<AdminDocument>;
+}

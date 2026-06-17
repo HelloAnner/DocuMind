@@ -20,7 +20,7 @@ export default function HomePage() {
 
   return (
     <main style={{ height: "100vh", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
-      <span>正在进入工作空间…</span>
+      <span>正在打开 DocuMind 登录页…</span>
     </main>
   );
 }

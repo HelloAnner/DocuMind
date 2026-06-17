@@ -616,7 +616,7 @@ a {
   color: var(--text-tertiary);
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(260px, 1fr) 64px 64px 64px 86px 100px;
+  grid-template-columns: minmax(260px, 1fr) 64px 80px 64px 64px 70px 86px 100px;
   min-height: 50px;
   padding: 8px 0;
   text-align: left;
@@ -1442,6 +1442,97 @@ a {
   display: block;
   font-size: 15px;
   font-weight: 600;
+}
+
+.dm-select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  min-height: 38px;
+  padding: 0 10px;
+  width: 100%;
+}
+
+.dm-inline-error {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.18);
+  border-radius: var(--radius-sm);
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px 12px;
+}
+
+.dm-empty-state {
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+
+.dm-doc-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 24px 24px;
+}
+
+.dm-doc-inspector > div {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+}
+
+.dm-doc-inspector > div.danger {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.18);
+}
+
+.dm-doc-inspector span,
+.dm-table-preview span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dm-doc-inspector strong,
+.dm-table-preview strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.dm-doc-inspector code {
+  color: var(--text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.dm-table-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 24px 12px;
+  padding: 12px;
+}
+
+.dm-table-preview pre {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 0;
+  overflow: auto;
+  padding: 12px;
 }
 
 .dm-file-preview-head small {

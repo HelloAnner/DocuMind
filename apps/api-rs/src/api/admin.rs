@@ -13,7 +13,6 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/admin/overview", get(overview))
         .route("/api/admin/knowledge-bases", get(list_knowledge_bases))
-        .route("/api/admin/documents", get(list_documents))
         .route("/api/admin/members", get(list_members))
         .route("/api/admin/logs", get(list_logs))
 }
@@ -106,18 +105,6 @@ async fn list_knowledge_bases(
             updated_at: chrono::Utc::now(),
         },
     ]))
-}
-
-async fn list_documents(
-    ActorExtractor(actor): ActorExtractor,
-) -> Result<impl IntoResponse, crate::error::AppError> {
-    require_tenant_admin(&actor)?;
-    Ok(Json(json!([
-        { "name": "2025年度销售策略.pptx", "type": "PPTX", "size": "2.4 MB", "chunks": 47, "status": "已完成", "updated": "2025-06-10" },
-        { "name": "Q3 采购合同模板.docx", "type": "DOCX", "size": "856 KB", "chunks": 12, "status": "已完成", "updated": "2025-06-09" },
-        { "name": "员工报销政策 2025.pdf", "type": "PDF", "size": "1.2 MB", "chunks": 28, "status": "已完成", "updated": "2025-06-08" },
-        { "name": "产品安全规范 v2.1.pptx", "type": "PPTX", "size": "3.1 MB", "chunks": 0, "status": "解析中", "updated": "2025-06-08" },
-    ])))
 }
 
 async fn list_members(

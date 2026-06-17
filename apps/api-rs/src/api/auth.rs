@@ -136,7 +136,9 @@ async fn provision_portal_actor(
     roles: &[String],
 ) -> Result<crate::models::CurrentActor, AppError> {
     let Some(pool) = &state.db_pool else {
-        return Err(AppError::bad_request("database is required for portal managed auth"));
+        return Err(AppError::bad_request(
+            "database is required for portal managed auth",
+        ));
     };
     let tenant_name = portal
         .tenant_name
@@ -148,7 +150,17 @@ async fn provision_portal_actor(
         .as_deref()
         .map(slugify)
         .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| format!("tenant-{}", portal.tenant_id.to_string().chars().take(8).collect::<String>()));
+        .unwrap_or_else(|| {
+            format!(
+                "tenant-{}",
+                portal
+                    .tenant_id
+                    .to_string()
+                    .chars()
+                    .take(8)
+                    .collect::<String>()
+            )
+        });
 
     sqlx::query(
         r#"
@@ -249,7 +261,12 @@ fn map_documind_roles(portal: &PortalContext) -> Vec<String> {
         .system_roles
         .iter()
         .filter_map(|role| map_documind_role(role))
-        .chain(portal.portal_roles.iter().filter_map(|role| map_portal_role_for_documind(role)))
+        .chain(
+            portal
+                .portal_roles
+                .iter()
+                .filter_map(|role| map_portal_role_for_documind(role)),
+        )
     {
         let value = role;
         if !mapped.iter().any(|r| r == &value) {
@@ -339,7 +356,10 @@ window.location.replace(`${{prefix}}${{target}}`);
     );
     (
         StatusCode::OK,
-        [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))],
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        )],
         html,
     )
         .into_response()
@@ -362,7 +382,15 @@ fn portal_callback_error(err: AppError) -> Response {
 <body><p>门户登录失败：{}</p></body></html>"#,
         html_escape(&message)
     );
-    (status, [(header::CONTENT_TYPE, HeaderValue::from_static("text/html; charset=utf-8"))], html).into_response()
+    (
+        status,
+        [(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("text/html; charset=utf-8"),
+        )],
+        html,
+    )
+        .into_response()
 }
 
 fn default_route_for_roles(roles: &[String]) -> &'static str {

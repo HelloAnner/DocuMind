@@ -6,10 +6,10 @@ use tokio::sync::mpsc::unbounded_channel;
 use crate::models::agent::{
     AgentRequest, AgentRun, AgentTrace, AnswerStreamItem, ConversationTurn, PromptVersions,
 };
-use crate::models::{Confidence, Usage};
 use crate::models::now;
 use crate::models::rag::{ContextInput, EvidencePack, RerankInput, RetrievalInput};
 use crate::models::trace::{PlanMode, RetrievalPlan, SubQuery};
+use crate::models::{Confidence, Usage};
 
 use super::generator::{AnswerGenerator, AnswerStream};
 use super::mode::ModeSelector;
@@ -60,16 +60,16 @@ impl AgentKernel {
     pub async fn run(&self, req: AgentRequest) -> Result<AgentRun> {
         let mode = match req.options.mode {
             Some(m) => m,
-            None => self.mode_selector.select(&req.original_query, &req.history).await?,
+            None => {
+                self.mode_selector
+                    .select(&req.original_query, &req.history)
+                    .await?
+            }
         };
 
         let rewrite = self
             .query_rewriter
-            .rewrite(
-                &req.original_query,
-                &req.history,
-                &req.effective_kb_ids,
-            )
+            .rewrite(&req.original_query, &req.history, &req.effective_kb_ids)
             .await?;
 
         let mut plan = RetrievalPlan {
@@ -92,11 +92,8 @@ impl AgentKernel {
                 .clarification_question
                 .clone()
                 .unwrap_or_else(|| "能再具体说明一下吗？".to_string());
-            answer_stream = single_text_stream(
-                q,
-                Confidence::Low,
-                Some(NoAnswerReason::NeedsClarification),
-            );
+            answer_stream =
+                single_text_stream(q, Confidence::Low, Some(NoAnswerReason::NeedsClarification));
         } else {
             plan = self
                 .retrieval_planner
@@ -202,7 +199,11 @@ impl AgentKernel {
     }
 }
 
-fn single_text_stream(text: String, confidence: Confidence, _reason: Option<NoAnswerReason>) -> AnswerStream {
+fn single_text_stream(
+    text: String,
+    confidence: Confidence,
+    _reason: Option<NoAnswerReason>,
+) -> AnswerStream {
     let (tx, rx) = unbounded_channel();
     tokio::spawn(async move {
         for segment in split_text(&text) {

@@ -2,6 +2,7 @@ pub mod agent;
 pub mod api;
 pub mod auth;
 pub mod config;
+pub mod document;
 pub mod error;
 pub mod llm;
 pub mod models;
@@ -39,16 +40,11 @@ pub async fn run() -> anyhow::Result<()> {
     let addr: SocketAddr = format!("{host}:{port}").parse()?;
 
     let state = state::build_state(config).await?;
+    let api_routes = api_routes();
 
     let app = Router::new()
-        .route("/api/health", get(health))
-        .route("/api/config", get(config_snapshot))
-        .merge(api::auth_router())
-        .merge(api::system_router())
-        .merge(api::admin_router())
-        .merge(api::knowledge_router())
-        .merge(api::history_router())
-        .merge(api::conversations_router())
+        .merge(api_routes.clone())
+        .nest("/documind", api_routes)
         .fallback(static_or_spa)
         .with_state(state)
         .layer(
@@ -65,6 +61,19 @@ pub async fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn api_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/health", get(health))
+        .route("/api/config", get(config_snapshot))
+        .merge(api::auth_router())
+        .merge(api::system_router())
+        .merge(api::admin_router())
+        .merge(api::documents_router())
+        .merge(api::knowledge_router())
+        .merge(api::history_router())
+        .merge(api::conversations_router())
+}
+
 async fn health() -> impl IntoResponse {
     Json(json!({
         "ok": true,
@@ -79,6 +88,14 @@ async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
         "tenant": cfg.default_tenant_id.to_string(),
         "role": cfg.default_role,
         "auth": "jwt",
+        "storage": {
+            "blob_dir": &cfg.blob_storage_dir,
+            "object_endpoint": &cfg.object_storage_endpoint,
+            "object_bucket": &cfg.object_storage_bucket,
+            "elasticsearch": &cfg.elasticsearch_url,
+            "rabbitmq": &cfg.rabbitmq_url,
+            "redis": &cfg.redis_url,
+        },
         "embedding": "bge-large-zh-v1.5",
         "retrieval": {
             "strategy": "hybrid",

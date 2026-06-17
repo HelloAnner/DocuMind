@@ -9,6 +9,11 @@ pub struct AppConfig {
     pub server_port: u16,
     pub database_url: Option<String>,
     pub redis_url: Option<String>,
+    pub rabbitmq_url: Option<String>,
+    pub elasticsearch_url: Option<String>,
+    pub object_storage_endpoint: Option<String>,
+    pub object_storage_bucket: String,
+    pub blob_storage_dir: String,
     pub jwt_secret: String,
     pub auth_token_expire_hours: i64,
     pub auth_login_mode: String,
@@ -99,6 +104,14 @@ pub fn load_config() -> Result<AppConfig> {
         .unwrap_or(8089);
     let database_url = env::var("DATABASE_URL").ok();
     let redis_url = env::var("REDIS_URL").ok();
+    let rabbitmq_url = env::var("RABBITMQ_URL").ok();
+    let elasticsearch_url = env::var("ELASTICSEARCH_URL").ok();
+    let object_storage_endpoint = env::var("OBJECT_STORAGE_ENDPOINT").ok();
+    let object_storage_bucket =
+        env::var("OBJECT_STORAGE_BUCKET").unwrap_or_else(|_| "documind".to_string());
+    let blob_storage_dir = env::var("BLOB_STORAGE_DIR")
+        .or_else(|_| env::var("OBJECT_STORAGE_LOCAL_DIR"))
+        .unwrap_or_else(|_| "./data/objects".to_string());
     let jwt_secret =
         env::var("JWT_SECRET").unwrap_or_else(|_| "documind-dev-secret-change-me".to_string());
     let auth_token_expire_hours = env::var("AUTH_TOKEN_EXPIRE_HOURS")
@@ -106,14 +119,16 @@ pub fn load_config() -> Result<AppConfig> {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(24);
-    let legacy_portal_auth = env_bool("PORTAL_MANAGED", false) && env_bool("PORTAL_AUTH_ENABLED", false);
-    let auth_login_mode = normalize_auth_login_mode(&env::var("AUTH_LOGIN_MODE").unwrap_or_else(|_| {
-        if legacy_portal_auth {
-            "portal".to_string()
-        } else {
-            "local".to_string()
-        }
-    }));
+    let legacy_portal_auth =
+        env_bool("PORTAL_MANAGED", false) && env_bool("PORTAL_AUTH_ENABLED", false);
+    let auth_login_mode =
+        normalize_auth_login_mode(&env::var("AUTH_LOGIN_MODE").unwrap_or_else(|_| {
+            if legacy_portal_auth {
+                "portal".to_string()
+            } else {
+                "local".to_string()
+            }
+        }));
     let portal_base_url =
         env::var("PORTAL_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
     let portal_exchange_endpoint = env::var("PORTAL_EXCHANGE_ENDPOINT")
@@ -263,6 +278,11 @@ pub fn load_config() -> Result<AppConfig> {
         server_port,
         database_url,
         redis_url,
+        rabbitmq_url,
+        elasticsearch_url,
+        object_storage_endpoint,
+        object_storage_bucket,
+        blob_storage_dir,
         jwt_secret,
         auth_token_expire_hours,
         auth_login_mode,

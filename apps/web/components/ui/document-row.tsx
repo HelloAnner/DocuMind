@@ -10,6 +10,9 @@ export function DocumentRow({
   type,
   size,
   chunks,
+  tables,
+  quality,
+  kbName,
   status,
   updated,
   onClick,
@@ -18,6 +21,9 @@ export function DocumentRow({
   type: string;
   size?: string;
   chunks: number;
+  tables?: number;
+  quality?: number;
+  kbName?: string;
   status: DocumentStatus;
   updated: string;
   onClick?: () => void;
@@ -37,11 +43,14 @@ export function DocumentRow({
         <FileText size={18} />
         <span>
           <strong>{name}</strong>
+          {kbName ? <small>{kbName}</small> : null}
         </span>
       </span>
       <span className="dm-document-cell">{type}</span>
       <span className="dm-document-cell">{size}</span>
-      <span className="dm-document-cell">{status === "已完成" ? chunks : "—"}</span>
+      <span className="dm-document-cell">{status === "失败" ? "—" : chunks}</span>
+      <span className="dm-document-cell">{tables ?? 0}</span>
+      <span className="dm-document-cell">{quality == null ? "—" : `${Math.round(quality * 100)}%`}</span>
       <span className="dm-document-cell">
         <Badge tone={tone}>{status}</Badge>
       </span>

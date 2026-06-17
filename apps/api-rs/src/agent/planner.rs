@@ -5,11 +5,7 @@ use crate::models::trace::{PlanMode, RetrievalPlan, SubQuery};
 
 #[async_trait::async_trait]
 pub trait RetrievalPlanner: Send + Sync {
-    async fn plan(
-        &self,
-        original_query: &str,
-        rewrite: &RewriteOutput,
-    ) -> Result<RetrievalPlan>;
+    async fn plan(&self, original_query: &str, rewrite: &RewriteOutput) -> Result<RetrievalPlan>;
 }
 
 pub struct RuleBasedRetrievalPlanner;
@@ -22,11 +18,7 @@ impl RuleBasedRetrievalPlanner {
 
 #[async_trait::async_trait]
 impl RetrievalPlanner for RuleBasedRetrievalPlanner {
-    async fn plan(
-        &self,
-        original_query: &str,
-        rewrite: &RewriteOutput,
-    ) -> Result<RetrievalPlan> {
+    async fn plan(&self, original_query: &str, rewrite: &RewriteOutput) -> Result<RetrievalPlan> {
         let q = original_query.to_lowercase();
         let multi = q.contains("对比")
             || q.contains("区别")

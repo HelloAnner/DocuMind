@@ -5,7 +5,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 
 export default function LoginPage() {
   const { login } = useAuth();
-  const [email, setEmail] = useState("admin@documind.local");
+  const [email, setEmail] = useState("Anner");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -31,15 +31,15 @@ export default function LoginPage() {
       </div>
 
       <form className="dm-login-card" onSubmit={handleSubmit}>
-        <div className="dm-login-card-title">登录到你的工作空间</div>
+        <div className="dm-login-card-title">登录 DocuMind</div>
 
         <div className="dm-field">
-          <label>邮箱</label>
+          <label>账号</label>
           <input
-            type="email"
+            type="text"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="name@company.com"
+            placeholder="Anner"
             required
           />
         </div>
@@ -50,7 +50,7 @@ export default function LoginPage() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="默认密码 documind123"
+            placeholder="请输入密码"
             required
           />
         </div>

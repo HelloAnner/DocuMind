@@ -154,10 +154,20 @@ pub struct CitationOutput {
 
 #[derive(Debug, Clone)]
 pub enum AnswerStreamItem {
-    Delta { text: String },
-    Citation { citation: CitationOutput },
-    Completed { confidence: Confidence, usage: Option<Usage> },
-    Failed { code: String, message: String },
+    Delta {
+        text: String,
+    },
+    Citation {
+        citation: CitationOutput,
+    },
+    Completed {
+        confidence: Confidence,
+        usage: Option<Usage>,
+    },
+    Failed {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug)]

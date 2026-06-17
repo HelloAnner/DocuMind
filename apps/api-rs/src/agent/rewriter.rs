@@ -72,7 +72,9 @@ impl QueryRewriter for RuleBasedQueryRewriter {
         }
 
         let keywords: Vec<String> = rewritten
-            .split(|c: char| c.is_whitespace() || c == '？' || c == '?' || c == '，' || c == ',' || c == '、')
+            .split(|c: char| {
+                c.is_whitespace() || c == '？' || c == '?' || c == '，' || c == ',' || c == '、'
+            })
             .filter(|s| !s.is_empty() && s.chars().any(|c| !c.is_ascii_punctuation()))
             .map(|s| s.to_string())
             .collect();
@@ -129,7 +131,10 @@ mod tests {
     #[tokio::test]
     async fn asks_for_clarification_without_history() {
         let rewriter = RuleBasedQueryRewriter::new();
-        let out = rewriter.rewrite("它的违约责任是什么", &[], &[]).await.unwrap();
+        let out = rewriter
+            .rewrite("它的违约责任是什么", &[], &[])
+            .await
+            .unwrap();
         assert!(out.needs_clarification);
     }
 }

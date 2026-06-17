@@ -110,7 +110,10 @@ fn is_extensionless_route(path: &str) -> bool {
 
 fn normalize_path(path: &str) -> String {
     let decoded = percent_decode_str(path).decode_utf8_lossy();
-    let clean = decoded.trim_start_matches('/');
+    let clean = decoded
+        .trim_start_matches('/')
+        .strip_prefix("documind/")
+        .unwrap_or_else(|| decoded.trim_start_matches('/'));
     if clean.is_empty() || clean.contains("..") {
         "index.html".to_string()
     } else {

@@ -4,11 +4,8 @@ use crate::models::agent::{AgentMode, ConversationTurn};
 
 #[async_trait::async_trait]
 pub trait ModeSelector: Send + Sync {
-    async fn select(
-        &self,
-        original_query: &str,
-        history: &[ConversationTurn],
-    ) -> Result<AgentMode>;
+    async fn select(&self, original_query: &str, history: &[ConversationTurn])
+        -> Result<AgentMode>;
 }
 
 pub struct RuleBasedModeSelector;
@@ -30,8 +27,7 @@ impl ModeSelector for RuleBasedModeSelector {
         if q.contains("对比")
             || q.contains("区别")
             || q.contains("相比")
-            || q.contains("和")
-            && q.contains("比")
+            || q.contains("和") && q.contains("比")
         {
             return Ok(AgentMode::Comparer);
         }
@@ -52,10 +48,7 @@ impl ModeSelector for RuleBasedModeSelector {
         {
             return Ok(AgentMode::Analyst);
         }
-        if q.contains("它")
-            || q.contains("这个")
-            || q.contains("那份")
-            || q.contains("上面")
+        if q.contains("它") || q.contains("这个") || q.contains("那份") || q.contains("上面")
         {
             return Ok(AgentMode::Clarifier);
         }

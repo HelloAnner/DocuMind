@@ -6,11 +6,13 @@ use uuid::Uuid;
 
 use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
-use crate::models::conversation::{ConversationListItem, ConversationListResponse, ConversationSession};
-use crate::models::ConversationStatus;
+use crate::models::conversation::{
+    ConversationListItem, ConversationListResponse, ConversationSession,
+};
 use crate::models::feedback::Feedback;
 use crate::models::message::ConversationMessage;
 use crate::models::trace::{QueryTrace, RetrievalTrace};
+use crate::models::ConversationStatus;
 
 use super::trait_repo::ConversationRepository;
 
@@ -62,13 +64,15 @@ impl ConversationRepository for InMemoryConversationRepository {
         cursor: Option<String>,
     ) -> anyhow::Result<ConversationListResponse> {
         let sessions = self.sessions.read().unwrap();
-        let offset = cursor
-            .and_then(|c| c.parse::<usize>().ok())
-            .unwrap_or(0);
+        let offset = cursor.and_then(|c| c.parse::<usize>().ok()).unwrap_or(0);
 
         let mut list: Vec<&ConversationSession> = sessions
             .values()
-            .filter(|s| s.tenant_id == tenant_id && s.user_id == user_id && s.status == ConversationStatus::Active)
+            .filter(|s| {
+                s.tenant_id == tenant_id
+                    && s.user_id == user_id
+                    && s.status == ConversationStatus::Active
+            })
             .collect();
         list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
 
@@ -78,8 +82,16 @@ impl ConversationRepository for InMemoryConversationRepository {
             .skip(offset)
             .take(limit + 1)
             .map(|s| {
-                let preview = self.messages.read().unwrap().values()
-                    .filter(|m| m.conversation_id == s.id && m.role == crate::models::MessageRole::User && m.status == crate::models::MessageStatus::Completed)
+                let preview = self
+                    .messages
+                    .read()
+                    .unwrap()
+                    .values()
+                    .filter(|m| {
+                        m.conversation_id == s.id
+                            && m.role == crate::models::MessageRole::User
+                            && m.status == crate::models::MessageStatus::Completed
+                    })
                     .max_by_key(|m| m.created_at)
                     .map(|m| m.content.clone());
                 ConversationListItem {
@@ -108,7 +120,10 @@ impl ConversationRepository for InMemoryConversationRepository {
         conversation_id: Uuid,
     ) -> anyhow::Result<Option<ConversationSession>> {
         let sessions = self.sessions.read().unwrap();
-        Ok(sessions.get(&conversation_id).filter(|s| s.tenant_id == tenant_id).cloned())
+        Ok(sessions
+            .get(&conversation_id)
+            .filter(|s| s.tenant_id == tenant_id)
+            .cloned())
     }
 
     async fn update_session(&self, session: ConversationSession) -> anyhow::Result<()> {
@@ -121,7 +136,10 @@ impl ConversationRepository for InMemoryConversationRepository {
         let mut messages = self.messages.write().unwrap();
         if let Some(ref req_id) = message.client_request_id {
             let mut cr = self.client_request_ids.write().unwrap();
-            cr.insert((message.tenant_id, message.user_id, req_id.clone()), message.id);
+            cr.insert(
+                (message.tenant_id, message.user_id, req_id.clone()),
+                message.id,
+            );
         }
         messages.insert(message.id, message);
         Ok(())
@@ -133,7 +151,10 @@ impl ConversationRepository for InMemoryConversationRepository {
         message_id: Uuid,
     ) -> anyhow::Result<Option<ConversationMessage>> {
         let messages = self.messages.read().unwrap();
-        Ok(messages.get(&message_id).filter(|m| m.tenant_id == tenant_id).cloned())
+        Ok(messages
+            .get(&message_id)
+            .filter(|m| m.tenant_id == tenant_id)
+            .cloned())
     }
 
     async fn get_messages(
@@ -212,13 +233,20 @@ impl ConversationRepository for InMemoryConversationRepository {
         Ok(ct.get(&assistant_message_id).cloned().unwrap_or_default())
     }
 
-    async fn save_agent_trace(&self, assistant_message_id: Uuid, trace: AgentTrace) -> anyhow::Result<()> {
+    async fn save_agent_trace(
+        &self,
+        assistant_message_id: Uuid,
+        trace: AgentTrace,
+    ) -> anyhow::Result<()> {
         let mut at = self.agent_traces.write().unwrap();
         at.insert(assistant_message_id, trace);
         Ok(())
     }
 
-    async fn get_agent_trace(&self, assistant_message_id: Uuid) -> anyhow::Result<Option<AgentTrace>> {
+    async fn get_agent_trace(
+        &self,
+        assistant_message_id: Uuid,
+    ) -> anyhow::Result<Option<AgentTrace>> {
         let at = self.agent_traces.read().unwrap();
         Ok(at.get(&assistant_message_id).cloned())
     }
