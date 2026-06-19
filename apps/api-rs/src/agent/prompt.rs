@@ -33,6 +33,12 @@ impl BuiltinPromptRegistry {
     }
 }
 
+impl Default for BuiltinPromptRegistry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl PromptRegistry for BuiltinPromptRegistry {
     async fn compose(

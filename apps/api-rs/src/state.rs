@@ -10,7 +10,7 @@ use crate::agent::{
 use crate::config::AppConfig;
 use crate::llm::openai::{OpenAiClient, OpenAiClientConfig};
 use crate::llm::OpenAiAnswerGenerator;
-use crate::rag::{MockReranker, MockRetriever, SimpleContextAssembler};
+use crate::rag::{HttpReranker, MockReranker, MockRetriever, PgRetriever, SimpleContextAssembler};
 use crate::repositories::{
     AnswerCache, InMemoryAnswerCache, InMemoryConversationRepository, RedisAnswerCache,
     SqlxConversationRepository,
@@ -67,12 +67,32 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
             Arc::new(MockAnswerGenerator::new())
         };
 
+    let retriever: Arc<dyn crate::rag::Retriever> = if let Some(pool) = &db_pool {
+        Arc::new(PgRetriever::new(pool.clone()))
+    } else {
+        Arc::new(MockRetriever::new())
+    };
+
+    let reranker: Arc<dyn crate::rag::Reranker> = if config.rag.rerank.enabled {
+        if let Some(api_url) = &config.rag.rerank.api_url {
+            Arc::new(HttpReranker::new(
+                api_url.clone(),
+                config.rag.rerank.api_key.clone(),
+                config.rag.rerank.model.clone(),
+            )?)
+        } else {
+            Arc::new(MockReranker::new())
+        }
+    } else {
+        Arc::new(MockReranker::new())
+    };
+
     let agent_kernel = AgentKernel::new(
         Arc::new(RuleBasedModeSelector::new()),
         Arc::new(RuleBasedQueryRewriter::new()),
         Arc::new(RuleBasedRetrievalPlanner::new()),
-        Arc::new(MockRetriever::new()),
-        Arc::new(MockReranker::new()),
+        retriever,
+        reranker,
         Arc::new(SimpleContextAssembler::new()),
         answer_generator,
         Arc::new(BuiltinPromptRegistry::new()),

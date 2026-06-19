@@ -17,6 +17,7 @@ use crate::auth::ActorExtractor;
 use crate::error::AppError;
 use crate::models::agent::{
     AgentOptions, AgentRequest, AnswerStreamItem, CitationOutput, ConversationTurn,
+    RetrievalRuntimeConfig,
 };
 use crate::models::citation::Citation;
 use crate::models::conversation::{
@@ -369,6 +370,7 @@ async fn send_message(
     Ok(Sse::new(UnboundedReceiverStream::new(rx)))
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_agent_pipeline(
     repo: Arc<dyn ConversationRepository>,
     cache: Arc<dyn AnswerCache>,
@@ -384,19 +386,23 @@ async fn run_agent_pipeline(
 ) -> Result<(), AppError> {
     // Build history from previous completed QA pairs.
     let history = build_history(&repo, actor.tenant_id, conversation_id, user_message_id).await?;
+    let doc_version_hash = repo
+        .doc_version_hash(actor.tenant_id, &effective_kb_ids)
+        .await?;
 
     let cache_key = cache_key(
         "v1",
         actor.tenant_id,
         &effective_kb_ids,
         &original_query,
-        "stub-doc-version",
+        &doc_version_hash,
     );
 
     let mut stream: tokio::sync::mpsc::UnboundedReceiver<AnswerStreamItem>;
     let mut trace;
     let mode;
     let rewritten_query;
+    let mut pipeline_retrieval_traces: Vec<RetrievalTrace> = vec![];
 
     if let Some(cached) = cache.get(&cache_key).await? {
         mode = crate::models::agent::AgentMode::Answerer;
@@ -450,6 +456,7 @@ async fn run_agent_pipeline(
         mode = run.mode;
         rewritten_query = run.rewritten_query.clone();
         trace = run.trace;
+        pipeline_retrieval_traces = run.retrieval_traces;
         stream = run.answer_stream;
     }
 
@@ -551,6 +558,11 @@ async fn run_agent_pipeline(
     };
     repo.save_query_trace(query_trace).await?;
 
+    // Update trace usage before persisting the agent trace.
+    if let Some(u) = usage.clone() {
+        trace.usage = Some(u);
+    }
+
     // Save agent trace
     repo.save_agent_trace(assistant_message_id, trace.clone())
         .await?;
@@ -570,27 +582,17 @@ async fn run_agent_pipeline(
             heading_path: vec![],
             quote: c.quote.clone(),
             score: c.score,
+            source_status: c.source_status.clone(),
         })
         .collect();
     repo.save_citations(citation_models.clone()).await?;
 
-    // Save retrieval trace (use citations as evidence)
-    let retrieval_traces: Vec<RetrievalTrace> = citations
-        .iter()
-        .enumerate()
-        .map(|(i, c)| RetrievalTrace {
-            id: Uuid::new_v4(),
-            message_id: user_message_id,
-            chunk_id: c.chunk_id,
-            doc_id: c.doc_id,
-            source: RetrievalSource::Rerank,
-            rank: i as i32 + 1,
-            score: c.score,
-            heading_path: vec![],
-            page_range: c.page_range.clone(),
-            content_preview: c.quote.clone(),
-        })
-        .collect();
+    // Save retrieval traces from the pipeline. Cached answers fall back to citation evidence.
+    let retrieval_traces = if pipeline_retrieval_traces.is_empty() {
+        citation_retrieval_traces(user_message_id, &citations)
+    } else {
+        pipeline_retrieval_traces
+    };
     repo.save_retrieval_traces(retrieval_traces).await?;
 
     // Update session updated_at
@@ -611,10 +613,6 @@ async fn run_agent_pipeline(
         cache.set(&cache_key, cached).await?;
     }
 
-    // Update trace usage
-    if let Some(u) = usage {
-        trace.usage = Some(u);
-    }
     // Trace is kept in memory only for stub; could be persisted here.
     let _ = (mode, trace);
 
@@ -639,7 +637,37 @@ fn agent_options_from_config(config: &crate::config::AppConfig) -> AgentOptions 
             temperature: config.rag.generation.temperature,
             max_output_tokens: config.rag.generation.max_output_tokens,
         },
+        retrieval: RetrievalRuntimeConfig {
+            dense_top_k: config.rag.retrieval.dense_top_k,
+            bm25_top_k: config.rag.retrieval.bm25_top_k,
+            rrf_top_k: config.rag.retrieval.rrf_top_k,
+            rerank_top_k: config.rag.retrieval.effective_top_k,
+            rerank_enabled: config.rag.rerank.enabled,
+            rerank_min_score: config.rag.rerank.min_score,
+        },
     }
+}
+
+fn citation_retrieval_traces(
+    user_message_id: Uuid,
+    citations: &[CitationOutput],
+) -> Vec<RetrievalTrace> {
+    citations
+        .iter()
+        .enumerate()
+        .map(|(i, c)| RetrievalTrace {
+            id: Uuid::new_v4(),
+            message_id: user_message_id,
+            chunk_id: c.chunk_id,
+            doc_id: c.doc_id,
+            source: RetrievalSource::Rerank,
+            rank: i as i32 + 1,
+            score: c.score,
+            heading_path: vec![],
+            page_range: c.page_range.clone(),
+            content_preview: c.quote.clone(),
+        })
+        .collect()
 }
 
 async fn build_history(
@@ -883,18 +911,25 @@ async fn submit_feedback(
     // Negative feedback invalidates the cache key for this answer's query scope.
     if feedback.rating == crate::models::feedback::Rating::Down {
         if let Some(parent_id) = message.parent_message_id {
-            if let Some(Some(parent)) = state
+            if let Ok(Some(parent)) = state
                 .repository
                 .get_message(actor.tenant_id, parent_id)
                 .await
-                .ok()
             {
+                let kb_scope = match state.repository.get_query_trace(parent_id).await {
+                    Ok(Some(trace)) if !trace.effective_kb_ids.is_empty() => trace.effective_kb_ids,
+                    _ => session.kb_ids.clone(),
+                };
+                let doc_version_hash = state
+                    .repository
+                    .doc_version_hash(actor.tenant_id, &kb_scope)
+                    .await?;
                 let cache_key = cache_key(
                     "v1",
                     actor.tenant_id,
-                    &session.kb_ids,
+                    &kb_scope,
                     &parent.content,
-                    "stub-doc-version",
+                    &doc_version_hash,
                 );
                 let _ = state.cache.delete(&cache_key).await;
             }

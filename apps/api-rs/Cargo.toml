@@ -12,8 +12,10 @@ bcrypt = "0.15"
 chrono.workspace = true
 dotenvy.workspace = true
 futures.workspace = true
+hex = "0.4"
 jsonwebtoken = "9"
 pdf-extract = "0.7"
+quick-xml = "0.38"
 redis = { version = "0.25", features = ["tokio-comp"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
 roxmltree = "0.20"

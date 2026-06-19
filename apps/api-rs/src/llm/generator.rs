@@ -42,6 +42,7 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
                 page_range: c.chunk.page_range.clone(),
                 quote: c.chunk.content.clone(),
                 score: c.score,
+                source_status: "available".to_string(),
             })
             .collect();
 

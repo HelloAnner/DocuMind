@@ -8,7 +8,7 @@ use crate::models::agent::{
 };
 use crate::models::now;
 use crate::models::rag::{ContextInput, EvidencePack, RerankInput, RetrievalInput};
-use crate::models::trace::{PlanMode, RetrievalPlan, SubQuery};
+use crate::models::trace::{PlanMode, RetrievalPlan, RetrievalSource, RetrievalTrace, SubQuery};
 use crate::models::{Confidence, Usage};
 
 use super::generator::{AnswerGenerator, AnswerStream};
@@ -33,6 +33,7 @@ pub struct AgentKernel {
 }
 
 impl AgentKernel {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         mode_selector: Arc<dyn ModeSelector>,
         query_rewriter: Arc<dyn QueryRewriter>,
@@ -82,6 +83,7 @@ impl AgentKernel {
 
         let reranked: Vec<crate::models::rag::RerankedChunk>;
         let evidence: EvidencePack;
+        let mut retrieval_traces: Vec<RetrievalTrace> = vec![];
 
         let answer_stream: AnswerStream;
         let mode_reason: String;
@@ -107,23 +109,42 @@ impl AgentKernel {
                     tenant_id: req.tenant_id,
                     effective_kb_ids: req.effective_kb_ids.clone(),
                     queries,
-                    top_k: 10,
+                    top_k: req.options.retrieval.rrf_top_k.max(1),
+                    dense_top_k: req.options.retrieval.dense_top_k.max(1),
+                    bm25_top_k: req.options.retrieval.bm25_top_k.max(1),
                 })
                 .await?;
 
-            reranked = self
-                .reranker
-                .rerank(RerankInput {
-                    query: rewrite.rewritten_query.clone(),
-                    chunks: retrieved,
-                    top_k: 5,
-                })
-                .await?;
+            reranked = if req.options.retrieval.rerank_enabled {
+                self.reranker
+                    .rerank(RerankInput {
+                        query: rewrite.rewritten_query.clone(),
+                        chunks: retrieved,
+                        top_k: req.options.retrieval.rerank_top_k.max(1),
+                    })
+                    .await?
+            } else {
+                retrieved
+                    .into_iter()
+                    .take(req.options.retrieval.rerank_top_k.max(1))
+                    .enumerate()
+                    .map(|(index, chunk)| crate::models::rag::RerankedChunk {
+                        score: chunk.score,
+                        rank: index as i32 + 1,
+                        chunk,
+                    })
+                    .collect()
+            };
+            retrieval_traces = build_retrieval_traces(req.user_message_id, &reranked);
 
-            let max_score = reranked.iter().map(|r| r.score).fold(0.0, f64::max);
-            let threshold = 0.3;
+            let threshold = req.options.retrieval.rerank_min_score;
+            let filtered_reranked: Vec<_> = reranked
+                .iter()
+                .filter(|item| item.score >= threshold)
+                .cloned()
+                .collect();
 
-            if reranked.is_empty() || max_score < threshold {
+            if filtered_reranked.is_empty() {
                 mode_reason = "no relevant chunks above threshold".to_string();
                 answer_stream = single_text_stream(
                     "文档中未找到与该问题直接相关的信息。".to_string(),
@@ -135,7 +156,7 @@ impl AgentKernel {
                 evidence = self
                     .context_assembler
                     .assemble(ContextInput {
-                        chunks: reranked.clone(),
+                        chunks: filtered_reranked,
                         original_query: req.original_query.clone(),
                     })
                     .await?;
@@ -193,10 +214,42 @@ impl AgentKernel {
             mode,
             rewritten_query: Some(rewrite.rewritten_query),
             retrieval_plan: plan,
+            retrieval_traces,
             answer_stream,
             trace,
         })
     }
+}
+
+fn build_retrieval_traces(
+    message_id: uuid::Uuid,
+    reranked: &[crate::models::rag::RerankedChunk],
+) -> Vec<RetrievalTrace> {
+    reranked
+        .iter()
+        .enumerate()
+        .map(|(index, item)| RetrievalTrace {
+            id: uuid::Uuid::new_v4(),
+            message_id,
+            chunk_id: item.chunk.chunk_id,
+            doc_id: item.chunk.doc_id,
+            source: RetrievalSource::Rerank,
+            rank: index as i32 + 1,
+            score: item.score,
+            heading_path: item.chunk.heading_path.clone(),
+            page_range: item.chunk.page_range.clone(),
+            content_preview: content_preview(&item.chunk.content),
+        })
+        .collect()
+}
+
+fn content_preview(content: &str) -> String {
+    const MAX_CHARS: usize = 500;
+    let mut preview: String = content.chars().take(MAX_CHARS).collect();
+    if content.chars().count() > MAX_CHARS {
+        preview.push_str("...");
+    }
+    preview
 }
 
 fn single_text_stream(

@@ -145,6 +145,14 @@ async fn list_users(
             tenants: vec!["Acme(enterprise_admin)".to_string()],
             last_login_at: None,
         },
+        SystemUserSummary {
+            id: Uuid::new_v4(),
+            email: "dev@documind.local".to_string(),
+            name: Some("Dev".to_string()),
+            status: "active".to_string(),
+            tenants: vec!["Acme(admin)".to_string()],
+            last_login_at: None,
+        },
     ]))
 }
 

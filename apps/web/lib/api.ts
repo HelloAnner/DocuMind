@@ -3,6 +3,7 @@ import type {
   Conversation,
   CreateConversationRequest,
   FeedbackResponse,
+  MessageTraceResponse,
   Message,
   MessageListResponse,
   SendMessageRequest,
@@ -12,9 +13,14 @@ import type {
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
 export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
+  const headers =
+    init?.body instanceof FormData
+      ? { ...getAuthHeaders(), ...(init.headers ?? {}) }
+      : { "Content-Type": "application/json", ...getAuthHeaders(), ...(init?.headers ?? {}) };
+
   const response = await fetch(`${BASE}${input}`, {
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
     ...init,
+    headers,
   });
   if (!response.ok) {
     const text = await response.text().catch(() => "Unknown error");
@@ -44,6 +50,13 @@ export async function createConversation(
 
 export async function getMessages(conversationId: string): Promise<MessageListResponse> {
   return fetchJson(`/api/conversations/${conversationId}/messages`);
+}
+
+export async function getMessageTraces(
+  conversationId: string,
+  messageId: string
+): Promise<MessageTraceResponse> {
+  return fetchJson(`/api/conversations/${conversationId}/messages/${messageId}/traces`);
 }
 
 export function sendMessageStreamUrl(conversationId: string): string {
@@ -297,3 +310,31 @@ export async function uploadAdminDocument(kbId: string, file: File): Promise<Adm
   }
   return response.json() as Promise<AdminDocument>;
 }
+
+// Cloud-side aliases for backward compatibility
+export interface UploadDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  title: string;
+  file_type: string;
+  parse_status: string;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  storage_key: string;
+}
+
+export interface ReprocessDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  reused_existing_parse: boolean;
+}
+
+export const uploadDocument = uploadAdminDocument;
+export const deleteDocument = deleteAdminDocument;
+export const reprocessDocument = retryAdminDocument;

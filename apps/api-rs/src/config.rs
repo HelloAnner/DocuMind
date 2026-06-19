@@ -65,6 +65,8 @@ pub struct RetrievalConfig {
 pub struct RerankConfig {
     pub enabled: bool,
     pub model: String,
+    pub api_url: Option<String>,
+    pub api_key: Option<String>,
     pub min_score: f64,
 }
 
@@ -216,6 +218,12 @@ pub fn load_config() -> Result<AppConfig> {
                 .unwrap_or(true),
             model: env::var("RAG_RERANK_MODEL")
                 .unwrap_or_else(|_| "bge-reranker-v2-m3".to_string()),
+            api_url: env::var("RAG_RERANK_API_URL")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            api_key: env::var("RAG_RERANK_API_KEY")
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
             min_score: env::var("RAG_RERANK_THRESHOLD")
                 .ok()
                 .and_then(|v| v.parse().ok())

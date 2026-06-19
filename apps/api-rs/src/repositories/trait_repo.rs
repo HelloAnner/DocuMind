@@ -63,5 +63,7 @@ pub trait ConversationRepository: Send + Sync {
         assistant_message_id: Uuid,
     ) -> anyhow::Result<Option<AgentTrace>>;
 
+    async fn doc_version_hash(&self, tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String>;
+
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()>;
 }

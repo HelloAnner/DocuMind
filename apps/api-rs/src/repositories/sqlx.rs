@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use chrono::Utc;
+use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row};
 use uuid::Uuid;
 
@@ -27,6 +28,10 @@ impl SqlxConversationRepository {
 
 fn opt_uuid_list(value: Option<Vec<Uuid>>) -> Vec<Uuid> {
     value.unwrap_or_default()
+}
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    hex::encode(Sha256::digest(bytes))
 }
 
 #[async_trait]
@@ -420,9 +425,15 @@ impl ConversationRepository for SqlxConversationRepository {
 
     async fn get_citations(&self, assistant_message_id: Uuid) -> anyhow::Result<Vec<Citation>> {
         let rows = sqlx::query(
-            "SELECT id, assistant_message_id, index, chunk_id, doc_id, doc_title,
-                    page_range, heading_path, quote, score
-             FROM conversation_citations
+            "SELECT c.id, c.assistant_message_id, c.index, c.chunk_id, c.doc_id, c.doc_title,
+                    c.page_range, c.heading_path, c.quote, c.score,
+                    CASE
+                        WHEN d.id IS NULL THEN 'deleted'
+                        WHEN d.parse_status = 'deleted' THEN 'deleted'
+                        ELSE 'available'
+                    END AS source_status
+             FROM conversation_citations c
+             LEFT JOIN documents d ON d.id = c.doc_id
              WHERE assistant_message_id = $1
              ORDER BY index ASC",
         )
@@ -447,6 +458,7 @@ impl ConversationRepository for SqlxConversationRepository {
                 .unwrap_or_default(),
                 quote: row.try_get("quote").unwrap(),
                 score: row.try_get("score").unwrap(),
+                source_status: row.try_get("source_status").unwrap(),
             });
         }
         Ok(citations)
@@ -486,6 +498,65 @@ impl ConversationRepository for SqlxConversationRepository {
             let value: serde_json::Value = r.try_get("trace").unwrap();
             serde_json::from_value(value).unwrap()
         }))
+    }
+
+    async fn doc_version_hash(&self, tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String> {
+        if kb_ids.is_empty() {
+            return Ok("empty-scope".to_string());
+        }
+
+        let row = sqlx::query(
+            "WITH live_chunks AS (
+                SELECT doc_id,
+                       COUNT(*) AS chunk_count,
+                       MAX(created_at) AS max_chunk_created_at
+                FROM chunks
+                WHERE tenant_id = $1
+                  AND kb_id = ANY($2)
+                GROUP BY doc_id
+             ),
+             scope_docs AS (
+                SELECT d.id,
+                       d.kb_id,
+                       d.file_sha256,
+                       d.parse_status,
+                       d.parse_version,
+                       d.latest_parse_job_id,
+                       d.updated_at,
+                       COALESCE(lc.chunk_count, 0) AS chunk_count,
+                       lc.max_chunk_created_at
+                FROM documents d
+                LEFT JOIN live_chunks lc ON lc.doc_id = d.id
+                WHERE d.tenant_id = $1
+                  AND d.kb_id = ANY($2)
+             )
+             SELECT COALESCE(
+                string_agg(
+                    concat_ws('|',
+                        id::text,
+                        kb_id::text,
+                        file_sha256,
+                        parse_status,
+                        parse_version::text,
+                        COALESCE(latest_parse_job_id::text, ''),
+                        updated_at::text,
+                        chunk_count::text,
+                        COALESCE(max_chunk_created_at::text, '')
+                    ),
+                    E'\n'
+                    ORDER BY kb_id, id
+                ),
+                'no-documents'
+             ) AS version_input
+             FROM scope_docs",
+        )
+        .bind(tenant_id)
+        .bind(kb_ids)
+        .fetch_one(&self.pool)
+        .await?;
+
+        let version_input: String = row.try_get("version_input")?;
+        Ok(sha256_hex(version_input.as_bytes()))
     }
 
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {

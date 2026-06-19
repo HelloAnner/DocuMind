@@ -13,4 +13,5 @@ pub struct Citation {
     pub heading_path: Vec<String>,
     pub quote: String,
     pub score: f64,
+    pub source_status: String,
 }

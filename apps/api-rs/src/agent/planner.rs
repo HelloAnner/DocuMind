@@ -16,6 +16,12 @@ impl RuleBasedRetrievalPlanner {
     }
 }
 
+impl Default for RuleBasedRetrievalPlanner {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl RetrievalPlanner for RuleBasedRetrievalPlanner {
     async fn plan(&self, original_query: &str, rewrite: &RewriteOutput) -> Result<RetrievalPlan> {

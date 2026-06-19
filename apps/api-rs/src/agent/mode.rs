@@ -16,6 +16,12 @@ impl RuleBasedModeSelector {
     }
 }
 
+impl Default for RuleBasedModeSelector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl ModeSelector for RuleBasedModeSelector {
     async fn select(

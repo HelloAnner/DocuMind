@@ -31,6 +31,12 @@ impl RuleBasedQueryRewriter {
     }
 }
 
+impl Default for RuleBasedQueryRewriter {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl QueryRewriter for RuleBasedQueryRewriter {
     async fn rewrite(

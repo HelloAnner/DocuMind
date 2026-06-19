@@ -4,7 +4,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
 use super::{Confidence, Usage};
-use crate::models::trace::{ResolvedRef, RetrievalPlan};
+use crate::models::trace::{ResolvedRef, RetrievalPlan, RetrievalTrace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -85,6 +85,8 @@ pub struct AgentOptions {
     pub require_citation: bool,
     #[serde(default)]
     pub generation: GenerationConfig,
+    #[serde(default)]
+    pub retrieval: RetrievalRuntimeConfig,
 }
 
 fn default_tone() -> String {
@@ -107,6 +109,7 @@ impl Default for AgentOptions {
             allow_analyst_mode: true,
             require_citation: true,
             generation: GenerationConfig::default(),
+            retrieval: RetrievalRuntimeConfig::default(),
         }
     }
 }
@@ -142,6 +145,51 @@ impl Default for GenerationConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalRuntimeConfig {
+    #[serde(default = "default_dense_top_k")]
+    pub dense_top_k: usize,
+    #[serde(default = "default_bm25_top_k")]
+    pub bm25_top_k: usize,
+    #[serde(default = "default_rrf_top_k")]
+    pub rrf_top_k: usize,
+    #[serde(default = "default_rerank_top_k")]
+    pub rerank_top_k: usize,
+    #[serde(default = "default_true")]
+    pub rerank_enabled: bool,
+    #[serde(default = "default_rerank_min_score")]
+    pub rerank_min_score: f64,
+}
+
+fn default_dense_top_k() -> usize {
+    100
+}
+fn default_bm25_top_k() -> usize {
+    100
+}
+fn default_rrf_top_k() -> usize {
+    20
+}
+fn default_rerank_top_k() -> usize {
+    5
+}
+fn default_rerank_min_score() -> f64 {
+    0.3
+}
+
+impl Default for RetrievalRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            dense_top_k: default_dense_top_k(),
+            bm25_top_k: default_bm25_top_k(),
+            rrf_top_k: default_rrf_top_k(),
+            rerank_top_k: default_rerank_top_k(),
+            rerank_enabled: true,
+            rerank_min_score: default_rerank_min_score(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CitationOutput {
     pub index: i32,
     pub chunk_id: Uuid,
@@ -150,6 +198,12 @@ pub struct CitationOutput {
     pub page_range: Vec<i32>,
     pub quote: String,
     pub score: f64,
+    #[serde(default = "default_citation_source_status")]
+    pub source_status: String,
+}
+
+fn default_citation_source_status() -> String {
+    "available".to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -176,6 +230,7 @@ pub struct AgentRun {
     pub mode: AgentMode,
     pub rewritten_query: Option<String>,
     pub retrieval_plan: RetrievalPlan,
+    pub retrieval_traces: Vec<RetrievalTrace>,
     pub answer_stream: UnboundedReceiver<AnswerStreamItem>,
     pub trace: AgentTrace,
 }

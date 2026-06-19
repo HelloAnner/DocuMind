@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ArrowUp,
   Bot,
@@ -19,7 +19,8 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { useConversation } from "@/components/providers/conversation-provider";
-import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
+import { getMessageTraces } from "@/lib/api";
+import type { Citation, FeedbackReason, Message, Rating, RetrievalTrace } from "@/lib/types";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -38,6 +39,7 @@ export function ChatWorkspace() {
     availableKbs,
     selectedKbIds,
     setSelectedKbIds,
+    currentId,
     sendMessage,
     retryMessage,
     cancelMessage,
@@ -49,6 +51,9 @@ export function ChatWorkspace() {
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackCorrection, setFeedbackCorrection] = useState("");
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const [retrievalTraces, setRetrievalTraces] = useState<RetrievalTrace[]>([]);
+  const [traceLoading, setTraceLoading] = useState(false);
+  const [traceError, setTraceError] = useState<string | null>(null);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -66,6 +71,43 @@ export function ChatWorkspace() {
 
   const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
   const sourceDocs = latestAssistant?.citations ?? [];
+
+  useEffect(() => {
+    if (
+      !currentId ||
+      !latestAssistant ||
+      latestAssistant.status !== "completed" ||
+      latestAssistant.message_id.startsWith("tmp-")
+    ) {
+      setRetrievalTraces([]);
+      setTraceError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setTraceLoading(true);
+    setTraceError(null);
+    const timeout = window.setTimeout(() => {
+      getMessageTraces(currentId, latestAssistant.message_id)
+        .then((res) => {
+          if (!cancelled) setRetrievalTraces(res.retrieval_traces ?? []);
+        })
+        .catch((error) => {
+          if (!cancelled) {
+            setRetrievalTraces([]);
+            setTraceError(error instanceof Error ? error.message : "检索 trace 加载失败");
+          }
+        })
+        .finally(() => {
+          if (!cancelled) setTraceLoading(false);
+        });
+    }, 500);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeout);
+    };
+  }, [currentId, latestAssistant]);
 
   const renderStream = () => (
     <div className="dm-chat-stream">
@@ -170,11 +212,40 @@ export function ChatWorkspace() {
             <div className="dm-rail-doc-card" key={doc.index}>
               <div className="dm-rail-doc-card-head">
                 <strong>[{doc.index}] {doc.doc_title}</strong>
+                {isCitationDeleted(doc) ? <span className="deleted">原文已删除</span> : null}
               </div>
               <span className="page">
                 第 {doc.page_range.join("-")} 页 · 切片 {doc.chunk_id.slice(0, 8)}
               </span>
               <p>{doc.quote}</p>
+            </div>
+          ))}
+          {sourceDocs.length === 0 ? <p className="dm-rail-empty">暂无引用来源</p> : null}
+        </div>
+
+        <div className="dm-rail-section">
+          <div className="dm-rail-section-head">
+            <span className="dm-rail-section-title">检索证据</span>
+            <span className="dm-rail-section-hint">{retrievalTraces.length} 条 trace</span>
+          </div>
+          {traceLoading ? <p className="dm-rail-empty">加载检索 trace...</p> : null}
+          {traceError ? <p className="dm-rail-error">{traceError}</p> : null}
+          {!traceLoading && !traceError && retrievalTraces.length === 0 ? (
+            <p className="dm-rail-empty">完成回答后显示候选切片</p>
+          ) : null}
+          {retrievalTraces.map((trace) => (
+            <div className="dm-rail-doc-card" key={trace.id}>
+              <div className="dm-rail-doc-card-head">
+                <strong>#{trace.rank} {traceTitle(trace, sourceDocs)}</strong>
+                <span>{trace.score.toFixed(3)}</span>
+              </div>
+              <span className="page">
+                {sourceLabel(trace.source)} · {pageLabel(trace.page_range)} ·{" "}
+                {trace.heading_path.length > 0
+                  ? trace.heading_path.join(" / ")
+                  : `切片 ${trace.chunk_id.slice(0, 8)}`}
+              </span>
+              <p>{trace.content_preview}</p>
             </div>
           ))}
         </div>
@@ -270,6 +341,9 @@ export function ChatWorkspace() {
                 <span style={{ color: "var(--text-primary)", fontSize: 14, fontWeight: 600 }}>
                   [{selectedCitation.index}] {selectedCitation.doc_title}
                 </span>
+                {isCitationDeleted(selectedCitation) ? (
+                  <span className="dm-deleted-source-badge">原文已删除</span>
+                ) : null}
               </div>
               <p style={{ marginTop: 4 }}>
                 第 {selectedCitation.page_range.join("-")} 页 · 切片{" "}
@@ -288,7 +362,9 @@ export function ChatWorkspace() {
               <Button variant="secondary" onClick={() => setSelectedCitation(null)}>
                 关闭
               </Button>
-              <Button icon={<MapPin size={14} />}>定位到该页</Button>
+              <Button icon={<MapPin size={14} />} disabled={isCitationDeleted(selectedCitation)}>
+                定位到该页
+              </Button>
             </div>
           </aside>
         </div>
@@ -360,6 +436,9 @@ function MessageRow({
             >
               <strong>
                 [{citation.index}] {citation.doc_title}
+                {isCitationDeleted(citation) ? (
+                  <span className="dm-deleted-source-badge">原文已删除</span>
+                ) : null}
               </strong>
               <p>{citation.quote}</p>
               <span>第 {citation.page_range.join("-")} 页</span>
@@ -396,6 +475,27 @@ function confidenceLabel(c: "high" | "medium" | "low") {
   if (c === "high") return "高";
   if (c === "medium") return "中";
   return "低";
+}
+
+function traceTitle(trace: RetrievalTrace, citations: Citation[]) {
+  const citation = citations.find((item) => item.chunk_id === trace.chunk_id);
+  return citation?.doc_title ?? `文档 ${trace.doc_id.slice(0, 8)}`;
+}
+
+function pageLabel(pages: number[]) {
+  if (pages.length === 0) return "无页码";
+  return `第 ${pages.join("-")} 页`;
+}
+
+function sourceLabel(source: RetrievalTrace["source"]) {
+  if (source === "dense") return "向量召回";
+  if (source === "bm25") return "关键词召回";
+  if (source === "rrf") return "融合召回";
+  return "精排";
+}
+
+function isCitationDeleted(citation: Citation) {
+  return citation.source_status === "deleted";
 }
 
 function FeedbackDrawer({

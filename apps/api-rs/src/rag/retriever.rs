@@ -1,8 +1,15 @@
+use std::collections::{HashMap, HashSet};
+
 use anyhow::Result;
+use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
 use crate::models::rag::{RetrievalInput, RetrievedChunk};
 use crate::models::trace::RetrievalSource;
+use crate::rag::embedding::{
+    cosine_similarity, local_hash_embedding, vector_from_json, LOCAL_HASH_EMBEDDING_DIM,
+    LOCAL_HASH_EMBEDDING_MODEL,
+};
 
 #[async_trait::async_trait]
 pub trait Retriever: Send + Sync {
@@ -11,6 +18,23 @@ pub trait Retriever: Send + Sync {
 
 pub struct MockRetriever {
     corpus: Vec<RetrievedChunk>,
+}
+
+pub struct PgRetriever {
+    pool: PgPool,
+}
+
+#[derive(Debug, Clone)]
+struct CandidateChunk {
+    chunk: RetrievedChunk,
+    updated_at: chrono::DateTime<chrono::Utc>,
+    embedding: Vec<f64>,
+}
+
+impl PgRetriever {
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
+    }
 }
 
 impl Default for MockRetriever {
@@ -76,6 +100,81 @@ impl MockRetriever {
 }
 
 #[async_trait::async_trait]
+impl Retriever for PgRetriever {
+    async fn retrieve(&self, input: RetrievalInput) -> Result<Vec<RetrievedChunk>> {
+        if input.effective_kb_ids.is_empty() || input.queries.is_empty() {
+            return Ok(vec![]);
+        }
+
+        let candidate_limit = (input.dense_top_k.max(input.bm25_top_k).max(input.top_k) * 50)
+            .clamp(1000, 5000) as i64;
+        let rows = sqlx::query(
+            "SELECT c.id AS chunk_id,
+                    c.doc_id,
+                    d.title AS doc_title,
+                    c.content,
+                    c.heading_path,
+                    c.page_range,
+                    d.updated_at,
+                    e.embedding_vector
+             FROM chunks c
+             JOIN documents d ON d.id = c.doc_id
+             LEFT JOIN chunk_embeddings e
+                    ON e.chunk_id = c.id
+                   AND e.embedding_model = $4
+                   AND e.status = 'completed'
+             WHERE c.tenant_id = $1
+               AND c.kb_id = ANY($2)
+               AND d.parse_status = 'indexed'
+               AND d.latest_parse_job_id = c.parse_job_id
+             ORDER BY d.updated_at DESC, c.chunk_index ASC
+             LIMIT $3",
+        )
+        .bind(input.tenant_id)
+        .bind(&input.effective_kb_ids)
+        .bind(candidate_limit)
+        .bind(LOCAL_HASH_EMBEDDING_MODEL)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut candidates = vec![];
+        for row in rows {
+            let content: String = row.try_get("content")?;
+            let embedding_value: Option<serde_json::Value> =
+                row.try_get("embedding_vector").unwrap_or(None);
+            let embedding = embedding_value
+                .as_ref()
+                .and_then(vector_from_json)
+                .filter(|v| v.len() == LOCAL_HASH_EMBEDDING_DIM)
+                .unwrap_or_else(|| local_hash_embedding(&content));
+            let updated_at: chrono::DateTime<chrono::Utc> = row.try_get("updated_at")?;
+            candidates.push(CandidateChunk {
+                updated_at,
+                chunk: RetrievedChunk {
+                    chunk_id: row.try_get("chunk_id")?,
+                    doc_id: row.try_get("doc_id")?,
+                    doc_title: row.try_get("doc_title")?,
+                    content,
+                    heading_path: row.try_get("heading_path")?,
+                    page_range: row.try_get("page_range")?,
+                    score: 0.0,
+                    source: RetrievalSource::Rrf,
+                },
+                embedding,
+            });
+        }
+
+        Ok(hybrid_rrf(
+            &input.queries,
+            candidates,
+            input.top_k,
+            input.dense_top_k,
+            input.bm25_top_k,
+        ))
+    }
+}
+
+#[async_trait::async_trait]
 impl Retriever for MockRetriever {
     async fn retrieve(&self, input: RetrievalInput) -> Result<Vec<RetrievedChunk>> {
         let mut seen = std::collections::HashSet::new();
@@ -96,11 +195,8 @@ impl Retriever for MockRetriever {
         all.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap());
         let result: Vec<RetrievedChunk> = all
             .into_iter()
-            .take(input.top_k)
-            .map(|(_, mut c)| {
-                c.score = c.score;
-                c
-            })
+            .take(input.top_k.max(1))
+            .map(|(_, c)| c)
             .collect();
         let _ = input.effective_kb_ids;
         Ok(result)
@@ -137,4 +233,155 @@ fn overlap_score(query: &str, text: &str) -> f64 {
         score += 0.4 * (hits as f64);
     }
     score.min(1.0)
+}
+
+fn hybrid_rrf(
+    queries: &[String],
+    candidates: Vec<CandidateChunk>,
+    top_k: usize,
+    dense_top_k: usize,
+    bm25_top_k: usize,
+) -> Vec<RetrievedChunk> {
+    if candidates.is_empty() || queries.is_empty() {
+        return vec![];
+    }
+
+    let query_embeddings: Vec<Vec<f64>> = queries
+        .iter()
+        .map(|query| local_hash_embedding(query))
+        .collect();
+
+    let mut dense_scores = vec![];
+    let mut bm25_scores = vec![];
+
+    for candidate in &candidates {
+        let dense = query_embeddings
+            .iter()
+            .map(|query_embedding| cosine_similarity(query_embedding, &candidate.embedding))
+            .fold(0.0, f64::max);
+        let bm25 = queries
+            .iter()
+            .map(|query| overlap_score(&query.to_lowercase(), &candidate.chunk.content))
+            .fold(0.0, f64::max);
+
+        if dense > 0.0 {
+            dense_scores.push((candidate.chunk.chunk_id, dense));
+        }
+        if bm25 > 0.0 {
+            bm25_scores.push((candidate.chunk.chunk_id, bm25));
+        }
+    }
+
+    dense_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    bm25_scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    dense_scores.truncate(dense_top_k.max(top_k).max(1));
+    bm25_scores.truncate(bm25_top_k.max(top_k).max(1));
+
+    let dense_rank = rank_map(&dense_scores);
+    let bm25_rank = rank_map(&bm25_scores);
+    let dense_ids: HashSet<Uuid> = dense_rank.keys().copied().collect();
+    let bm25_ids: HashSet<Uuid> = bm25_rank.keys().copied().collect();
+
+    let by_id: HashMap<Uuid, CandidateChunk> = candidates
+        .into_iter()
+        .map(|candidate| (candidate.chunk.chunk_id, candidate))
+        .collect();
+
+    let mut fused = vec![];
+    for (chunk_id, candidate) in by_id {
+        let mut score = 0.0;
+        if let Some(rank) = dense_rank.get(&chunk_id) {
+            score += reciprocal_rank(*rank);
+        }
+        if let Some(rank) = bm25_rank.get(&chunk_id) {
+            score += reciprocal_rank(*rank);
+        }
+        if score == 0.0 {
+            continue;
+        }
+
+        let mut chunk = candidate.chunk;
+        chunk.score = score;
+        chunk.source = match (dense_ids.contains(&chunk_id), bm25_ids.contains(&chunk_id)) {
+            (true, true) => RetrievalSource::Rrf,
+            (true, false) => RetrievalSource::Dense,
+            (false, true) => RetrievalSource::Bm25,
+            (false, false) => RetrievalSource::Rrf,
+        };
+        fused.push((score, candidate.updated_at, chunk));
+    }
+
+    fused.sort_by(|a, b| {
+        b.0.partial_cmp(&a.0)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.1.cmp(&a.1))
+    });
+
+    fused
+        .into_iter()
+        .take(top_k.max(1))
+        .map(|(_, _, chunk)| chunk)
+        .collect()
+}
+
+fn rank_map(scores: &[(Uuid, f64)]) -> HashMap<Uuid, usize> {
+    scores
+        .iter()
+        .enumerate()
+        .map(|(index, (chunk_id, _))| (*chunk_id, index + 1))
+        .collect()
+}
+
+fn reciprocal_rank(rank: usize) -> f64 {
+    1.0 / (60.0 + rank as f64)
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+
+    #[test]
+    fn hybrid_rrf_prefers_related_chunks() {
+        let query = "付款节点".to_string();
+        let candidates = vec![
+            candidate(
+                "11111111-1111-1111-1111-111111111111",
+                "付款节点包括首付款和验收款。",
+            ),
+            candidate(
+                "22222222-2222-2222-2222-222222222222",
+                "员工差旅住宿标准按城市级别执行。",
+            ),
+        ];
+
+        let result = hybrid_rrf(&[query], candidates, 2, 100, 100);
+
+        assert_eq!(
+            result.first().map(|chunk| chunk.chunk_id),
+            Some(Uuid::parse_str("11111111-1111-1111-1111-111111111111").unwrap())
+        );
+        assert!(matches!(
+            result.first().map(|chunk| chunk.source),
+            Some(RetrievalSource::Rrf)
+        ));
+    }
+
+    fn candidate(chunk_id: &str, content: &str) -> CandidateChunk {
+        CandidateChunk {
+            chunk: RetrievedChunk {
+                chunk_id: Uuid::parse_str(chunk_id).unwrap(),
+                doc_id: Uuid::parse_str("33333333-3333-3333-3333-333333333333").unwrap(),
+                doc_title: "测试文档.docx".to_string(),
+                content: content.to_string(),
+                heading_path: vec![],
+                page_range: vec![],
+                score: 0.0,
+                source: RetrievalSource::Rrf,
+            },
+            updated_at: Utc::now(),
+            embedding: local_hash_embedding(content),
+        }
+    }
 }

@@ -15,6 +15,12 @@ impl SimpleContextAssembler {
     }
 }
 
+impl Default for SimpleContextAssembler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl ContextAssembler for SimpleContextAssembler {
     async fn assemble(&self, input: ContextInput) -> Result<EvidencePack> {

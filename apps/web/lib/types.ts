@@ -26,6 +26,8 @@ export interface Citation {
   doc_title: string;
   page_range: number[];
   quote: string;
+  score?: number;
+  source_status?: "available" | "deleted" | string;
 }
 
 export interface PromptVersions {
@@ -77,6 +79,63 @@ export interface SubmitFeedbackRequest {
 export interface MessageListResponse {
   conversation_id: UUID;
   messages: Message[];
+}
+
+export interface ResolvedRef {
+  text: string;
+  resolved_to: string;
+  source_message_id?: UUID;
+  evidence_message_id?: UUID;
+}
+
+export interface QueryTrace {
+  id: UUID;
+  message_id: UUID;
+  original_query: string;
+  rewritten_query?: string;
+  keywords: string[];
+  hypothetical_answer?: string;
+  resolved_refs: ResolvedRef[];
+  effective_kb_ids: UUID[];
+  rewrite_model: string;
+  created_at: string;
+}
+
+export interface RetrievalTrace {
+  id: UUID;
+  message_id: UUID;
+  chunk_id: UUID;
+  doc_id: UUID;
+  source: "dense" | "bm25" | "rrf" | "rerank";
+  rank: number;
+  score: number;
+  heading_path: string[];
+  page_range: number[];
+  content_preview: string;
+}
+
+export interface RetrievalPlan {
+  mode: "single" | "multi" | "single_query" | "multi_query";
+  queries: Array<{ query: string; reason: string }>;
+}
+
+export interface AgentTrace {
+  mode_reason: string;
+  rewritten_query?: string;
+  keywords: string[];
+  resolved_refs: ResolvedRef[];
+  retrieval_plan: RetrievalPlan;
+  prompt_versions: PromptVersions;
+  model: string;
+  usage?: { input_tokens: number; output_tokens: number };
+  started_at: string;
+}
+
+export interface MessageTraceResponse {
+  message_id: UUID;
+  agent_trace?: AgentTrace | null;
+  query_trace?: QueryTrace | null;
+  retrieval_traces: RetrievalTrace[];
 }
 
 export interface FeedbackResponse {

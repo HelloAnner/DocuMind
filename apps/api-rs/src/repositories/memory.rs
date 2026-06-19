@@ -16,10 +16,12 @@ use crate::models::ConversationStatus;
 
 use super::trait_repo::ConversationRepository;
 
+type ClientRequestMap = HashMap<(Uuid, Uuid, String), Uuid>;
+
 pub struct InMemoryConversationRepository {
     sessions: Arc<RwLock<HashMap<Uuid, ConversationSession>>>,
     messages: Arc<RwLock<HashMap<Uuid, ConversationMessage>>>,
-    client_request_ids: Arc<RwLock<HashMap<(Uuid, Uuid, String), Uuid>>>,
+    client_request_ids: Arc<RwLock<ClientRequestMap>>,
     query_traces: Arc<RwLock<HashMap<Uuid, QueryTrace>>>,
     retrieval_traces: Arc<RwLock<HashMap<Uuid, Vec<RetrievalTrace>>>>,
     citations: Arc<RwLock<HashMap<Uuid, Vec<Citation>>>>,
@@ -74,7 +76,7 @@ impl ConversationRepository for InMemoryConversationRepository {
                     && s.status == ConversationStatus::Active
             })
             .collect();
-        list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        list.sort_by_key(|s| std::cmp::Reverse(s.updated_at));
 
         let _total = list.len();
         let page: Vec<ConversationListItem> = list
@@ -251,6 +253,12 @@ impl ConversationRepository for InMemoryConversationRepository {
         Ok(at.get(&assistant_message_id).cloned())
     }
 
+    async fn doc_version_hash(&self, _tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String> {
+        let mut kb_sorted: Vec<String> = kb_ids.iter().map(|id| id.to_string()).collect();
+        kb_sorted.sort();
+        Ok(format!("memory:{}", kb_sorted.join(",")))
+    }
+
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {
         let mut fb = self.feedback.write().unwrap();
         fb.insert(feedback.id, feedback);
@@ -312,5 +320,18 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(dup.map(|m| m.id), Some(msg.id));
+    }
+
+    #[tokio::test]
+    async fn doc_version_hash_is_scope_order_independent() {
+        let repo = InMemoryConversationRepository::new();
+        let tenant = Uuid::new_v4();
+        let kb_a = Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap();
+        let kb_b = Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap();
+
+        let first = repo.doc_version_hash(tenant, &[kb_a, kb_b]).await.unwrap();
+        let second = repo.doc_version_hash(tenant, &[kb_b, kb_a]).await.unwrap();
+
+        assert_eq!(first, second);
     }
 }

@@ -1,6 +1,7 @@
 use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
+use sqlx::Row;
 use uuid::Uuid;
 
 use crate::auth::ActorExtractor;
@@ -20,22 +21,22 @@ async fn list_knowledge_bases(
     }
 
     if let Some(pool) = &state.db_pool {
-        let rows = sqlx::query_as::<
-            _,
-            (
-                Uuid,
-                Uuid,
-                String,
-                Option<String>,
-                String,
-                Vec<String>,
-                chrono::DateTime<chrono::Utc>,
-            ),
-        >(
-            "SELECT id, tenant_id, name, description, status, tags, updated_at
-             FROM knowledge_base
-             WHERE tenant_id = $1 AND id = ANY($2)
-             ORDER BY updated_at DESC",
+        let rows = sqlx::query(
+            "SELECT kb.id, kb.tenant_id, kb.name, kb.description, kb.status, kb.tags,
+                    COUNT(DISTINCT d.id)::bigint AS doc_count,
+                    COUNT(c.id)::bigint AS chunk_count,
+                    kb.updated_at
+             FROM knowledge_base kb
+             LEFT JOIN documents d
+                    ON d.kb_id = kb.id
+                   AND d.tenant_id = kb.tenant_id
+                   AND d.parse_status <> 'deleted'
+             LEFT JOIN chunks c
+                    ON c.doc_id = d.id
+                   AND d.latest_parse_job_id = c.parse_job_id
+             WHERE kb.tenant_id = $1 AND kb.id = ANY($2)
+             GROUP BY kb.id
+             ORDER BY kb.updated_at DESC",
         )
         .bind(actor.tenant_id)
         .bind(&actor.allowed_kb_ids)
@@ -44,22 +45,18 @@ async fn list_knowledge_bases(
 
         let summaries = rows
             .into_iter()
-            .map(
-                |(id, tenant_id, name, description, status, tags, updated_at)| {
-                    KnowledgeBaseSummary {
-                        id,
-                        tenant_id,
-                        name,
-                        description,
-                        status,
-                        tags,
-                        doc_count: 0,
-                        chunk_count: 0,
-                        query_count: 0,
-                        updated_at,
-                    }
-                },
-            )
+            .map(|row| KnowledgeBaseSummary {
+                id: row.get("id"),
+                tenant_id: row.get("tenant_id"),
+                name: row.get("name"),
+                description: row.get("description"),
+                status: row.get("status"),
+                tags: row.get("tags"),
+                doc_count: row.get("doc_count"),
+                chunk_count: row.get("chunk_count"),
+                query_count: 0,
+                updated_at: row.get("updated_at"),
+            })
             .collect();
         return Ok(Json(summaries));
     }
@@ -68,7 +65,7 @@ async fn list_knowledge_bases(
         id: state
             .config
             .default_kb_ids
-            .get(0)
+            .first()
             .copied()
             .unwrap_or_else(Uuid::nil),
         tenant_id: actor.tenant_id,

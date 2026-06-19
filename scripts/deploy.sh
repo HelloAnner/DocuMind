@@ -67,10 +67,20 @@ jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || date +%
 llm_api_key=""
 llm_base_url="http://localhost:11434/v1"
 llm_model="qwen2.5:14b"
+rerank_api_url="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_URL=' | tail -1 | cut -d= -f2- || true)"
+rerank_api_key="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_KEY=' | tail -1 | cut -d= -f2- || true)"
 if [[ -f .env ]]; then
   llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
   llm_base_url="$(grep -E '^LLM_BASE_URL=' .env | tail -1 | cut -d= -f2- || true)"
   llm_model="$(grep -E '^LLM_MODEL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_rerank_api_url="$(grep -E '^RAG_RERANK_API_URL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_rerank_api_key="$(grep -E '^RAG_RERANK_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
+  if [[ -n "$local_rerank_api_url" ]]; then
+    rerank_api_url="$local_rerank_api_url"
+  fi
+  if [[ -n "$local_rerank_api_key" ]]; then
+    rerank_api_key="$local_rerank_api_key"
+  fi
 fi
 
 cat > "$TMP_ENV" <<ENV
@@ -114,7 +124,7 @@ PORTAL_EXCHANGE_ENDPOINT=/api/auth/exchange-ticket
 DEFAULT_TENANT_ID=00000000-0000-0000-0000-000000000001
 DEFAULT_USER_ID=00000000-0000-0000-0000-000000000002
 DEFAULT_ROLE=enterprise_admin
-DEFAULT_KB_IDS=00000000-0000-0000-0000-000000000010
+DEFAULT_KB_IDS=00000000-0000-0000-0000-000000000010,00000000-0000-0000-0000-000000000011,00000000-0000-0000-0000-000000000012
 DEFAULT_TENANT_NAME=AcmeCorp
 DEFAULT_TENANT_SLUG=acme
 SUPER_ADMIN_EMAIL=ops@documind.local
@@ -136,6 +146,8 @@ RAG_RRF_TOP_K=20
 RAG_TOP_K=5
 RAG_RERANK_ENABLED=true
 RAG_RERANK_MODEL=bge-reranker-v2-m3
+RAG_RERANK_API_URL=$rerank_api_url
+RAG_RERANK_API_KEY=$rerank_api_key
 RAG_RERANK_THRESHOLD=0.3
 RAG_REQUIRE_CITATION=true
 RAG_VERIFY_CLAIMS=true

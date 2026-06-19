@@ -53,6 +53,7 @@ pub struct CitationResponse {
     pub doc_title: String,
     pub page_range: Vec<i32>,
     pub quote: String,
+    pub source_status: String,
 }
 
 impl From<&Citation> for CitationResponse {
@@ -64,6 +65,7 @@ impl From<&Citation> for CitationResponse {
             doc_title: c.doc_title.clone(),
             page_range: c.page_range.clone(),
             quote: c.quote.clone(),
+            source_status: c.source_status.clone(),
         }
     }
 }
@@ -89,4 +91,30 @@ pub struct MessageListResponse {
 pub struct RetryMessageRequest {
     #[serde(default)]
     pub stream: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn citation_response_preserves_source_status() {
+        let citation = Citation {
+            id: Uuid::new_v4(),
+            assistant_message_id: Uuid::new_v4(),
+            index: 1,
+            chunk_id: Uuid::new_v4(),
+            doc_id: Uuid::new_v4(),
+            doc_title: "已删除文档.pdf".to_string(),
+            page_range: vec![1],
+            heading_path: vec![],
+            quote: "历史引用快照".to_string(),
+            score: 0.8,
+            source_status: "deleted".to_string(),
+        };
+
+        let response = CitationResponse::from(&citation);
+
+        assert_eq!(response.source_status, "deleted");
+    }
 }

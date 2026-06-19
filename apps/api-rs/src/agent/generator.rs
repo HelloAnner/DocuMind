@@ -30,6 +30,12 @@ impl MockAnswerGenerator {
     }
 }
 
+impl Default for MockAnswerGenerator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[async_trait::async_trait]
 impl AnswerGenerator for MockAnswerGenerator {
     async fn generate(
@@ -54,6 +60,7 @@ impl AnswerGenerator for MockAnswerGenerator {
                 page_range: c.chunk.page_range.clone(),
                 quote: c.chunk.content.clone(),
                 score: c.score,
+                source_status: "available".to_string(),
             })
             .collect();
 

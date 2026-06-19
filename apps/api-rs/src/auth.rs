@@ -43,13 +43,65 @@ impl FromRequestParts<AppState> for ActorExtractor {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let claims = claims_from_headers(&state.config, &parts.headers)?;
-        if claims.sid.is_some() {
-            validate_and_renew_auth_session(state, &claims).await?;
+        let cfg = &state.config;
+        let headers = &parts.headers;
+
+        // 1. Prefer JWT Bearer authentication when an Authorization header is present.
+        if let Some(actor) = actor_from_bearer_token(state, headers).await? {
+            return Ok(ActorExtractor(actor));
         }
-        let actor = actor_from_claims(state, &claims).await?;
+
+        // 2. Fall back to trusted upstream headers (portal / development mode).
+        let tenant_id = headers
+            .get("x-tenant-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok())
+            .unwrap_or(cfg.default_tenant_id);
+        let user_id = headers
+            .get("x-user-id")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| Uuid::parse_str(v).ok())
+            .unwrap_or(cfg.default_user_id);
+        let requested_role = headers
+            .get("x-role")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| cfg.default_role.clone());
+
+        let actor = if let Some(pool) = &state.db_pool {
+            resolve_actor_from_db(pool, tenant_id, user_id, &requested_role)
+                .await
+                .ok()
+        } else {
+            None
+        };
+
+        let actor = actor.unwrap_or_else(|| {
+            build_actor_from_fallback(
+                tenant_id,
+                user_id,
+                &requested_role,
+                &requested_role,
+                &requested_role,
+                cfg.default_kb_ids.clone(),
+            )
+        });
+
         Ok(ActorExtractor(actor))
     }
+}
+
+async fn actor_from_bearer_token(
+    state: &AppState,
+    headers: &axum::http::HeaderMap,
+) -> Result<Option<CurrentActor>, AppError> {
+    let Ok(claims) = claims_from_headers(&state.config, headers) else {
+        return Ok(None);
+    };
+    if claims.sid.is_some() {
+        validate_and_renew_auth_session(state, &claims).await?;
+    }
+    actor_from_claims(state, &claims).await.map(Some)
 }
 
 pub fn claims_from_headers(
@@ -77,7 +129,7 @@ pub async fn authenticate(
     tenant_key: Option<&str>,
 ) -> Result<(CurrentActor, String), AppError> {
     if username.trim().is_empty() || password.is_empty() {
-        return Err(AppError::bad_request("请输入用户名和密码"));
+        return Err(AppError::bad_request("CREDENTIALS_REQUIRED", "请输入用户名和密码"));
     }
 
     let actor = if let Some(pool) = &state.db_pool {
@@ -228,7 +280,7 @@ pub async fn actor_from_claims(
     claims: &Claims,
 ) -> Result<CurrentActor, AppError> {
     if let Some(pool) = &state.db_pool {
-        resolve_actor_from_db(pool, claims.tenant_id, claims.sub).await
+        resolve_actor_from_db(pool, claims.tenant_id, claims.sub, &claims.role).await
     } else {
         Ok(build_actor_from_fallback(
             claims.tenant_id,
@@ -245,14 +297,16 @@ async fn resolve_actor_from_db(
     pool: &PgPool,
     tenant_id: Uuid,
     user_id: Uuid,
+    _requested_role: &str,
 ) -> Result<CurrentActor, AppError> {
-    let user = sqlx::query("SELECT id, email, name, status FROM app_user WHERE id = $1")
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?
-        .ok_or_else(AppError::unauthorized)?;
+    let user: (Uuid, String, Option<String>, String) =
+        sqlx::query_as("SELECT id, email, name, status FROM app_user WHERE id = $1")
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+            .ok_or_else(AppError::unauthorized)?;
 
-    let status: String = user.get("status");
+    let status: String = user.3;
     if status != "active" {
         return Err(AppError::unauthorized());
     }
@@ -270,8 +324,8 @@ async fn resolve_actor_from_db(
     }
 
     let allowed_kb_ids = allowed_kb_ids(pool, tenant_id, user_id, &roles).await?;
-    let email: String = user.get("email");
-    let name: Option<String> = user.try_get("name").ok();
+    let email = user.1;
+    let name = user.2;
     Ok(CurrentActor {
         user_id,
         tenant_id,

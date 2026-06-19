@@ -70,9 +70,9 @@ impl AppError {
             message: "请先登录".to_string(),
         }
     }
-    pub fn bad_request(message: impl Into<String>) -> Self {
+    pub fn bad_request(code: impl Into<String>, message: impl Into<String>) -> Self {
         Self::BadRequest {
-            code: "BAD_REQUEST".to_string(),
+            code: code.into(),
             message: message.into(),
         }
     }

@@ -137,6 +137,7 @@ async fn provision_portal_actor(
 ) -> Result<crate::models::CurrentActor, AppError> {
     let Some(pool) = &state.db_pool else {
         return Err(AppError::bad_request(
+            "PORTAL_REQUIRES_DB",
             "database is required for portal managed auth",
         ));
     };

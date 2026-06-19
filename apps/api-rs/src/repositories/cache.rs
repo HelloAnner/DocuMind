@@ -4,6 +4,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use chrono::{DateTime, TimeZone, Utc};
 use redis::AsyncCommands;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::models::agent::CitationOutput;
@@ -119,22 +120,38 @@ pub fn cache_key(
 ) -> String {
     let mut kb_sorted: Vec<String> = kb_ids.iter().map(|id| id.to_string()).collect();
     kb_sorted.sort();
-    let kb_scope_hash = format!("{:x}", hash_str(&kb_sorted.join(",")));
-    let query_fingerprint = format!("{:x}", hash_str(query));
+    let kb_scope_hash = hash_str(&kb_sorted.join(","));
+    let query_fingerprint = hash_str(query);
     format!(
         "conversation:answer:{version}:{tenant_id}:{kb_scope_hash}:{query_fingerprint}:{doc_version_hash}"
     )
 }
 
-fn hash_str(input: &str) -> u64 {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut hasher = DefaultHasher::new();
-    input.hash(&mut hasher);
-    hasher.finish()
+fn hash_str(input: &str) -> String {
+    hex::encode(Sha256::digest(input.as_bytes()))
 }
 
 #[allow(dead_code)]
 fn dt_from_timestamp(secs: i64) -> DateTime<Utc> {
     Utc.timestamp_opt(secs, 0).single().unwrap_or_else(Utc::now)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cache_key_is_stable_and_scope_order_independent() {
+        let tenant_id = Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let kb_a = Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap();
+        let kb_b = Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap();
+
+        let first = cache_key("v1", tenant_id, &[kb_a, kb_b], "付款节点是什么？", "doc-v1");
+        let second = cache_key("v1", tenant_id, &[kb_b, kb_a], "付款节点是什么？", "doc-v1");
+        let changed_doc = cache_key("v1", tenant_id, &[kb_a, kb_b], "付款节点是什么？", "doc-v2");
+
+        assert_eq!(first, second);
+        assert_ne!(first, changed_doc);
+        assert!(first.contains("doc-v1"));
+    }
 }

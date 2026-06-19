@@ -34,6 +34,8 @@ pub struct RetrievalInput {
     pub effective_kb_ids: Vec<Uuid>,
     pub queries: Vec<String>,
     pub top_k: usize,
+    pub dense_top_k: usize,
+    pub bm25_top_k: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
