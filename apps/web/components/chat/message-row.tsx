@@ -8,6 +8,32 @@ import { CitationCard, isCitationDeleted } from "./citation-card";
 import { AnswerContent } from "./answer-content";
 import type { Citation, Message } from "@/lib/types";
 
+function CitationChip({
+  citation,
+  onClick,
+}: {
+  citation: Citation;
+  onClick: (c: Citation) => void;
+}) {
+  const deleted = isCitationDeleted(citation);
+  return (
+    <button
+      type="button"
+      className={`dm-citation-chip ${deleted ? "deleted" : ""}`}
+      onClick={() => onClick(citation)}
+    >
+      <span className="dm-citation-chip-index">[{citation.index}]</span>
+      <span className="dm-citation-chip-doc">{citation.doc_title}</span>
+      {citation.page_range.length > 0 && (
+        <span className="dm-citation-chip-page">
+          · 第 {citation.page_range.join("-")} 页
+        </span>
+      )}
+      {deleted && <span className="dm-deleted-source-badge">原文已删除</span>}
+    </button>
+  );
+}
+
 interface MessageRowProps {
   message: Message;
   isStreaming: boolean;
@@ -97,10 +123,9 @@ export function MessageRow({
 
       {hasCitations && !isStreaming && (
         <div className="dm-answer-citations">
-          <div className="dm-answer-citations-title">引用来源</div>
-          <div className="dm-citation-grid">
+          <div className="dm-answer-citations-row">
             {message.citations.map((citation) => (
-              <CitationCard
+              <CitationChip
                 key={citation.index}
                 citation={citation}
                 onClick={onCitationClick}

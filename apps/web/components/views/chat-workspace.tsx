@@ -161,7 +161,7 @@ export function ChatWorkspace() {
     return (
       <aside className="dm-right-rail">
         <div className="dm-right-rail-head">
-          <h3>引用来源</h3>
+          <h3>文档预览</h3>
           <div className="dm-right-rail-head-actions">
             <IconButton
               aria-label="上一条"
@@ -188,35 +188,34 @@ export function ChatWorkspace() {
           </div>
         </div>
 
-        <div className="dm-rail-section">
-          <div className="dm-rail-section-head">
-            <span className="dm-rail-section-title">来源文档</span>
-            <span className="dm-rail-section-hint">{sourceDocs.length} 个来源</span>
+        <div className="dm-right-rail-body">
+          <div className="dm-rail-section dm-rail-source-section">
+            <div className="dm-rail-section-head">
+              <span className="dm-rail-section-title">来源文档</span>
+              <span className="dm-rail-section-hint">{sourceDocs.length} 个来源</span>
+            </div>
+            {sourceDocs.length === 0 ? (
+              <p className="dm-rail-empty">完成回答后显示引用来源</p>
+            ) : (
+              <div className="dm-rail-source-list">
+                {sourceDocs.map((doc) => (
+                  <CitationCard
+                    key={doc.index}
+                    citation={doc}
+                    active={selectedCitation?.index === doc.index}
+                    onClick={handleCitationClick}
+                  />
+                ))}
+              </div>
+            )}
           </div>
-          {sourceDocs.length === 0 ? (
-            <p className="dm-rail-empty">完成回答后显示引用来源</p>
-          ) : (
-            <div className="dm-rail-source-list">
-              {sourceDocs.map((doc) => (
-                <CitationCard
-                  key={doc.index}
-                  citation={doc}
-                  active={selectedCitation?.index === doc.index}
-                  onClick={handleCitationClick}
-                />
-              ))}
+
+          {selectedCitation && (
+            <div className="dm-rail-section dm-rail-preview-section">
+              <DocumentPreview citation={selectedCitation} />
             </div>
           )}
         </div>
-
-        {selectedCitation && (
-          <div className="dm-rail-section dm-rail-preview-section">
-            <div className="dm-rail-section-head">
-              <span className="dm-rail-section-title">文档预览</span>
-            </div>
-            <DocumentPreview citation={selectedCitation} />
-          </div>
-        )}
       </aside>
     );
   };

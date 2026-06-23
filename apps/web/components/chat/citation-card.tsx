@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText } from "lucide-react";
+import { FileText, Presentation, File } from "lucide-react";
 import type { Citation } from "@/lib/types";
 
 interface CitationCardProps {
@@ -13,8 +13,16 @@ export function isCitationDeleted(citation: Citation) {
   return citation.source_status === "deleted";
 }
 
+function docIcon(title: string) {
+  const lower = title.toLowerCase();
+  if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return Presentation;
+  if (lower.endsWith(".pdf")) return File;
+  return FileText;
+}
+
 export function CitationCard({ citation, onClick, active }: CitationCardProps) {
   const deleted = isCitationDeleted(citation);
+  const Icon = docIcon(citation.doc_title);
   return (
     <button
       type="button"
@@ -23,11 +31,13 @@ export function CitationCard({ citation, onClick, active }: CitationCardProps) {
     >
       <div className="dm-citation-card-head">
         <span className="dm-citation-card-meta">
-          <FileText size={14} />
+          <Icon size={13} />
           <span className="dm-citation-card-doc">{citation.doc_title}</span>
-          <span className="dm-citation-card-page">
-            · 第 {citation.page_range.join("-")} 页
-          </span>
+          {citation.page_range.length > 0 && (
+            <span className="dm-citation-card-page">
+              · 第 {citation.page_range.join("-")} 页
+            </span>
+          )}
         </span>
         <span className="dm-citation-card-index">[{citation.index}]</span>
       </div>
