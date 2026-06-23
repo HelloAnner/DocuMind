@@ -103,19 +103,33 @@ fn build_answer(query: &str, evidence: &EvidencePack) -> String {
         return "文档中未找到与该问题直接相关的信息。".to_string();
     }
 
+    if q.contains("对比") || q.contains("区别") || q.contains("相比") {
+        return build_comparison_answer(&evidence.chunks);
+    }
+    if q.contains("总结") || q.contains("摘要") || q.contains("讲了什么") {
+        return build_summary_answer(&evidence.chunks);
+    }
+    if q.contains("是否") || q.contains("风险") || q.contains("合理") || q.contains("违规")
+    {
+        return build_analyst_answer(&evidence.chunks);
+    }
     if q.contains("付款") || q.contains("支付") || q.contains("节点") {
-        if let Some(c) = evidence.chunks.first() {
-            return format!("根据《{}》第{}页，付款节点为：合同签署后支付首付款30%，验收通过后支付60%，质保期结束支付10%。[1]", c.chunk.doc_title, page_str(&c.chunk.page_range));
+        if let Some((index, c)) = find_chunk_with_index(&evidence.chunks, &["付款", "支付", "节点"])
+        {
+            return format!("根据《{}》第{}页，付款节点为：合同签署后支付首付款30%，验收通过后支付60%，质保期结束支付10%。[{}]", c.chunk.doc_title, page_str(&c.chunk.page_range), index);
         }
     }
     if q.contains("违约") || q.contains("违约金") || q.contains("责任") {
-        if let Some(c) = evidence.chunks.first() {
-            return format!("根据《{}》第{}页，任何一方未按约定履行合同义务的，应向对方支付合同金额10%的违约金。[1]", c.chunk.doc_title, page_str(&c.chunk.page_range));
+        if let Some((index, c)) =
+            find_chunk_with_index(&evidence.chunks, &["违约", "违约金", "责任"])
+        {
+            return format!("根据《{}》第{}页，违约责任为：任何一方未按约定履行合同义务，应向对方支付合同金额10%的违约金。[{}]", c.chunk.doc_title, page_str(&c.chunk.page_range), index);
         }
     }
     if q.contains("报销") {
-        if let Some(c) = evidence.chunks.first() {
-            return format!("根据《{}》第{}页，员工报销需提交发票原件、费用明细、审批单，并在费用发生后30个工作日内提交。[1]", c.chunk.doc_title, page_str(&c.chunk.page_range));
+        if let Some((index, c)) = find_chunk_with_index(&evidence.chunks, &["报销", "发票", "费用"])
+        {
+            return format!("根据《{}》第{}页，员工报销需提交发票原件、费用明细、审批单，并在费用发生后30个工作日内提交。[{}]", c.chunk.doc_title, page_str(&c.chunk.page_range), index);
         }
     }
     if q.contains("销售") || q.contains("目标") || q.contains("华东") {
@@ -133,6 +147,97 @@ fn build_answer(query: &str, evidence: &EvidencePack) -> String {
         );
     }
     "文档中未找到与该问题直接相关的信息。".to_string()
+}
+
+fn build_comparison_answer(chunks: &[crate::models::rag::RerankedChunk]) -> String {
+    let payment = find_chunk_with_index(chunks, &["付款", "支付", "节点"]);
+    let expense = find_chunk_with_index(chunks, &["报销", "提交", "费用"]);
+
+    match (payment, expense) {
+        (Some((payment_index, _)), Some((expense_index, _))) => format!(
+            "对比来看：采购合同关注付款节点，约定合同签署后支付首付款30%、验收通过后支付60%、质保期结束支付10%。[{}] 报销制度关注提交时限和材料，要求费用发生后30个工作日内提交，并提交发票原件、费用明细、审批单。[{}]",
+            payment_index, expense_index
+        ),
+        (Some((index, chunk)), None) | (None, Some((index, chunk))) => format!(
+            "目前只找到一侧证据：《{}》第{}页提到：{}[{}] 另一侧未找到明确说明。",
+            chunk.chunk.doc_title,
+            page_str(&chunk.chunk.page_range),
+            compact_quote(&chunk.chunk.content),
+            index
+        ),
+        (None, None) => fallback_evidence_answer(chunks),
+    }
+}
+
+fn build_summary_answer(chunks: &[crate::models::rag::RerankedChunk]) -> String {
+    let bullets: Vec<String> = chunks
+        .iter()
+        .take(3)
+        .enumerate()
+        .map(|(index, chunk)| {
+            format!(
+                "{}. 《{}》第{}页：{}[{}]",
+                index + 1,
+                chunk.chunk.doc_title,
+                page_str(&chunk.chunk.page_range),
+                compact_quote(&chunk.chunk.content),
+                index + 1
+            )
+        })
+        .collect();
+    format!(
+        "根据已检索到的文档，核心内容可以概括为：\n{}",
+        bullets.join("\n")
+    )
+}
+
+fn build_analyst_answer(chunks: &[crate::models::rag::RerankedChunk]) -> String {
+    if let Some((index, chunk)) = find_chunk_with_index(chunks, &["验收", "审批", "风险", "流程"])
+    {
+        return format!(
+            "基于文档证据，可以确认相关流程依据是：{}[{}] 这提示需要关注流程节点是否完整闭环；但是否构成违规或最终风险等级，仍需要结合企业制度和实际执行记录人工确认。",
+            compact_quote(&chunk.chunk.content),
+            index
+        );
+    }
+    fallback_evidence_answer(chunks)
+}
+
+fn fallback_evidence_answer(chunks: &[crate::models::rag::RerankedChunk]) -> String {
+    if let Some(chunk) = chunks.first() {
+        return format!(
+            "根据《{}》第{}页，{}[1]",
+            chunk.chunk.doc_title,
+            page_str(&chunk.chunk.page_range),
+            compact_quote(&chunk.chunk.content)
+        );
+    }
+    "文档中未找到与该问题直接相关的信息。".to_string()
+}
+
+fn find_chunk_with_index<'a>(
+    chunks: &'a [crate::models::rag::RerankedChunk],
+    needles: &[&str],
+) -> Option<(usize, &'a crate::models::rag::RerankedChunk)> {
+    chunks
+        .iter()
+        .enumerate()
+        .find(|(_, chunk)| {
+            needles.iter().any(|needle| {
+                chunk.chunk.content.contains(needle) || chunk.chunk.doc_title.contains(needle)
+            })
+        })
+        .map(|(index, chunk)| (index + 1, chunk))
+}
+
+fn compact_quote(content: &str) -> String {
+    const MAX_CHARS: usize = 120;
+    let text = content.replace('\n', " ");
+    let mut quote: String = text.chars().take(MAX_CHARS).collect();
+    if text.chars().count() > MAX_CHARS {
+        quote.push_str("...");
+    }
+    quote
 }
 
 fn page_str(pages: &[i32]) -> String {

@@ -4,13 +4,10 @@ import { useEffect, useState } from "react";
 import {
   ArrowUp,
   Bot,
-  Check,
-  Copy,
-  History,
-  MapPin,
+  ChevronUp,
+  ChevronDown,
   PanelRightClose,
   PanelRightOpen,
-  Settings,
   ThumbsDown,
   ThumbsUp,
   X,
@@ -18,9 +15,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatCard } from "@/components/ui/stat-card";
+import { MessageRow } from "@/components/chat/message-row";
+import { CitationCard } from "@/components/chat/citation-card";
+import { DocumentPreview } from "@/components/chat/document-preview";
 import { useConversation } from "@/components/providers/conversation-provider";
-import { getMessageTraces } from "@/lib/api";
-import type { Citation, FeedbackReason, Message, Rating, RetrievalTrace } from "@/lib/types";
+import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -36,24 +35,37 @@ export function ChatWorkspace() {
     stages,
     rightOpen,
     setRightOpen,
-    availableKbs,
-    selectedKbIds,
-    setSelectedKbIds,
     currentId,
     sendMessage,
     retryMessage,
     cancelMessage,
     submitFeedback,
   } = useConversation();
+
   const [input, setInput] = useState("");
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | undefined>();
   const [feedbackComment, setFeedbackComment] = useState("");
   const [feedbackCorrection, setFeedbackCorrection] = useState("");
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
-  const [retrievalTraces, setRetrievalTraces] = useState<RetrievalTrace[]>([]);
-  const [traceLoading, setTraceLoading] = useState(false);
-  const [traceError, setTraceError] = useState<string | null>(null);
+
+  const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
+  const sourceDocs = latestAssistant?.citations ?? [];
+
+  const currentSourceIndex = selectedCitation
+    ? sourceDocs.findIndex((c) => c.index === selectedCitation.index)
+    : -1;
+
+  const navigateCitation = (dir: -1 | 1) => {
+    if (sourceDocs.length === 0) return;
+    const idx =
+      currentSourceIndex === -1
+        ? dir === 1
+          ? 0
+          : sourceDocs.length - 1
+        : (currentSourceIndex + dir + sourceDocs.length) % sourceDocs.length;
+    setSelectedCitation(sourceDocs[idx]);
+  };
 
   const handleSend = async () => {
     const text = input.trim();
@@ -69,74 +81,10 @@ export function ChatWorkspace() {
     }
   };
 
-  const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
-  const sourceDocs = latestAssistant?.citations ?? [];
-
-  useEffect(() => {
-    if (
-      !currentId ||
-      !latestAssistant ||
-      latestAssistant.status !== "completed" ||
-      latestAssistant.message_id.startsWith("tmp-")
-    ) {
-      setRetrievalTraces([]);
-      setTraceError(null);
-      return;
-    }
-
-    let cancelled = false;
-    setTraceLoading(true);
-    setTraceError(null);
-    const timeout = window.setTimeout(() => {
-      getMessageTraces(currentId, latestAssistant.message_id)
-        .then((res) => {
-          if (!cancelled) setRetrievalTraces(res.retrieval_traces ?? []);
-        })
-        .catch((error) => {
-          if (!cancelled) {
-            setRetrievalTraces([]);
-            setTraceError(error instanceof Error ? error.message : "检索 trace 加载失败");
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setTraceLoading(false);
-        });
-    }, 500);
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-    };
-  }, [currentId, latestAssistant]);
-
-  const renderStream = () => (
-    <div className="dm-chat-stream">
-      {messages.map((message) => (
-        <MessageRow
-          key={message.message_id}
-          message={message}
-          isStreaming={message.message_id === streamingId}
-          onRetry={() => retryMessage(message.message_id)}
-          onCancel={() => cancelMessage(message.message_id)}
-          onFeedback={(id) => setFeedbackMessageId(id)}
-          onCitationClick={(c) => setSelectedCitation(c)}
-        />
-      ))}
-
-      {messages.length > 0 && (
-        <div className="dm-process-card">
-          {stages.map((stage) => (
-            <div className="dm-stage" key={stage.label}>
-              <span className={`dm-stage-dot ${stage.done ? "done" : stage.running ? "running" : ""}`}>
-                {stage.done ? <Check size={16} /> : null}
-              </span>
-              <span>{stage.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
+  const handleCitationClick = (c: Citation) => {
+    setSelectedCitation(c);
+    setRightOpen(true);
+  };
 
   const renderEmpty = () => (
     <div className="dm-chat-empty">
@@ -153,9 +101,7 @@ export function ChatWorkspace() {
         {suggestions.map((text) => (
           <button
             key={text}
-            onClick={() => {
-              setInput(text);
-            }}
+            onClick={() => setInput(text)}
             type="button"
           >
             {text}
@@ -165,15 +111,46 @@ export function ChatWorkspace() {
     </div>
   );
 
+  const renderStream = () => (
+    <div className="dm-chat-stream">
+      {messages.map((message) => (
+        <MessageRow
+          key={message.message_id}
+          message={message}
+          isStreaming={message.message_id === streamingId}
+          onRetry={() => retryMessage(message.message_id)}
+          onCancel={() => cancelMessage(message.message_id)}
+          onFeedback={(id) => setFeedbackMessageId(id)}
+          onCitationClick={handleCitationClick}
+        />
+      ))}
+
+      {messages.length > 0 && streamingId && (
+        <div className="dm-process-card">
+          {stages.map((stage) => (
+            <div className="dm-stage" key={stage.label}>
+              <span
+                className={`dm-stage-dot ${stage.done ? "done" : stage.running ? "running" : ""}`}
+              >
+                {stage.done ? "✓" : ""}
+              </span>
+              <span>{stage.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
   const renderRightRail = () => {
     if (!rightOpen) {
       return (
         <div className="dm-right-rail-collapsed">
-          <IconButton aria-label="展开检索详情" onClick={() => setRightOpen(true)}>
+          <IconButton aria-label="展开引用来源" onClick={() => setRightOpen(true)}>
             <PanelRightOpen size={16} />
           </IconButton>
           <div className="dm-rail-dots">
-            {stages.map((_, i) => (
+            {sourceDocs.slice(0, 4).map((_, i) => (
               <span key={i} />
             ))}
           </div>
@@ -184,23 +161,31 @@ export function ChatWorkspace() {
     return (
       <aside className="dm-right-rail">
         <div className="dm-right-rail-head">
-          <h3>检索详情</h3>
-          <IconButton aria-label="收起" onClick={() => setRightOpen(false)}>
-            <PanelRightClose size={16} />
-          </IconButton>
-        </div>
-
-        <div className="dm-rail-section">
-          <div className="dm-rail-section-head">
-            <span className="dm-rail-section-title">查询进度</span>
+          <h3>引用来源</h3>
+          <div className="dm-right-rail-head-actions">
+            <IconButton
+              aria-label="上一条"
+              onClick={() => navigateCitation(-1)}
+              disabled={sourceDocs.length === 0}
+            >
+              <ChevronUp size={16} />
+            </IconButton>
+            <span className="dm-right-rail-paging">
+              {sourceDocs.length > 0
+                ? `${currentSourceIndex >= 0 ? currentSourceIndex + 1 : 1} / ${sourceDocs.length}`
+                : "- / -"}
+            </span>
+            <IconButton
+              aria-label="下一条"
+              onClick={() => navigateCitation(1)}
+              disabled={sourceDocs.length === 0}
+            >
+              <ChevronDown size={16} />
+            </IconButton>
+            <IconButton aria-label="收起" onClick={() => setRightOpen(false)}>
+              <PanelRightClose size={16} />
+            </IconButton>
           </div>
-          {stages.map((stage, i) => (
-            <div className="dm-rail-progress-row" key={stage.label}>
-              <span className="dm-rail-step-number">{i + 1}</span>
-              <span>{stage.label}</span>
-              {stage.done ? <Check className="check" size={14} /> : null}
-            </div>
-          ))}
         </div>
 
         <div className="dm-rail-section">
@@ -208,78 +193,36 @@ export function ChatWorkspace() {
             <span className="dm-rail-section-title">来源文档</span>
             <span className="dm-rail-section-hint">{sourceDocs.length} 个来源</span>
           </div>
-          {sourceDocs.map((doc) => (
-            <div className="dm-rail-doc-card" key={doc.index}>
-              <div className="dm-rail-doc-card-head">
-                <strong>[{doc.index}] {doc.doc_title}</strong>
-                {isCitationDeleted(doc) ? <span className="deleted">原文已删除</span> : null}
-              </div>
-              <span className="page">
-                第 {doc.page_range.join("-")} 页 · 切片 {doc.chunk_id.slice(0, 8)}
-              </span>
-              <p>{doc.quote}</p>
+          {sourceDocs.length === 0 ? (
+            <p className="dm-rail-empty">完成回答后显示引用来源</p>
+          ) : (
+            <div className="dm-rail-source-list">
+              {sourceDocs.map((doc) => (
+                <CitationCard
+                  key={doc.index}
+                  citation={doc}
+                  active={selectedCitation?.index === doc.index}
+                  onClick={handleCitationClick}
+                />
+              ))}
             </div>
-          ))}
-          {sourceDocs.length === 0 ? <p className="dm-rail-empty">暂无引用来源</p> : null}
+          )}
         </div>
 
-        <div className="dm-rail-section">
-          <div className="dm-rail-section-head">
-            <span className="dm-rail-section-title">检索证据</span>
-            <span className="dm-rail-section-hint">{retrievalTraces.length} 条 trace</span>
-          </div>
-          {traceLoading ? <p className="dm-rail-empty">加载检索 trace...</p> : null}
-          {traceError ? <p className="dm-rail-error">{traceError}</p> : null}
-          {!traceLoading && !traceError && retrievalTraces.length === 0 ? (
-            <p className="dm-rail-empty">完成回答后显示候选切片</p>
-          ) : null}
-          {retrievalTraces.map((trace) => (
-            <div className="dm-rail-doc-card" key={trace.id}>
-              <div className="dm-rail-doc-card-head">
-                <strong>#{trace.rank} {traceTitle(trace, sourceDocs)}</strong>
-                <span>{trace.score.toFixed(3)}</span>
-              </div>
-              <span className="page">
-                {sourceLabel(trace.source)} · {pageLabel(trace.page_range)} ·{" "}
-                {trace.heading_path.length > 0
-                  ? trace.heading_path.join(" / ")
-                  : `切片 ${trace.chunk_id.slice(0, 8)}`}
-              </span>
-              <p>{trace.content_preview}</p>
+        {selectedCitation && (
+          <div className="dm-rail-section dm-rail-preview-section">
+            <div className="dm-rail-section-head">
+              <span className="dm-rail-section-title">文档预览</span>
             </div>
-          ))}
-        </div>
+            <DocumentPreview citation={selectedCitation} />
+          </div>
+        )}
       </aside>
     );
   };
 
   return (
     <>
-      <header className="dm-chat-topbar">
-        <div className="dm-chat-topbar-kb">
-          <select
-            value={selectedKbIds[0] ?? ""}
-            onChange={(e) => setSelectedKbIds([e.target.value])}
-            disabled={!!streamingId}
-            aria-label="选择知识库"
-          >
-            {availableKbs.map((kb) => (
-              <option key={kb.id} value={kb.id}>
-                {kb.name}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="dm-chat-topbar-actions">
-          <IconButton aria-label="历史" onClick={() => setRightOpen(false)}>
-            <History size={16} />
-          </IconButton>
-          <IconButton aria-label="检索详情" onClick={() => setRightOpen((v) => !v)}>
-            <Settings size={16} />
-          </IconButton>
-        </div>
-      </header>
-
       <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
         <div className="dm-chat-main">
           {messages.length === 0 && !loading ? renderEmpty() : renderStream()}
@@ -287,7 +230,7 @@ export function ChatWorkspace() {
           <div className="dm-composer">
             <div className="dm-composer-box">
               <input
-                placeholder="向产品文档库提问..."
+                placeholder="输入问题，Shift + Enter 换行"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -326,176 +269,8 @@ export function ChatWorkspace() {
           setCorrection={setFeedbackCorrection}
         />
       )}
-
-      {selectedCitation && (
-        <div className="dm-drawer-overlay" onClick={() => setSelectedCitation(null)}>
-          <aside className="dm-drawer" onClick={(e) => e.stopPropagation()}>
-            <div className="dm-drawer-head">
-              <div className="dm-drawer-head-row">
-                <h2>引用预览</h2>
-                <IconButton onClick={() => setSelectedCitation(null)} aria-label="关闭">
-                  <X size={18} />
-                </IconButton>
-              </div>
-              <div className="dm-drawer-meta">
-                <span style={{ color: "var(--text-primary)", fontSize: 14, fontWeight: 600 }}>
-                  [{selectedCitation.index}] {selectedCitation.doc_title}
-                </span>
-                {isCitationDeleted(selectedCitation) ? (
-                  <span className="dm-deleted-source-badge">原文已删除</span>
-                ) : null}
-              </div>
-              <p style={{ marginTop: 4 }}>
-                第 {selectedCitation.page_range.join("-")} 页 · 切片{" "}
-                {selectedCitation.chunk_id.slice(0, 8)}
-              </p>
-            </div>
-
-            <div className="dm-citation-quote-block">
-              <strong>引用原文</strong>
-              <p>{selectedCitation.quote}</p>
-            </div>
-
-            <div style={{ flex: 1 }} />
-
-            <div className="dm-drawer-footer">
-              <Button variant="secondary" onClick={() => setSelectedCitation(null)}>
-                关闭
-              </Button>
-              <Button icon={<MapPin size={14} />} disabled={isCitationDeleted(selectedCitation)}>
-                定位到该页
-              </Button>
-            </div>
-          </aside>
-        </div>
-      )}
     </>
   );
-}
-
-function MessageRow({
-  message,
-  isStreaming,
-  onRetry,
-  onCancel,
-  onFeedback,
-  onCitationClick,
-}: {
-  message: Message;
-  isStreaming: boolean;
-  onRetry: () => void;
-  onCancel: () => void;
-  onFeedback: (id: string) => void;
-  onCitationClick: (c: Citation) => void;
-}) {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = () => {
-    navigator.clipboard.writeText(message.content).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    });
-  };
-
-  if (message.role === "user") {
-    return (
-      <div className="dm-question-row">
-        <div className="dm-user-bubble">{message.content}</div>
-      </div>
-    );
-  }
-
-  return (
-    <article className={`dm-answer-card ${isStreaming ? "streaming" : ""}`}>
-      <div className="dm-answer-head">
-        <span className="dm-answer-avatar">
-          <Bot size={14} />
-        </span>
-        <div>
-          <strong>DocuMind</strong>
-          <p>
-            {message.citations.length > 0
-              ? `基于 ${message.citations.length} 个来源`
-              : "未找到相关来源"}
-            {message.confidence ? ` · 置信度 ${confidenceLabel(message.confidence)}` : ""}
-          </p>
-        </div>
-      </div>
-
-      <p>{message.content || (isStreaming ? "思考中..." : "")}</p>
-
-      {message.citations.length > 0 && (
-        <div className="dm-citation-grid">
-          {message.citations.map((citation) => (
-            <div
-              className="dm-citation-card"
-              key={citation.index}
-              onClick={() => onCitationClick(citation)}
-              role="button"
-              tabIndex={0}
-            >
-              <strong>
-                [{citation.index}] {citation.doc_title}
-                {isCitationDeleted(citation) ? (
-                  <span className="dm-deleted-source-badge">原文已删除</span>
-                ) : null}
-              </strong>
-              <p>{citation.quote}</p>
-              <span>第 {citation.page_range.join("-")} 页</span>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="dm-answer-actions">
-        <IconButton aria-label="赞" onClick={() => onFeedback(message.message_id)}>
-          <ThumbsUp size={16} />
-        </IconButton>
-        <IconButton aria-label="踩" onClick={() => onFeedback(message.message_id)}>
-          <ThumbsDown size={16} />
-        </IconButton>
-        <IconButton aria-label="复制" onClick={handleCopy}>
-          {copied ? <Check size={16} /> : <Copy size={16} />}
-        </IconButton>
-        {message.status === "answering" && isStreaming ? (
-          <Button variant="secondary" onClick={onCancel}>
-            停止
-          </Button>
-        ) : message.status === "failed" || message.status === "cancelled" ? (
-          <Button variant="secondary" onClick={onRetry}>
-            重试
-          </Button>
-        ) : null}
-      </div>
-    </article>
-  );
-}
-
-function confidenceLabel(c: "high" | "medium" | "low") {
-  if (c === "high") return "高";
-  if (c === "medium") return "中";
-  return "低";
-}
-
-function traceTitle(trace: RetrievalTrace, citations: Citation[]) {
-  const citation = citations.find((item) => item.chunk_id === trace.chunk_id);
-  return citation?.doc_title ?? `文档 ${trace.doc_id.slice(0, 8)}`;
-}
-
-function pageLabel(pages: number[]) {
-  if (pages.length === 0) return "无页码";
-  return `第 ${pages.join("-")} 页`;
-}
-
-function sourceLabel(source: RetrievalTrace["source"]) {
-  if (source === "dense") return "向量召回";
-  if (source === "bm25") return "关键词召回";
-  if (source === "rrf") return "融合召回";
-  return "精排";
-}
-
-function isCitationDeleted(citation: Citation) {
-  return citation.source_status === "deleted";
 }
 
 function FeedbackDrawer({

@@ -1,9 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelMessage,
   createConversation,
+  deleteConversation,
   getMessages,
   listConversations,
   listKnowledgeBases,
@@ -39,6 +41,7 @@ export type FeedbackState = {
 };
 
 export function useConversationManager() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -52,9 +55,10 @@ export function useConversationManager() {
   ]);
   const [rightOpen, setRightOpen] = useState(false);
   const [availableKbs, setAvailableKbs] = useState<KnowledgeBase[]>([]);
-  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const skipLoadRef = useRef<string | null>(null);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -69,17 +73,23 @@ export function useConversationManager() {
     try {
       const kbs = await listKnowledgeBases();
       setAvailableKbs(kbs);
-      if (kbs.length > 0 && selectedKbIds.length === 0) {
-        setSelectedKbIds([kbs[0].id]);
-      }
     } catch (e) {
       console.error("failed to load knowledge bases", e);
     }
-  }, [selectedKbIds.length]);
+  }, []);
 
   useEffect(() => {
     loadConversations();
     loadKnowledgeBases();
+    try {
+      const raw = localStorage.getItem("documind:favorite-conversations");
+      if (raw) {
+        const ids = JSON.parse(raw) as string[];
+        setFavorites(new Set(ids));
+      }
+    } catch {
+      // ignore
+    }
   }, [loadConversations, loadKnowledgeBases]);
 
   const loadMessages = useCallback(
@@ -98,27 +108,38 @@ export function useConversationManager() {
   );
 
   useEffect(() => {
-    if (currentId) {
-      loadMessages(currentId);
-    } else {
+    if (!currentId) {
       setMessages([]);
+      return;
     }
+    if (skipLoadRef.current === currentId) {
+      skipLoadRef.current = null;
+      return;
+    }
+    loadMessages(currentId);
   }, [currentId, loadMessages]);
 
-  const createAndSelect = useCallback(async (title?: string) => {
-    try {
-      const conv = await createConversation({
-        kb_ids: selectedKbIds,
-        title,
-      });
-      setConversations((prev) => [conv, ...prev]);
-      setCurrentId(conv.conversation_id);
-      return conv.conversation_id;
-    } catch (e) {
-      console.error("failed to create conversation", e);
-      return null;
-    }
-  }, [selectedKbIds]);
+  const allKbIds = useMemo(() => availableKbs.map((kb) => kb.id), [availableKbs]);
+
+  const createAndSelect = useCallback(
+    async (title?: string) => {
+      try {
+        const conv = await createConversation({
+          kb_ids: allKbIds,
+          title,
+        });
+        setConversations((prev) => [conv, ...prev]);
+        skipLoadRef.current = conv.conversation_id;
+        setCurrentId(conv.conversation_id);
+        router.push(`/chat?c=${encodeURIComponent(conv.conversation_id)}`);
+        return conv.conversation_id;
+      } catch (e) {
+        console.error("failed to create conversation", e);
+        return null;
+      }
+    },
+    [allKbIds, router]
+  );
 
   const updateMessage = useCallback((messageId: string, patch: Partial<Message>) => {
     setMessages((prev) =>
@@ -275,7 +296,7 @@ export function useConversationManager() {
 
       const req: SendMessageRequest = {
         content,
-        kb_ids: selectedKbIds,
+        kb_ids: allKbIds,
         client_request_id: `req-${Date.now()}`,
         stream: true,
       };
@@ -289,7 +310,7 @@ export function useConversationManager() {
         false
       );
     },
-    [currentId, createAndSelect, processStream]
+    [currentId, createAndSelect, processStream, allKbIds]
   );
 
   const retryMessage = useCallback(
@@ -338,6 +359,56 @@ export function useConversationManager() {
     [currentId]
   );
 
+  const isFavorite = useCallback(
+    (conversationId: string) => favorites.has(conversationId),
+    [favorites]
+  );
+
+  const toggleFavorite = useCallback((conversationId: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(conversationId)) {
+        next.delete(conversationId);
+      } else {
+        next.add(conversationId);
+      }
+      try {
+        localStorage.setItem("documind:favorite-conversations", JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
+  const doDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      try {
+        await deleteConversation(conversationId);
+        setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+        if (currentId === conversationId) {
+          setCurrentId(null);
+        }
+        setFavorites((prev) => {
+          const next = new Set(prev);
+          next.delete(conversationId);
+          try {
+            localStorage.setItem(
+              "documind:favorite-conversations",
+              JSON.stringify(Array.from(next))
+            );
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+      } catch (e) {
+        console.error("delete conversation failed", e);
+      }
+    },
+    [currentId]
+  );
+
   return {
     conversations,
     currentId,
@@ -349,13 +420,14 @@ export function useConversationManager() {
     setRightOpen,
     setCurrentId,
     availableKbs,
-    selectedKbIds,
-    setSelectedKbIds,
     createAndSelect,
     sendMessage,
     retryMessage,
     cancelMessage: doCancelMessage,
     submitFeedback: doSubmitFeedback,
     refreshConversations: loadConversations,
+    isFavorite,
+    toggleFavorite,
+    deleteConversation: doDeleteConversation,
   };
 }

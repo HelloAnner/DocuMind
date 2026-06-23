@@ -29,11 +29,21 @@ pub trait ObjectStorage: Send + Sync {
 /// 当 `OBJECT_STORAGE_ENDPOINT`、`OBJECT_STORAGE_ACCESS_KEY`、`OBJECT_STORAGE_SECRET_KEY`
 /// 同时存在且非空时使用 MinIO / S3；否则回退到本地文件系统。
 pub fn build_storage(config: &AppConfig) -> Arc<dyn ObjectStorage> {
-    let endpoint = config.object_storage_endpoint.as_deref().filter(|s| !s.trim().is_empty());
-    let access_key = config.object_storage_access_key.as_deref().filter(|s| !s.trim().is_empty());
-    let secret_key = config.object_storage_secret_key.as_deref().filter(|s| !s.trim().is_empty());
+    let endpoint = config
+        .object_storage_endpoint
+        .as_deref()
+        .filter(|s| !s.trim().is_empty());
+    let access_key = config
+        .object_storage_access_key
+        .as_deref()
+        .filter(|s| !s.trim().is_empty());
+    let secret_key = config
+        .object_storage_secret_key
+        .as_deref()
+        .filter(|s| !s.trim().is_empty());
 
-    if let (Some(endpoint), Some(access_key), Some(secret_key)) = (endpoint, access_key, secret_key) {
+    if let (Some(endpoint), Some(access_key), Some(secret_key)) = (endpoint, access_key, secret_key)
+    {
         info!(
             endpoint = endpoint,
             bucket = %config.object_storage_bucket,

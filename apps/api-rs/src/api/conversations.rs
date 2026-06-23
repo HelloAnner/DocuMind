@@ -12,7 +12,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::agent::AgentKernel;
+use crate::agent::{AgentKernel, AgentProgress};
 use crate::auth::ActorExtractor;
 use crate::error::AppError;
 use crate::models::agent::{
@@ -183,6 +183,23 @@ enum SseEvent {
         user_message_id: Uuid,
         assistant_message_id: Uuid,
     },
+    StatusUpdated {
+        message_id: Uuid,
+        status: &'static str,
+    },
+    RewriteCompleted {
+        message_id: Uuid,
+        rewritten_query: String,
+        keywords: Vec<String>,
+    },
+    RetrievalCompleted {
+        message_id: Uuid,
+        chunk_count: usize,
+    },
+    RerankCompleted {
+        message_id: Uuid,
+        top_chunk_ids: Vec<Uuid>,
+    },
     AnswerDelta {
         message_id: Uuid,
         text: String,
@@ -207,6 +224,10 @@ impl SseEvent {
     fn event_name(&self) -> &'static str {
         match self {
             SseEvent::MessageCreated { .. } => "message.created",
+            SseEvent::StatusUpdated { .. } => "status.updated",
+            SseEvent::RewriteCompleted { .. } => "rewrite.completed",
+            SseEvent::RetrievalCompleted { .. } => "retrieval.completed",
+            SseEvent::RerankCompleted { .. } => "rerank.completed",
             SseEvent::AnswerDelta { .. } => "answer.delta",
             SseEvent::CitationDelta { .. } => "citation.delta",
             SseEvent::AnswerCompleted { .. } => "answer.completed",
@@ -222,6 +243,33 @@ impl SseEvent {
             } => json!({
                 "user_message_id": user_message_id,
                 "assistant_message_id": assistant_message_id,
+            }),
+            SseEvent::StatusUpdated { message_id, status } => json!({
+                "message_id": message_id,
+                "status": status,
+            }),
+            SseEvent::RewriteCompleted {
+                message_id,
+                rewritten_query,
+                keywords,
+            } => json!({
+                "message_id": message_id,
+                "rewritten_query": rewritten_query,
+                "keywords": keywords,
+            }),
+            SseEvent::RetrievalCompleted {
+                message_id,
+                chunk_count,
+            } => json!({
+                "message_id": message_id,
+                "chunk_count": chunk_count,
+            }),
+            SseEvent::RerankCompleted {
+                message_id,
+                top_chunk_ids,
+            } => json!({
+                "message_id": message_id,
+                "top_chunk_ids": top_chunk_ids,
             }),
             SseEvent::AnswerDelta { message_id, text } => json!({
                 "message_id": message_id,
@@ -268,6 +316,11 @@ async fn send_message(
     Path(conversation_id): Path<Uuid>,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
+    let content = req.content.trim().to_string();
+    if content.is_empty() {
+        return Err(AppError::bad_request("EMPTY_MESSAGE", "消息内容不能为空"));
+    }
+
     let (session, effective_kb_ids) =
         resolve_conversation_scope(&state, &actor, conversation_id, &req.kb_ids).await?;
 
@@ -289,7 +342,7 @@ async fn send_message(
         tenant_id: actor.tenant_id,
         user_id: actor.user_id,
         role: MessageRole::User,
-        content: req.content.clone(),
+        content: content.clone(),
         status: MessageStatus::Completed,
         parent_message_id: None,
         retry_of_message_id: None,
@@ -357,7 +410,7 @@ async fn send_message(
             session.id,
             user_message.id,
             assistant_message_id,
-            req.content,
+            content,
             effective_kb_ids,
             tx2,
         )
@@ -402,6 +455,7 @@ async fn run_agent_pipeline(
     let mut trace;
     let mode;
     let rewritten_query;
+    let mut agent_no_answer_reason: Option<NoAnswerReason> = None;
     let mut pipeline_retrieval_traces: Vec<RetrievalTrace> = vec![];
 
     if let Some(cached) = cache.get(&cache_key).await? {
@@ -441,6 +495,15 @@ async fn run_agent_pipeline(
         });
         stream = rx2;
     } else {
+        let (progress_tx, mut progress_rx) = unbounded_channel::<AgentProgress>();
+        let progress_sse_tx = tx.clone();
+        tokio::spawn(async move {
+            while let Some(progress) = progress_rx.recv().await {
+                let event = progress_to_sse_event(assistant_message_id, progress);
+                let _ = progress_sse_tx.send(Ok(event.to_sse_event()));
+            }
+        });
+
         let agent_req = AgentRequest {
             tenant_id: actor.tenant_id,
             user_id: actor.user_id,
@@ -452,10 +515,26 @@ async fn run_agent_pipeline(
             history: history.clone(),
             options: agent_options_from_config(&config),
         };
-        let run = kernel.run(agent_req).await?;
+        let run = match kernel.run_with_progress(agent_req, Some(progress_tx)).await {
+            Ok(run) => run,
+            Err(err) => {
+                let message = err.to_string();
+                fail_assistant_message(
+                    &repo,
+                    actor.tenant_id,
+                    assistant_message_id,
+                    "PIPELINE_ERROR".to_string(),
+                    message.clone(),
+                    &tx,
+                )
+                .await?;
+                return Ok(());
+            }
+        };
         mode = run.mode;
         rewritten_query = run.rewritten_query.clone();
         trace = run.trace;
+        agent_no_answer_reason = run.no_answer_reason;
         pipeline_retrieval_traces = run.retrieval_traces;
         stream = run.answer_stream;
     }
@@ -467,6 +546,9 @@ async fn run_agent_pipeline(
     let mut failed: Option<(String, String)> = None;
 
     while let Some(item) = stream.recv().await {
+        if assistant_message_cancelled(&repo, actor.tenant_id, assistant_message_id).await? {
+            return Ok(());
+        }
         match item {
             AnswerStreamItem::Delta { text } => {
                 answer_text.push_str(&text);
@@ -498,9 +580,9 @@ async fn run_agent_pipeline(
     }
 
     let no_answer_reason = if confidence == Confidence::Low && citations.is_empty() {
-        Some(NoAnswerReason::NoRelevantChunks)
+        agent_no_answer_reason.or(Some(NoAnswerReason::NoRelevantChunks))
     } else {
-        None
+        agent_no_answer_reason
     };
 
     if let Some((code, message)) = failed {
@@ -522,14 +604,10 @@ async fn run_agent_pipeline(
         return Ok(());
     }
 
-    let _ = tx.send(Ok(SseEvent::AnswerCompleted {
-        message_id: assistant_message_id,
-        confidence,
-        usage: usage.clone(),
-    }
-    .to_sse_event()));
-
     // Persist assistant message
+    if assistant_message_cancelled(&repo, actor.tenant_id, assistant_message_id).await? {
+        return Ok(());
+    }
     let mut msg = repo
         .get_message(actor.tenant_id, assistant_message_id)
         .await?
@@ -613,9 +691,75 @@ async fn run_agent_pipeline(
         cache.set(&cache_key, cached).await?;
     }
 
+    let _ = tx.send(Ok(SseEvent::AnswerCompleted {
+        message_id: assistant_message_id,
+        confidence,
+        usage: usage.clone(),
+    }
+    .to_sse_event()));
+
     // Trace is kept in memory only for stub; could be persisted here.
     let _ = (mode, trace);
 
+    Ok(())
+}
+
+fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> SseEvent {
+    match progress {
+        AgentProgress::StatusUpdated { status } => SseEvent::StatusUpdated { message_id, status },
+        AgentProgress::RewriteCompleted {
+            rewritten_query,
+            keywords,
+        } => SseEvent::RewriteCompleted {
+            message_id,
+            rewritten_query,
+            keywords,
+        },
+        AgentProgress::RetrievalCompleted { chunk_count } => SseEvent::RetrievalCompleted {
+            message_id,
+            chunk_count,
+        },
+        AgentProgress::RerankCompleted { top_chunk_ids } => SseEvent::RerankCompleted {
+            message_id,
+            top_chunk_ids,
+        },
+    }
+}
+
+async fn assistant_message_cancelled(
+    repo: &Arc<dyn ConversationRepository>,
+    tenant_id: Uuid,
+    assistant_message_id: Uuid,
+) -> Result<bool, AppError> {
+    let Some(message) = repo.get_message(tenant_id, assistant_message_id).await? else {
+        return Ok(false);
+    };
+    Ok(message.status == MessageStatus::Cancelled)
+}
+
+async fn fail_assistant_message(
+    repo: &Arc<dyn ConversationRepository>,
+    tenant_id: Uuid,
+    assistant_message_id: Uuid,
+    code: String,
+    message: String,
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+) -> Result<(), AppError> {
+    let _ = tx.send(Ok(SseEvent::AnswerFailed {
+        message_id: assistant_message_id,
+        code: code.clone(),
+        message: message.clone(),
+    }
+    .to_sse_event()));
+    let mut msg = repo
+        .get_message(tenant_id, assistant_message_id)
+        .await?
+        .ok_or_else(AppError::message_not_found)?;
+    msg.status = MessageStatus::Failed;
+    msg.error_code = Some(code);
+    msg.error_message = Some(message);
+    msg.completed_at = Some(now());
+    repo.update_message(msg).await?;
     Ok(())
 }
 

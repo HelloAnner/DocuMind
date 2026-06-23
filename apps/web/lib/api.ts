@@ -52,6 +52,12 @@ export async function getMessages(conversationId: string): Promise<MessageListRe
   return fetchJson(`/api/conversations/${conversationId}/messages`);
 }
 
+export async function deleteConversation(
+  conversationId: string
+): Promise<{ conversation_id: string; status: string }> {
+  return fetchJson(`/api/conversations/${conversationId}`, { method: "DELETE" });
+}
+
 export async function getMessageTraces(
   conversationId: string,
   messageId: string

@@ -2,6 +2,7 @@ pub mod context;
 pub mod embedding;
 pub mod reranker;
 pub mod retriever;
+pub mod vector_index;
 
 pub use context::{ContextAssembler, SimpleContextAssembler};
 pub use reranker::{HttpReranker, MockReranker, Reranker};

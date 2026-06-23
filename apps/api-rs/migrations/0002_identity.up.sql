@@ -97,7 +97,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO app_user (id, email, name, status)
 VALUES
     ('00000000-0000-0000-0000-000000000002'::uuid, 'dev@documind.local', 'Dev Tenant Admin', 'active'),
-    ('00000000-0000-0000-0000-000000000003'::uuid, 'ops@documind.local', 'Ops Super Admin', 'active'),
+    ('00000000-0000-0000-0000-000000000003'::uuid, 'Anner', 'Anner', 'active'),
     ('00000000-0000-0000-0000-000000000004'::uuid, 'user@documind.local', 'End User', 'active')
 ON CONFLICT (id) DO NOTHING;
 

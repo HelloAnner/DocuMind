@@ -233,6 +233,7 @@ pub struct AgentRun {
     pub retrieval_traces: Vec<RetrievalTrace>,
     pub answer_stream: UnboundedReceiver<AnswerStreamItem>,
     pub trace: AgentTrace,
+    pub no_answer_reason: Option<super::NoAnswerReason>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

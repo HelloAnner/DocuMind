@@ -13,10 +13,12 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 use crate::auth::{require_kb_permission, require_permission, ActorExtractor};
+use crate::config::EmbeddingConfig;
 use crate::document::{self as ingest, cleaning::cleaned_block_metadata};
 use crate::error::AppError;
-use crate::rag::embedding::{
-    local_hash_embedding, LOCAL_HASH_EMBEDDING_DIM, LOCAL_HASH_EMBEDDING_MODEL,
+use crate::rag::embedding::{EmbeddingClient, EmbeddingClientConfig};
+use crate::rag::vector_index::{
+    ElasticsearchChunkIndexer, ElasticsearchConfig, EsRange, IndexedChunk,
 };
 use crate::state::AppState;
 
@@ -265,6 +267,8 @@ struct ParseJobTask {
     file_type: String,
     file_sha256: String,
     bytes: Vec<u8>,
+    embedding_config: EmbeddingConfig,
+    elasticsearch_url: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -375,6 +379,8 @@ async fn upload_document(
             file_type: file_type.clone(),
             file_sha256,
             bytes: uploaded.bytes,
+            embedding_config: state.config.rag.embedding.clone(),
+            elasticsearch_url: state.config.elasticsearch_url.clone(),
         },
     );
 
@@ -754,6 +760,8 @@ async fn reprocess_or_retry_document(
             file_type: doc.file_type.clone(),
             file_sha256: doc.file_sha256,
             bytes,
+            embedding_config: state.config.rag.embedding.clone(),
+            elasticsearch_url: state.config.elasticsearch_url.clone(),
         },
     );
 
@@ -940,6 +948,11 @@ async fn run_parse_job(pool: sqlx::PgPool, task: ParseJobTask) -> Result<(), App
             )
             .await?;
             tx.commit().await?;
+            if artifacts.parse_status == "chunked" {
+                if let Err(err) = run_embedding_job(&pool, &task, &artifacts).await {
+                    mark_embedding_failed(&pool, &task, &err.to_string()).await?;
+                }
+            }
             Ok(())
         }
         Err(err) => {
@@ -1064,12 +1077,13 @@ async fn insert_parse_outputs(
     .await?;
 
     sqlx::query(
-        "INSERT INTO document_parse_results (parse_job_id, doc_id, parsed_json)
-         VALUES ($1, $2, $3)",
+        "INSERT INTO document_parse_results (parse_job_id, doc_id, parsed_json, schema_version)
+         VALUES ($1, $2, $3, $4)",
     )
     .bind(scope.parse_job_id)
     .bind(scope.doc_id)
     .bind(serde_json::to_value(&artifacts.bundle.parsed).unwrap_or_else(|_| json!({})))
+    .bind(ingest::SCHEMA_VERSION)
     .execute(&mut **tx)
     .await?;
 
@@ -1277,27 +1291,223 @@ async fn insert_parse_outputs(
             .execute(&mut **tx)
             .await?;
         }
-
-        sqlx::query(
-            "INSERT INTO chunk_embeddings (
-                tenant_id, kb_id, doc_id, chunk_id, embedding_model, embedding_dim,
-                embedding_vector, content_hash, status, embedded_at
-             )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', NOW())",
-        )
-        .bind(scope.tenant_id)
-        .bind(scope.kb_id)
-        .bind(scope.doc_id)
-        .bind(chunk.chunk_id)
-        .bind(LOCAL_HASH_EMBEDDING_MODEL)
-        .bind(LOCAL_HASH_EMBEDDING_DIM as i32)
-        .bind(json!(local_hash_embedding(&chunk.content)))
-        .bind(sha256_hex(chunk.content.as_bytes()))
-        .execute(&mut **tx)
-        .await?;
     }
 
     Ok(())
+}
+
+async fn run_embedding_job(
+    pool: &sqlx::PgPool,
+    task: &ParseJobTask,
+    artifacts: &ParseArtifacts,
+) -> Result<(), anyhow::Error> {
+    if !task.embedding_config.enabled {
+        return Ok(());
+    }
+    let elasticsearch_url = task
+        .elasticsearch_url
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("ELASTICSEARCH_URL is required for chunk indexing"))?;
+    let client_config = EmbeddingClientConfig::try_from(&task.embedding_config)?;
+    let embedding_client = EmbeddingClient::new(client_config)?;
+    let indexer = ElasticsearchChunkIndexer::new(ElasticsearchConfig {
+        base_url: elasticsearch_url,
+        index_name: task.embedding_config.index_name.clone(),
+        alias_name: task.embedding_config.index_alias.clone(),
+        timeout_seconds: 120,
+    })?;
+
+    mark_embedding_running(pool, task, embedding_client.model()).await?;
+
+    let now = Utc::now();
+    let mut indexed_chunks = Vec::new();
+    for batch in artifacts
+        .bundle
+        .chunks
+        .chunks(embedding_client.batch_size())
+    {
+        let inputs = batch
+            .iter()
+            .map(|chunk| chunk.content.clone())
+            .collect::<Vec<_>>();
+        let vectors = embedding_client.embed_batch(&inputs).await?;
+        let dims = vectors
+            .first()
+            .map(Vec::len)
+            .ok_or_else(|| anyhow::anyhow!("embedding provider returned no vectors"))?;
+        if vectors.iter().any(|vector| vector.len() != dims) {
+            anyhow::bail!("embedding provider returned vectors with inconsistent dimensions");
+        }
+
+        let mut tx = pool.begin().await?;
+        for (chunk, vector) in batch.iter().zip(vectors.into_iter()) {
+            let vector_dim = vector.len() as i32;
+            let vector_json = json!(vector.clone());
+            sqlx::query(
+                "INSERT INTO chunk_embeddings (
+                    tenant_id, kb_id, doc_id, chunk_id, embedding_model, embedding_dim,
+                    embedding_vector, content_hash, status, error_message, embedded_at
+                 )
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', NULL, NOW())
+                 ON CONFLICT (chunk_id, embedding_model) DO UPDATE
+                 SET embedding_dim = EXCLUDED.embedding_dim,
+                     embedding_vector = EXCLUDED.embedding_vector,
+                     content_hash = EXCLUDED.content_hash,
+                     status = 'completed',
+                     error_message = NULL,
+                     embedded_at = NOW()",
+            )
+            .bind(task.tenant_id)
+            .bind(task.kb_id)
+            .bind(task.doc_id)
+            .bind(chunk.chunk_id)
+            .bind(embedding_client.model())
+            .bind(vector_dim)
+            .bind(vector_json)
+            .bind(sha256_hex(chunk.content.as_bytes()))
+            .execute(&mut *tx)
+            .await?;
+
+            indexed_chunks.push(IndexedChunk {
+                chunk_id: chunk.chunk_id,
+                doc_id: task.doc_id,
+                kb_id: task.kb_id,
+                tenant_id: task.tenant_id,
+                parse_job_id: task.parse_job_id,
+                chunk_index: chunk.chunk_index + 1,
+                source_type: chunk.source_type.clone(),
+                content: chunk.content.clone(),
+                heading_path: chunk.heading_path.clone(),
+                page_range: es_range(chunk.page_start, chunk.page_end),
+                slide_start: chunk.slide_start,
+                slide_end: chunk.slide_end,
+                token_count: chunk.token_count,
+                block_ids: chunk.block_ids.clone(),
+                table_ids: chunk.table_ids.clone(),
+                embedding_model: embedding_client.model().to_string(),
+                embedding: vector,
+                metadata: chunk.metadata.clone(),
+                created_at: now,
+                embedded_at: now,
+            });
+        }
+        tx.commit().await?;
+    }
+
+    for batch in indexed_chunks.chunks(500) {
+        indexer.bulk_index(batch).await?;
+    }
+    mark_embedding_completed(
+        pool,
+        task,
+        embedding_client.model(),
+        indexed_chunks.len() as i32,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn mark_embedding_running(
+    pool: &sqlx::PgPool,
+    task: &ParseJobTask,
+    model: &str,
+) -> Result<(), anyhow::Error> {
+    sqlx::query(
+        "UPDATE documents
+         SET parse_status = 'embedding',
+             metadata = metadata || $1,
+             updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "active_parse_job_id": task.parse_job_id,
+        "parse_progress": 85,
+        "embedding_model": model,
+    }))
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn mark_embedding_completed(
+    pool: &sqlx::PgPool,
+    task: &ParseJobTask,
+    model: &str,
+    indexed_chunks: i32,
+) -> Result<(), anyhow::Error> {
+    sqlx::query(
+        "UPDATE documents
+         SET parse_status = 'indexed',
+             metadata = metadata || $1,
+             updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "active_parse_job_id": task.parse_job_id,
+        "parse_progress": 100,
+        "embedding_model": model,
+        "indexed_chunks": indexed_chunks,
+    }))
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+async fn mark_embedding_failed(
+    pool: &sqlx::PgPool,
+    task: &ParseJobTask,
+    error_message: &str,
+) -> Result<(), AppError> {
+    sqlx::query(
+        "UPDATE documents
+         SET parse_status = 'embedding_failed',
+             metadata = metadata || $1,
+             updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "active_parse_job_id": task.parse_job_id,
+        "parse_progress": 100,
+        "error_code": "EMBEDDING_FAILED",
+        "error_message": error_message,
+    }))
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "UPDATE chunk_embeddings
+         SET status = 'failed',
+             error_message = $1
+         WHERE tenant_id = $2
+           AND doc_id = $3
+           AND status <> 'completed'",
+    )
+    .bind(error_message)
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+fn es_range(start: Option<i32>, end: Option<i32>) -> Option<EsRange> {
+    match (start, end) {
+        (Some(start), Some(end)) => Some(EsRange {
+            gte: start,
+            lte: end,
+        }),
+        (Some(value), None) | (None, Some(value)) => Some(EsRange {
+            gte: value,
+            lte: value,
+        }),
+        (None, None) => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1883,7 +2093,7 @@ fn app_error_details(err: &AppError) -> (String, String) {
 
 fn parse_status_for_quality(score: f64) -> Result<String, AppError> {
     if score >= 0.75 {
-        Ok("indexed".to_string())
+        Ok("chunked".to_string())
     } else if score >= 0.55 {
         Ok("parse_low_confidence".to_string())
     } else {
@@ -2027,11 +2237,11 @@ mod tests {
     }
 
     #[test]
-    fn long_parse_is_indexed() {
+    fn long_parse_is_chunked() {
         let text = "付款节点包括首付款、验收款和质保金。".repeat(80);
         let artifacts = build_parse_artifacts(&test_task("long.txt", &text)).unwrap();
 
-        assert_eq!(artifacts.parse_status, "indexed");
+        assert_eq!(artifacts.parse_status, "chunked");
         assert!(artifacts.quality_score >= 0.75);
         assert!(artifacts.bundle.clean_stats.output_blocks > 0);
     }
@@ -2045,7 +2255,7 @@ mod tests {
         let artifacts = build_parse_artifacts(&test_task("identity.txt", &text)).unwrap();
 
         assert_eq!(pending_identity, artifacts.parse_identity);
-        assert_eq!(artifacts.parse_status, "indexed");
+        assert_eq!(artifacts.parse_status, "chunked");
     }
 
     fn test_task(file_name: &str, text: &str) -> ParseJobTask {
@@ -2061,6 +2271,16 @@ mod tests {
             file_type: "txt".to_string(),
             file_sha256: sha256_hex(text.as_bytes()),
             bytes: text.as_bytes().to_vec(),
+            embedding_config: EmbeddingConfig {
+                model: "text-embedding-v3".to_string(),
+                base_url: "http://localhost:11434/v1".to_string(),
+                api_key: Some("test".to_string()),
+                batch_size: 2,
+                index_name: "chunks".to_string(),
+                index_alias: "chunks_search".to_string(),
+                enabled: false,
+            },
+            elasticsearch_url: None,
         }
     }
 

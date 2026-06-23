@@ -1,5 +1,10 @@
-import { ChatWorkspace } from "@/components/views/chat-workspace";
+import { Suspense } from "react";
+import { ChatPageClient } from "./chat-page-client";
 
 export default function ChatPage() {
-  return <ChatWorkspace />;
+  return (
+    <Suspense fallback={null}>
+      <ChatPageClient />
+    </Suspense>
+  );
 }

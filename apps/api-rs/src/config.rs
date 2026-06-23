@@ -49,6 +49,7 @@ pub struct RagConfig {
     pub rewrite: RewriteConfig,
     pub retrieval: RetrievalConfig,
     pub rerank: RerankConfig,
+    pub embedding: EmbeddingConfig,
     pub generation: GenerationConfig,
     pub citation: CitationConfig,
 }
@@ -75,6 +76,17 @@ pub struct RerankConfig {
     pub api_url: Option<String>,
     pub api_key: Option<String>,
     pub min_score: f64,
+}
+
+#[derive(Debug, Clone)]
+pub struct EmbeddingConfig {
+    pub model: String,
+    pub base_url: String,
+    pub api_key: Option<String>,
+    pub batch_size: usize,
+    pub index_name: String,
+    pub index_alias: String,
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -115,13 +127,13 @@ pub fn load_config() -> Result<AppConfig> {
     let redis_url = env::var("REDIS_URL").ok();
     let rabbitmq_url = env::var("RABBITMQ_URL").ok();
     let elasticsearch_url = env::var("ELASTICSEARCH_URL").ok();
-    let object_storage_provider = env::var("OBJECT_STORAGE_PROVIDER")
-        .unwrap_or_else(|_| "minio".to_string());
+    let object_storage_provider =
+        env::var("OBJECT_STORAGE_PROVIDER").unwrap_or_else(|_| "minio".to_string());
     let object_storage_endpoint = env::var("OBJECT_STORAGE_ENDPOINT").ok();
-    let object_storage_region = env::var("OBJECT_STORAGE_REGION")
-        .unwrap_or_else(|_| "us-east-1".to_string());
-    let object_storage_bucket = env::var("OBJECT_STORAGE_BUCKET")
-        .unwrap_or_else(|_| "documind".to_string());
+    let object_storage_region =
+        env::var("OBJECT_STORAGE_REGION").unwrap_or_else(|_| "us-east-1".to_string());
+    let object_storage_bucket =
+        env::var("OBJECT_STORAGE_BUCKET").unwrap_or_else(|_| "documind".to_string());
     let object_storage_access_key = env::var("OBJECT_STORAGE_ACCESS_KEY").ok();
     let object_storage_secret_key = env::var("OBJECT_STORAGE_SECRET_KEY").ok();
     let object_storage_force_path_style = env_bool("OBJECT_STORAGE_FORCE_PATH_STYLE", true);
@@ -178,10 +190,8 @@ pub fn load_config() -> Result<AppConfig> {
         .ok()
         .and_then(|v| Uuid::parse_str(&v).ok())
         .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap());
-    let super_admin_email =
-        env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "ops@documind.local".to_string());
-    let super_admin_password =
-        env::var("SUPER_ADMIN_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
+    let super_admin_email = env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "Anner".to_string());
+    let super_admin_password = env::var("SUPER_ADMIN_PASSWORD").unwrap_or_else(|_| "1".to_string());
     let enterprise_admin_email =
         env::var("ENTERPRISE_ADMIN_EMAIL").unwrap_or_else(|_| "admin@documind.local".to_string());
     let enterprise_admin_password =
@@ -248,11 +258,31 @@ pub fn load_config() -> Result<AppConfig> {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(0.3),
         },
+        embedding: EmbeddingConfig {
+            model: env::var("EMBED_MODEL").unwrap_or_else(|_| "text-embedding-v3".to_string()),
+            base_url: env::var("EMBED_BASE_URL")
+                .or_else(|_| env::var("LLM_BASE_URL"))
+                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
+            api_key: env::var("EMBED_API_KEY")
+                .or_else(|_| env::var("LLM_API"))
+                .or_else(|_| env::var("LLM_API_KEY"))
+                .ok()
+                .filter(|v| !v.trim().is_empty()),
+            batch_size: env::var("EMBED_BATCH_SIZE")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(10),
+            index_name: env::var("ES_INDEX_CHUNKS").unwrap_or_else(|_| "chunks".to_string()),
+            index_alias: env::var("ES_INDEX_ALIAS").unwrap_or_else(|_| "chunks_search".to_string()),
+            enabled: env_bool("EMBED_ENABLED", true),
+        },
         generation: GenerationConfig {
             model: env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-turbo".to_string()),
             base_url: env::var("LLM_BASE_URL")
                 .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
-            api_key: env::var("LLM_API_KEY").unwrap_or_else(|_| "ollama".to_string()),
+            api_key: env::var("LLM_API_KEY")
+                .or_else(|_| env::var("LLM_API"))
+                .unwrap_or_else(|_| "ollama".to_string()),
             use_real_llm: env::var("USE_REAL_LLM")
                 .ok()
                 .and_then(|v| v.parse().ok())

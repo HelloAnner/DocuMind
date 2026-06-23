@@ -19,6 +19,23 @@ use super::rewriter::QueryRewriter;
 use super::verifier::ClaimVerifier;
 use crate::rag::{ContextAssembler, Reranker, Retriever};
 
+#[derive(Debug, Clone)]
+pub enum AgentProgress {
+    StatusUpdated {
+        status: &'static str,
+    },
+    RewriteCompleted {
+        rewritten_query: String,
+        keywords: Vec<String>,
+    },
+    RetrievalCompleted {
+        chunk_count: usize,
+    },
+    RerankCompleted {
+        top_chunk_ids: Vec<uuid::Uuid>,
+    },
+}
+
 #[derive(Clone)]
 pub struct AgentKernel {
     pub mode_selector: Arc<dyn ModeSelector>,
@@ -59,7 +76,15 @@ impl AgentKernel {
     }
 
     pub async fn run(&self, req: AgentRequest) -> Result<AgentRun> {
-        let mode = match req.options.mode {
+        self.run_with_progress(req, None).await
+    }
+
+    pub async fn run_with_progress(
+        &self,
+        req: AgentRequest,
+        progress: Option<tokio::sync::mpsc::UnboundedSender<AgentProgress>>,
+    ) -> Result<AgentRun> {
+        let mut mode = match req.options.mode {
             Some(m) => m,
             None => {
                 self.mode_selector
@@ -68,10 +93,26 @@ impl AgentKernel {
             }
         };
 
+        emit_progress(
+            &progress,
+            AgentProgress::StatusUpdated {
+                status: "rewriting",
+            },
+        );
         let rewrite = self
             .query_rewriter
             .rewrite(&req.original_query, &req.history, &req.effective_kb_ids)
             .await?;
+        if mode == crate::models::agent::AgentMode::Clarifier && !rewrite.needs_clarification {
+            mode = crate::models::agent::AgentMode::Answerer;
+        }
+        emit_progress(
+            &progress,
+            AgentProgress::RewriteCompleted {
+                rewritten_query: rewrite.rewritten_query.clone(),
+                keywords: rewrite.keywords.clone(),
+            },
+        );
 
         let mut plan = RetrievalPlan {
             mode: PlanMode::Single,
@@ -87,9 +128,11 @@ impl AgentKernel {
 
         let answer_stream: AnswerStream;
         let mode_reason: String;
+        let mut no_answer_reason = None;
 
         if rewrite.needs_clarification {
             mode_reason = "pronoun unclear or scope ambiguous".to_string();
+            no_answer_reason = Some(NoAnswerReason::NeedsClarification);
             let q = rewrite
                 .clarification_question
                 .clone()
@@ -103,6 +146,12 @@ impl AgentKernel {
                 .await?;
 
             let queries: Vec<String> = plan.queries.iter().map(|q| q.query.clone()).collect();
+            emit_progress(
+                &progress,
+                AgentProgress::StatusUpdated {
+                    status: "retrieving",
+                },
+            );
             let retrieved = self
                 .retriever
                 .retrieve(RetrievalInput {
@@ -114,7 +163,20 @@ impl AgentKernel {
                     bm25_top_k: req.options.retrieval.bm25_top_k.max(1),
                 })
                 .await?;
+            emit_progress(
+                &progress,
+                AgentProgress::RetrievalCompleted {
+                    chunk_count: retrieved.len(),
+                },
+            );
+            retrieval_traces.extend(build_retrieved_traces(req.user_message_id, &retrieved));
 
+            emit_progress(
+                &progress,
+                AgentProgress::StatusUpdated {
+                    status: "reranking",
+                },
+            );
             reranked = if req.options.retrieval.rerank_enabled {
                 self.reranker
                     .rerank(RerankInput {
@@ -135,7 +197,13 @@ impl AgentKernel {
                     })
                     .collect()
             };
-            retrieval_traces = build_retrieval_traces(req.user_message_id, &reranked);
+            emit_progress(
+                &progress,
+                AgentProgress::RerankCompleted {
+                    top_chunk_ids: reranked.iter().map(|item| item.chunk.chunk_id).collect(),
+                },
+            );
+            retrieval_traces.extend(build_rerank_traces(req.user_message_id, &reranked));
 
             let threshold = req.options.retrieval.rerank_min_score;
             let filtered_reranked: Vec<_> = reranked
@@ -146,6 +214,7 @@ impl AgentKernel {
 
             if filtered_reranked.is_empty() {
                 mode_reason = "no relevant chunks above threshold".to_string();
+                no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
                 answer_stream = single_text_stream(
                     "文档中未找到与该问题直接相关的信息。".to_string(),
                     Confidence::Low,
@@ -174,6 +243,12 @@ impl AgentKernel {
                     )
                     .await?;
 
+                emit_progress(
+                    &progress,
+                    AgentProgress::StatusUpdated {
+                        status: "generating",
+                    },
+                );
                 answer_stream = self
                     .answer_generator
                     .generate(
@@ -217,11 +292,43 @@ impl AgentKernel {
             retrieval_traces,
             answer_stream,
             trace,
+            no_answer_reason,
         })
     }
 }
 
-fn build_retrieval_traces(
+fn emit_progress(
+    progress: &Option<tokio::sync::mpsc::UnboundedSender<AgentProgress>>,
+    event: AgentProgress,
+) {
+    if let Some(tx) = progress {
+        let _ = tx.send(event);
+    }
+}
+
+fn build_retrieved_traces(
+    message_id: uuid::Uuid,
+    chunks: &[crate::models::rag::RetrievedChunk],
+) -> Vec<RetrievalTrace> {
+    chunks
+        .iter()
+        .enumerate()
+        .map(|(index, item)| RetrievalTrace {
+            id: uuid::Uuid::new_v4(),
+            message_id,
+            chunk_id: item.chunk_id,
+            doc_id: item.doc_id,
+            source: item.source,
+            rank: index as i32 + 1,
+            score: item.score,
+            heading_path: item.heading_path.clone(),
+            page_range: item.page_range.clone(),
+            content_preview: content_preview(&item.content),
+        })
+        .collect()
+}
+
+fn build_rerank_traces(
     message_id: uuid::Uuid,
     reranked: &[crate::models::rag::RerankedChunk],
 ) -> Vec<RetrievalTrace> {

@@ -51,7 +51,14 @@ impl FromRequestParts<AppState> for ActorExtractor {
             return Ok(ActorExtractor(actor));
         }
 
-        // 2. Fall back to trusted upstream headers (portal / development mode).
+        // 2. In a database-backed deployment, API requests must use the local
+        // JWT/session identity. The header fallback is kept only for no-DB
+        // development mode.
+        if state.db_pool.is_some() {
+            return Err(AppError::unauthorized());
+        }
+
+        // 3. Fall back to trusted upstream headers in no-DB development mode.
         let tenant_id = headers
             .get("x-tenant-id")
             .and_then(|v| v.to_str().ok())
@@ -129,7 +136,10 @@ pub async fn authenticate(
     tenant_key: Option<&str>,
 ) -> Result<(CurrentActor, String), AppError> {
     if username.trim().is_empty() || password.is_empty() {
-        return Err(AppError::bad_request("CREDENTIALS_REQUIRED", "请输入用户名和密码"));
+        return Err(AppError::bad_request(
+            "CREDENTIALS_REQUIRED",
+            "请输入用户名和密码",
+        ));
     }
 
     let actor = if let Some(pool) = &state.db_pool {
@@ -704,7 +714,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         pool,
         config.super_admin_user_id,
         &config.super_admin_email,
-        "DocuMind Super Admin",
+        "Anner",
         &config.super_admin_password,
     )
     .await?;

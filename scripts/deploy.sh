@@ -64,17 +64,61 @@ remote_env_content="$(ssh "$DEPLOY_HOST" "test -f '$REMOTE_ENV' && cat '$REMOTE_
 existing_jwt_secret="$(printf '%s\n' "$remote_env_content" | grep -E '^JWT_SECRET=' | tail -1 | cut -d= -f2- || true)"
 jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || date +%s | shasum -a 256 | awk '{print $1}')}"
 
-llm_api_key=""
-llm_base_url="http://localhost:11434/v1"
-llm_model="qwen2.5:14b"
+remote_env_value() {
+  printf '%s\n' "$remote_env_content" | grep -E "^$1=" | tail -1 | cut -d= -f2- || true
+}
+
+llm_api_key="$(remote_env_value LLM_API_KEY)"
+if [[ -z "$llm_api_key" ]]; then
+  llm_api_key="$(remote_env_value LLM_API)"
+fi
+llm_base_url="$(remote_env_value LLM_BASE_URL)"
+llm_base_url="${llm_base_url:-http://localhost:11434/v1}"
+llm_model="$(remote_env_value LLM_MODEL)"
+llm_model="${llm_model:-qwen2.5:14b}"
+use_real_llm="$(remote_env_value USE_REAL_LLM)"
+use_real_llm="${use_real_llm:-false}"
+embed_model="$(remote_env_value EMBED_MODEL)"
+embed_model="${embed_model:-text-embedding-v3}"
+embed_base_url="$(remote_env_value EMBED_BASE_URL)"
+embed_base_url="${embed_base_url:-$llm_base_url}"
+embed_api_key="$(remote_env_value EMBED_API_KEY)"
+embed_api_key="${embed_api_key:-$llm_api_key}"
+embed_batch_size="$(remote_env_value EMBED_BATCH_SIZE)"
+embed_batch_size="${embed_batch_size:-10}"
+embed_enabled="$(remote_env_value EMBED_ENABLED)"
+embed_enabled="${embed_enabled:-true}"
+es_index_chunks="$(remote_env_value ES_INDEX_CHUNKS)"
+es_index_chunks="${es_index_chunks:-chunks}"
+es_index_alias="$(remote_env_value ES_INDEX_ALIAS)"
+es_index_alias="${es_index_alias:-chunks_search}"
 rerank_api_url="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_URL=' | tail -1 | cut -d= -f2- || true)"
 rerank_api_key="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_KEY=' | tail -1 | cut -d= -f2- || true)"
 if [[ -f .env ]]; then
-  llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
-  llm_base_url="$(grep -E '^LLM_BASE_URL=' .env | tail -1 | cut -d= -f2- || true)"
-  llm_model="$(grep -E '^LLM_MODEL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
+  local_llm_api="$(grep -E '^LLM_API=' .env | tail -1 | cut -d= -f2- || true)"
+  local_llm_base_url="$(grep -E '^LLM_BASE_URL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_llm_model="$(grep -E '^LLM_MODEL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_use_real_llm="$(grep -E '^USE_REAL_LLM=' .env | tail -1 | cut -d= -f2- || true)"
+  local_embed_model="$(grep -E '^EMBED_MODEL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_embed_base_url="$(grep -E '^EMBED_BASE_URL=' .env | tail -1 | cut -d= -f2- || true)"
+  local_embed_api_key="$(grep -E '^EMBED_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
+  local_embed_batch_size="$(grep -E '^EMBED_BATCH_SIZE=' .env | tail -1 | cut -d= -f2- || true)"
+  local_embed_enabled="$(grep -E '^EMBED_ENABLED=' .env | tail -1 | cut -d= -f2- || true)"
   local_rerank_api_url="$(grep -E '^RAG_RERANK_API_URL=' .env | tail -1 | cut -d= -f2- || true)"
   local_rerank_api_key="$(grep -E '^RAG_RERANK_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
+  if [[ "${DEPLOY_USE_LOCAL_LLM_ENV:-0}" == "1" ]]; then
+    if [[ -n "$local_llm_api_key" ]]; then llm_api_key="$local_llm_api_key"; fi
+    if [[ -n "$local_llm_api" ]]; then llm_api_key="$local_llm_api"; fi
+    if [[ -n "$local_llm_base_url" ]]; then llm_base_url="$local_llm_base_url"; fi
+    if [[ -n "$local_llm_model" ]]; then llm_model="$local_llm_model"; fi
+    if [[ -n "$local_use_real_llm" ]]; then use_real_llm="$local_use_real_llm"; fi
+    if [[ -n "$local_embed_model" ]]; then embed_model="$local_embed_model"; fi
+    if [[ -n "$local_embed_base_url" ]]; then embed_base_url="$local_embed_base_url"; fi
+    if [[ -n "$local_embed_api_key" ]]; then embed_api_key="$local_embed_api_key"; fi
+    if [[ -n "$local_embed_batch_size" ]]; then embed_batch_size="$local_embed_batch_size"; fi
+    if [[ -n "$local_embed_enabled" ]]; then embed_enabled="$local_embed_enabled"; fi
+  fi
   if [[ -n "$local_rerank_api_url" ]]; then
     rerank_api_url="$local_rerank_api_url"
   fi
@@ -84,7 +128,8 @@ if [[ -f .env ]]; then
 fi
 
 cat > "$TMP_ENV" <<ENV
-# Managed by scripts/deploy.sh. Edit on server only when changing runtime config.
+# Bootstrap defaults for first deployment only.
+# Existing server config at $REMOTE_ENV is preserved by scripts/deploy.sh.
 SERVER_HOST=0.0.0.0
 SERVER_PORT=$DEPLOY_PORT
 
@@ -105,9 +150,18 @@ OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS=900
 BLOB_STORAGE_DIR=$REMOTE_ROOT/shared/objects
 
 LLM_BASE_URL=$llm_base_url
+LLM_API=$llm_api_key
 LLM_API_KEY=$llm_api_key
 LLM_MODEL=$llm_model
-USE_REAL_LLM=false
+USE_REAL_LLM=$use_real_llm
+
+EMBED_MODEL=$embed_model
+EMBED_BASE_URL=$embed_base_url
+EMBED_API_KEY=$embed_api_key
+EMBED_BATCH_SIZE=$embed_batch_size
+EMBED_ENABLED=$embed_enabled
+ES_INDEX_CHUNKS=$es_index_chunks
+ES_INDEX_ALIAS=$es_index_alias
 
 EMBEDDING_MODEL=bge-large-zh-v1.5
 EMBEDDING_DIM=1024
@@ -127,10 +181,10 @@ DEFAULT_ROLE=enterprise_admin
 DEFAULT_KB_IDS=00000000-0000-0000-0000-000000000010,00000000-0000-0000-0000-000000000011,00000000-0000-0000-0000-000000000012
 DEFAULT_TENANT_NAME=AcmeCorp
 DEFAULT_TENANT_SLUG=acme
-SUPER_ADMIN_EMAIL=ops@documind.local
-SUPER_ADMIN_PASSWORD=documind123
-ENTERPRISE_ADMIN_EMAIL=Anner
-ENTERPRISE_ADMIN_PASSWORD=1
+SUPER_ADMIN_EMAIL=Anner
+SUPER_ADMIN_PASSWORD=1
+ENTERPRISE_ADMIN_EMAIL=admin@documind.local
+ENTERPRISE_ADMIN_PASSWORD=documind123
 STANDARD_USER_EMAIL=user@documind.local
 STANDARD_USER_PASSWORD=documind123
 
@@ -176,7 +230,7 @@ mkdir -p '$REMOTE_RELEASE/bin' '$REMOTE_SHARED/logs' '$REMOTE_SHARED/runtime' '$
 REMOTE
 
 scp "$LOCAL_BINARY" "$DEPLOY_HOST:$REMOTE_RELEASE/bin/documind"
-scp "$TMP_ENV" "$DEPLOY_HOST:$REMOTE_ENV"
+scp "$TMP_ENV" "$DEPLOY_HOST:$REMOTE_RELEASE/.env.default"
 
 COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
 
@@ -204,7 +258,14 @@ rabbitmq_image='$REMOTE_RABBITMQ_IMAGE'
 es_image='$REMOTE_ES_IMAGE'
 minio_image='$REMOTE_MINIO_IMAGE'
 
-chmod 600 "\$remote_env"
+if [[ ! -f "\$remote_env" ]]; then
+  cp "\$remote_release/.env.default" "\$remote_env"
+  chmod 600 "\$remote_env"
+  echo "Initialized runtime config: \$remote_env"
+else
+  chmod 600 "\$remote_env"
+  echo "Preserving existing runtime config: \$remote_env"
+fi
 chmod +x "\$remote_release/bin/documind"
 remote_sha256="\$(sha256sum "\$remote_release/bin/documind" | awk '{print \$1}')"
 if [[ "\$remote_sha256" != "\$local_sha256" ]]; then

@@ -152,8 +152,8 @@ CREATE INDEX IF NOT EXISTS idx_chunks_kb_source
   ON chunks(kb_id, source_type);
 
 CREATE TABLE IF NOT EXISTS chunk_tables (
-  chunk_id UUID NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
-  table_id UUID NOT NULL REFERENCES document_tables(table_id) ON DELETE CASCADE,
+  chunk_id UUID NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+  table_id UUID NOT NULL REFERENCES document_tables(id) ON DELETE CASCADE,
   row_start INT,
   row_end INT,
   col_start INT,

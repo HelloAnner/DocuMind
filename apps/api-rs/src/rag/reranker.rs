@@ -168,7 +168,11 @@ fn rerank_score(query: &str, text: &str) -> f64 {
         return 0.0;
     }
     let hits = ngrams.iter().filter(|n| text_lower.contains(*n)).count();
+    if hits == 0 {
+        return 0.0;
+    }
     let density = hits as f64 / ngrams.len() as f64;
-    // Sigmoid-ish scale
-    0.3 + 0.7 * density
+    // Keep unrelated chunks below the default 0.3 threshold, while allowing
+    // partial matches through when there is actual lexical evidence.
+    0.25 + 0.75 * density
 }

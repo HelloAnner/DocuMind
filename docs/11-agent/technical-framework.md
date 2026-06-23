@@ -54,6 +54,11 @@ crates/
     src/
       lib.rs
       kernel.rs
+      router/
+        mod.rs
+        mode_router.rs
+        retrieval_router.rs
+        tool_router.rs
       mode.rs
       planner.rs
       prompt.rs
@@ -87,6 +92,9 @@ AgentRequest
 load_policy
   │  租户语气、知识库策略、引用要求
   ▼
+Router
+  │  Mode Router → Retrieval Router → Tool Router
+  ▼
 select_mode
   │  answerer / clarifier / summarizer / comparer / analyst ...
   ▼
@@ -114,20 +122,44 @@ verify_claims
 persist_trace
 ```
 
+Router 是 Kernel 的显式调度层，详见 [router.md](./router.md)。
+
+
 ## 核心 Rust 接口
 
 ### AgentKernel
 
 ```rust
-pub struct AgentKernel<M, R, P, V> {
-    pub mode_selector: M,
+pub struct AgentKernel<MR, RR, TR, R, P, V> {
+    pub mode_router: MR,
+    pub retrieval_router: RR,
+    pub tool_router: TR,
     pub rag: R,
     pub prompt_registry: P,
     pub verifier: V,
 }
 
-impl<M, R, P, V> AgentKernel<M, R, P, V> {
+impl<MR, RR, TR, R, P, V> AgentKernel<MR, RR, TR, R, P, V> {
     pub async fn run(&self, req: AgentRequest) -> Result<AgentRun>;
+}
+```
+
+### Router Traits
+
+```rust
+#[async_trait::async_trait]
+pub trait ModeRouter: Send + Sync {
+    async fn select_mode(&self, input: ModeRouterInput) -> Result<ModeDecision>;
+}
+
+#[async_trait::async_trait]
+pub trait RetrievalRouter: Send + Sync {
+    async fn plan(&self, mode: AgentMode, input: RetrievalRouterInput) -> Result<RetrievalPlan>;
+}
+
+#[async_trait::async_trait]
+pub trait ToolRouter: Send + Sync {
+    async fn execute(&self, plan: RetrievalPlan, ctx: AgentContext) -> Result<AgentRun>;
 }
 ```
 
