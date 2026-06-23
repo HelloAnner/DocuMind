@@ -1,32 +1,26 @@
-use std::collections::HashMap;
-use std::io::{Cursor, Read};
 use std::path::Path;
 
-use anyhow::{anyhow, Context, Result};
 use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use quick_xml::events::Event;
-use quick_xml::Reader;
 use serde::{Deserialize, Serialize};
-use serde_json::json;
-use serde_json::Value;
+use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
-use zip::ZipArchive;
 
 use crate::auth::{require_kb_permission, require_permission, ActorExtractor};
+use crate::document::{self as ingest, cleaning::cleaned_block_metadata};
 use crate::error::AppError;
 use crate::rag::embedding::{
     local_hash_embedding, LOCAL_HASH_EMBEDDING_DIM, LOCAL_HASH_EMBEDDING_MODEL,
 };
 use crate::state::AppState;
 
-const PARSER_VERSION: &str = "documind-parser@0.2.0";
+const PARSER_VERSION: &str = ingest::PARSER_VERSION;
 const PREVIEW_CHAR_LIMIT: usize = 60_000;
 
 pub fn router() -> Router<AppState> {
@@ -38,9 +32,14 @@ pub fn router() -> Router<AppState> {
         .route("/api/admin/documents", get(list_documents))
         .route(
             "/api/admin/documents/:doc_id",
-            get(get_document).delete(delete_document).post(reprocess_document),
+            get(get_document)
+                .delete(delete_document)
+                .post(reprocess_document),
         )
-        .route("/api/admin/documents/:doc_id/original", get(download_original))
+        .route(
+            "/api/admin/documents/:doc_id/original",
+            get(download_original),
+        )
         .route("/api/admin/documents/:doc_id/move", post(move_document))
         .route("/api/admin/documents/:doc_id/retry", post(retry_parse))
         .route("/api/admin/documents/retry", post(retry_documents))
@@ -131,6 +130,7 @@ struct DocumentDetail {
     latest_job: Option<ParseJobSummary>,
     preview: DocumentPreview,
     blocks: Vec<BlockSummary>,
+    cleaned_blocks: Vec<CleanedBlockSummary>,
     chunks: Vec<ChunkSummary>,
     tables: Vec<TableSummary>,
 }
@@ -178,6 +178,18 @@ struct BlockSummary {
 }
 
 #[derive(Debug, Serialize)]
+struct CleanedBlockSummary {
+    block_id: Uuid,
+    block_index: i32,
+    block_type: String,
+    cleaned_text: String,
+    is_removed: bool,
+    remove_reason: Option<String>,
+    cleaning_ops: Vec<String>,
+    heading_path: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct ChunkSummary {
     chunk_id: Uuid,
     chunk_index: i32,
@@ -203,46 +215,17 @@ struct TableSummary {
     quality: Value,
 }
 
-// ---------------------------------------------------------------------------
-// Parsing pipeline internal types (cloud base)
-// ---------------------------------------------------------------------------
-
-#[derive(Debug, Clone)]
-struct ParsedBlock {
-    block_type: String,
-    heading_path: Vec<String>,
-    page_range: Vec<i32>,
-    content: String,
-    metadata: serde_json::Value,
-}
-
-#[derive(Debug)]
-struct ParsedDocument {
-    blocks: Vec<ParsedBlock>,
-    warnings: Vec<String>,
-}
-
-#[derive(Debug)]
-struct ChunkDraft {
-    content: String,
-    heading_path: Vec<String>,
-    page_range: Vec<i32>,
-    token_count: i32,
-    metadata: serde_json::Value,
-}
-
 struct UploadedFile {
     title: String,
     file_name: String,
+    mime_type: String,
     bytes: Vec<u8>,
 }
 
 struct ParseArtifacts {
-    parsed: ParsedDocument,
-    chunks: Vec<ChunkDraft>,
+    bundle: ingest::ParsedBundle,
     parser_config: serde_json::Value,
     parse_identity: String,
-    table_count: usize,
     quality_score: f64,
     parse_status: String,
 }
@@ -252,7 +235,10 @@ struct DocumentRecord {
     id: Uuid,
     tenant_id: Uuid,
     kb_id: Uuid,
+    title: String,
     file_type: String,
+    file_name: String,
+    mime_type: String,
     storage_key: String,
     file_sha256: String,
     parse_version: i32,
@@ -273,6 +259,9 @@ struct ParseJobTask {
     doc_id: Uuid,
     parse_job_id: Uuid,
     parse_version: i32,
+    title: String,
+    file_name: String,
+    mime_type: String,
     file_type: String,
     file_sha256: String,
     bytes: Vec<u8>,
@@ -301,7 +290,10 @@ async fn upload_document(
     ensure_kb_exists(pool, actor.tenant_id, kb_id).await?;
 
     let uploaded = read_multipart_file(&mut multipart).await?;
-    let file_type = detect_file_type(&uploaded.file_name, &uploaded.bytes)?;
+    let file_format =
+        ingest::detect_file_type(&uploaded.file_name, &uploaded.mime_type, &uploaded.bytes)
+            .map_err(|err| AppError::bad_request("UNSUPPORTED_FILE_TYPE", err.to_string()))?;
+    let file_type = file_format.as_str().to_string();
     let file_sha256 = sha256_hex(&uploaded.bytes);
     let doc_id = Uuid::new_v4();
     let parse_job_id = Uuid::new_v4();
@@ -335,6 +327,7 @@ async fn upload_document(
     .bind(0_i32)
     .bind(json!({
         "original_filename": uploaded.file_name,
+        "mime_type": uploaded.mime_type,
         "active_parse_job_id": parse_job_id,
     }))
     .bind(actor.user_id)
@@ -376,6 +369,9 @@ async fn upload_document(
             doc_id,
             parse_job_id,
             parse_version: 1,
+            title: uploaded.title.clone(),
+            file_name: uploaded.file_name.clone(),
+            mime_type: uploaded.mime_type.clone(),
             file_type: file_type.clone(),
             file_sha256,
             bytes: uploaded.bytes,
@@ -459,10 +455,7 @@ async fn retry_documents(
 ) -> Result<Json<Value>, AppError> {
     require_permission(&actor, "document.reprocess")?;
     if req.doc_ids.is_empty() {
-        return Err(AppError::bad_request(
-            "DOC_IDS_EMPTY",
-            "请选择要重试的文档",
-        ));
+        return Err(AppError::bad_request("DOC_IDS_EMPTY", "请选择要重试的文档"));
     }
     if req.doc_ids.len() > 50 {
         return Err(AppError::bad_request(
@@ -509,15 +502,18 @@ async fn list_documents(
                COALESCE(d.file_sha256, '') AS file_sha256,
                d.parse_status, d.parse_version,
                d.latest_parse_job_id, j.quality_score, d.chunk_count,
-               0 AS table_count,
-               NULL::int AS page_count,
+               COALESCE((j.parser_config->>'table_count')::int, 0) AS table_count,
+               COALESCE((j.parser_config->>'page_count')::int, NULL)::int AS page_count,
                d.created_at AS uploaded_at, d.updated_at
         FROM documents d
         JOIN knowledge_base kb ON kb.id = d.kb_id
         LEFT JOIN document_parse_jobs j ON j.parse_job_id = d.latest_parse_job_id
         WHERE d.tenant_id = $1
           AND ($2::uuid IS NULL OR d.kb_id = $2)
-          AND ($3::text IS NULL OR $3 = 'all' OR d.parse_status = $3)
+          AND (
+            $3::text IS NULL OR $3 = 'all' OR d.parse_status = $3
+            OR ($3 = 'done' AND d.parse_status IN ('parsed', 'cleaned', 'chunked', 'indexed'))
+          )
           AND ($4::text IS NULL OR d.title ILIKE $4 OR COALESCE(d.metadata->>'original_filename', d.storage_key) ILIKE $4)
         ORDER BY d.updated_at DESC
         LIMIT $5
@@ -555,6 +551,7 @@ async fn get_document(
         None
     };
     let blocks = fetch_blocks(pool, doc_id, document.latest_parse_job_id).await?;
+    let cleaned_blocks = fetch_cleaned_blocks(pool, doc_id, document.latest_parse_job_id).await?;
     let chunks = fetch_chunks(pool, doc_id, document.latest_parse_job_id).await?;
     let tables = fetch_tables(pool, doc_id, document.latest_parse_job_id).await?;
     let preview = render_document_preview(&document, latest_job.as_ref(), &blocks);
@@ -563,6 +560,7 @@ async fn get_document(
         latest_job,
         preview,
         blocks,
+        cleaned_blocks,
         chunks,
         tables,
     }))
@@ -611,7 +609,9 @@ async fn move_document(
         .await?;
     tx.commit().await?;
 
-    Ok(Json(fetch_document_summary(pool, actor.tenant_id, doc_id).await?))
+    Ok(Json(
+        fetch_document_summary(pool, actor.tenant_id, doc_id).await?,
+    ))
 }
 
 async fn download_original(
@@ -748,6 +748,9 @@ async fn reprocess_or_retry_document(
             doc_id: doc.id,
             parse_job_id,
             parse_version: new_parse_version,
+            title: doc.title,
+            file_name: doc.file_name,
+            mime_type: doc.mime_type,
             file_type: doc.file_type.clone(),
             file_sha256: doc.file_sha256,
             bytes,
@@ -799,7 +802,10 @@ async fn fetch_document(
     doc_id: Uuid,
 ) -> Result<DocumentRecord, AppError> {
     let row = sqlx::query(
-        "SELECT id, tenant_id, kb_id, file_type, storage_key, file_sha256, parse_version
+        "SELECT id, tenant_id, kb_id, title, file_type,
+                COALESCE(metadata->>'original_filename', storage_key) AS file_name,
+                COALESCE(metadata->>'mime_type', 'application/octet-stream') AS mime_type,
+                storage_key, file_sha256, parse_version
          FROM documents
          WHERE tenant_id = $1 AND id = $2",
     )
@@ -817,7 +823,10 @@ async fn fetch_document(
         id: row.get("id"),
         tenant_id: row.get("tenant_id"),
         kb_id: row.get("kb_id"),
+        title: row.get("title"),
         file_type: row.get("file_type"),
+        file_name: row.get("file_name"),
+        mime_type: row.get("mime_type"),
         storage_key: row.get("storage_key"),
         file_sha256: row.get("file_sha256"),
         parse_version: row.get("parse_version"),
@@ -914,7 +923,7 @@ fn spawn_parse_job(pool: sqlx::PgPool, task: ParseJobTask) {
 async fn run_parse_job(pool: sqlx::PgPool, task: ParseJobTask) -> Result<(), AppError> {
     mark_parse_job_running(&pool, &task).await?;
 
-    match build_parse_artifacts(&task.file_type, &task.file_sha256, &task.bytes) {
+    match build_parse_artifacts(&task) {
         Ok(artifacts) => {
             let mut tx = pool.begin().await?;
             insert_parse_outputs(
@@ -1060,13 +1069,7 @@ async fn insert_parse_outputs(
     )
     .bind(scope.parse_job_id)
     .bind(scope.doc_id)
-    .bind(json!({
-        "parser_version": PARSER_VERSION,
-        "block_count": artifacts.parsed.blocks.len(),
-        "table_count": artifacts.table_count,
-        "chunk_count": artifacts.chunks.len(),
-        "file_type": file_type,
-    }))
+    .bind(serde_json::to_value(&artifacts.bundle.parsed).unwrap_or_else(|_| json!({})))
     .execute(&mut **tx)
     .await?;
 
@@ -1083,80 +1086,197 @@ async fn insert_parse_outputs(
     .bind(scope.parse_job_id)
     .bind(&artifacts.parse_status)
     .bind(scope.parse_version)
-    .bind(artifacts.chunks.len() as i32)
+    .bind(artifacts.bundle.chunks.len() as i32)
     .bind(json!({
         "quality_score": artifacts.quality_score,
-        "warnings": artifacts.parsed.warnings.clone(),
+        "warnings": artifacts.bundle.parsed.warnings.clone(),
+        "clean_stats": artifacts.bundle.clean_stats,
+        "file_type": file_type,
     }))
     .bind(scope.doc_id)
     .execute(&mut **tx)
     .await?;
 
-    for (index, block) in artifacts.parsed.blocks.iter().enumerate() {
+    for block in &artifacts.bundle.parsed.blocks {
         sqlx::query(
             "INSERT INTO document_blocks (
-                tenant_id, kb_id, doc_id, parse_job_id, block_index, block_type,
+                id, tenant_id, kb_id, doc_id, parse_job_id, block_index, block_type,
                 heading_path, page_range, content, metadata
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(block.block_id)
+        .bind(scope.tenant_id)
+        .bind(scope.kb_id)
+        .bind(scope.doc_id)
+        .bind(scope.parse_job_id)
+        .bind(block.block_index + 1)
+        .bind(&block.block_type)
+        .bind(&block.heading_path)
+        .bind(page_range(block.page_start, block.page_end))
+        .bind(&block.text)
+        .bind(json!({
+            "heading_level": block.heading_level,
+            "slide": block.slide_index,
+            "table_id": block.table_id,
+            "bbox": block.bbox,
+            "source_ref": block.source_ref,
+            "metadata": block.metadata,
+        }))
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    for block in &artifacts.bundle.cleaned_blocks {
+        sqlx::query(
+            "INSERT INTO cleaned_blocks (
+                tenant_id, kb_id, doc_id, parse_job_id, block_id, block_index, block_type,
+                cleaned_text, is_removed, remove_reason, cleaning_ops,
+                heading_path, page_range, metadata
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+             ON CONFLICT (parse_job_id, block_id) DO UPDATE
+             SET cleaned_text = EXCLUDED.cleaned_text,
+                 is_removed = EXCLUDED.is_removed,
+                 remove_reason = EXCLUDED.remove_reason,
+                 cleaning_ops = EXCLUDED.cleaning_ops,
+                 metadata = EXCLUDED.metadata",
         )
         .bind(scope.tenant_id)
         .bind(scope.kb_id)
         .bind(scope.doc_id)
         .bind(scope.parse_job_id)
-        .bind(index as i32 + 1)
-        .bind(&block.block_type)
-        .bind(&block.heading_path)
-        .bind(&block.page_range)
-        .bind(&block.content)
-        .bind(block.metadata.clone())
+        .bind(block.block.block_id)
+        .bind(block.block.block_index + 1)
+        .bind(&block.block.block_type)
+        .bind(&block.cleaned_text)
+        .bind(block.is_removed)
+        .bind(&block.remove_reason)
+        .bind(&block.cleaning_ops)
+        .bind(&block.block.heading_path)
+        .bind(page_range(block.block.page_start, block.block.page_end))
+        .bind(cleaned_block_metadata(block))
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    for table in &artifacts.bundle.parsed.tables {
+        sqlx::query(
+            "INSERT INTO document_tables (
+                id, tenant_id, kb_id, doc_id, parse_job_id, table_index,
+                heading_path, page_range, markdown, cells, metadata
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+        )
+        .bind(table.table_id)
+        .bind(scope.tenant_id)
+        .bind(scope.kb_id)
+        .bind(scope.doc_id)
+        .bind(scope.parse_job_id)
+        .bind(table.table_index + 1)
+        .bind(&table.heading_path)
+        .bind(page_range(table.page_start, table.page_end))
+        .bind(&table.markdown)
+        .bind(json!(table.rows))
+        .bind(json!({
+            "block_id": table.block_id,
+            "title": table.title,
+            "headers": table.headers,
+            "row_count": table.rows.len(),
+            "col_count": table.headers.len(),
+            "quality": table.quality,
+            "source_ref": table.source_ref,
+            "slide": table.slide_index,
+        }))
         .execute(&mut **tx)
         .await?;
 
-        if block.block_type == "table" {
+        for cell in &table.cells {
             sqlx::query(
-                "INSERT INTO document_tables (
-                    tenant_id, kb_id, doc_id, parse_job_id, table_index,
-                    heading_path, page_range, markdown, cells, metadata
+                "INSERT INTO document_table_cells (
+                    id, tenant_id, kb_id, doc_id, parse_job_id, table_id,
+                    row_index, col_index, row_span, col_span, text, metadata
                  )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]', $9)",
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                 ON CONFLICT (table_id, row_index, col_index) DO UPDATE
+                 SET text = EXCLUDED.text, metadata = EXCLUDED.metadata",
             )
+            .bind(cell.cell_id)
             .bind(scope.tenant_id)
             .bind(scope.kb_id)
             .bind(scope.doc_id)
             .bind(scope.parse_job_id)
-            .bind(index as i32 + 1)
-            .bind(&block.heading_path)
-            .bind(&block.page_range)
-            .bind(&block.content)
-            .bind(block.metadata.clone())
+            .bind(table.table_id)
+            .bind(cell.row_index)
+            .bind(cell.col_index)
+            .bind(cell.rowspan)
+            .bind(cell.colspan)
+            .bind(&cell.text)
+            .bind(json!({
+                "normalized_text": cell.normalized_text,
+                "is_header": cell.is_header,
+                "data_type": cell.data_type,
+                "bbox": cell.bbox,
+                "style": cell.style,
+                "source_ref": cell.source_ref,
+            }))
             .execute(&mut **tx)
             .await?;
         }
     }
 
-    for (index, chunk) in artifacts.chunks.iter().enumerate() {
-        let chunk_id = Uuid::new_v4();
+    for chunk in &artifacts.bundle.chunks {
         sqlx::query(
             "INSERT INTO chunks (
                 id, tenant_id, kb_id, doc_id, parse_job_id, chunk_index,
-                content, heading_path, page_range, token_count, metadata
+                source_type, content, heading_path, page_range, token_count,
+                block_ids, table_ids, overlap_prev_block_ids, overlap_next_block_ids, metadata
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
         )
-        .bind(chunk_id)
+        .bind(chunk.chunk_id)
         .bind(scope.tenant_id)
         .bind(scope.kb_id)
         .bind(scope.doc_id)
         .bind(scope.parse_job_id)
-        .bind(index as i32 + 1)
+        .bind(chunk.chunk_index + 1)
+        .bind(&chunk.source_type)
         .bind(&chunk.content)
         .bind(&chunk.heading_path)
-        .bind(&chunk.page_range)
+        .bind(page_range(chunk.page_start, chunk.page_end))
         .bind(chunk.token_count)
-        .bind(chunk.metadata.clone())
+        .bind(&chunk.block_ids)
+        .bind(&chunk.table_ids)
+        .bind(uuid_list_from_metadata(
+            &chunk.metadata,
+            "overlap_prev_block_ids",
+        ))
+        .bind(uuid_list_from_metadata(
+            &chunk.metadata,
+            "overlap_next_block_ids",
+        ))
+        .bind(json!({
+            "slide_start": chunk.slide_start,
+            "slide_end": chunk.slide_end,
+            "block_ids": chunk.block_ids,
+            "table_ids": chunk.table_ids,
+            "source_type": chunk.source_type,
+            "chunk_metadata": chunk.metadata,
+        }))
         .execute(&mut **tx)
         .await?;
+
+        for table_id in &chunk.table_ids {
+            sqlx::query(
+                "INSERT INTO chunk_tables (chunk_id, table_id)
+                 VALUES ($1, $2)
+                 ON CONFLICT (chunk_id, table_id) DO NOTHING",
+            )
+            .bind(chunk.chunk_id)
+            .bind(table_id)
+            .execute(&mut **tx)
+            .await?;
+        }
 
         sqlx::query(
             "INSERT INTO chunk_embeddings (
@@ -1168,7 +1288,7 @@ async fn insert_parse_outputs(
         .bind(scope.tenant_id)
         .bind(scope.kb_id)
         .bind(scope.doc_id)
-        .bind(chunk_id)
+        .bind(chunk.chunk_id)
         .bind(LOCAL_HASH_EMBEDDING_MODEL)
         .bind(LOCAL_HASH_EMBEDDING_DIM as i32)
         .bind(json!(local_hash_embedding(&chunk.content)))
@@ -1199,8 +1319,8 @@ async fn fetch_document_summary(
                COALESCE(d.file_sha256, '') AS file_sha256,
                d.parse_status, d.parse_version,
                d.latest_parse_job_id, j.quality_score, d.chunk_count,
-               0 AS table_count,
-               NULL::int AS page_count,
+               COALESCE((j.parser_config->>'table_count')::int, 0) AS table_count,
+               COALESCE((j.parser_config->>'page_count')::int, NULL)::int AS page_count,
                d.created_at AS uploaded_at, d.updated_at
         FROM documents d
         JOIN knowledge_base kb ON kb.id = d.kb_id
@@ -1249,11 +1369,11 @@ async fn fetch_parse_job(
     let row = sqlx::query(
         r#"
         SELECT parse_job_id, status, parser_version, quality_score,
-               NULL::int AS page_count,
-               NULL::int AS block_count,
-               NULL::int AS table_count,
-               NULL::int AS char_count,
-               '{}'::jsonb AS warnings,
+               (parser_config->>'page_count')::int AS page_count,
+               (parser_config->>'block_count')::int AS block_count,
+               (parser_config->>'table_count')::int AS table_count,
+               (parser_config->>'char_count')::int AS char_count,
+               COALESCE(parser_config->'warnings', '[]'::jsonb) AS warnings,
                error_code, error_message, started_at,
                completed_at AS finished_at, created_at
         FROM document_parse_jobs
@@ -1337,8 +1457,9 @@ async fn fetch_chunks(
     };
     let rows = sqlx::query(
         r#"
-        SELECT id AS chunk_id, chunk_index, content, heading_path,
-               page_range, token_count, metadata
+        SELECT id AS chunk_id, chunk_index,
+               COALESCE(source_type, metadata->>'source_type', 'paragraph') AS source_type,
+               content, heading_path, page_range, token_count, metadata
         FROM chunks
         WHERE doc_id = $1 AND parse_job_id = $2
         ORDER BY chunk_index
@@ -1361,11 +1482,7 @@ async fn fetch_chunks(
             ChunkSummary {
                 chunk_id: row.get("chunk_id"),
                 chunk_index: row.get("chunk_index"),
-                source_type: metadata
-                    .get("block_type")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("paragraph")
-                    .to_string(),
+                source_type: row.get("source_type"),
                 content: row.get("content"),
                 heading_path: row.get("heading_path"),
                 page_start: page_range.first().copied(),
@@ -1374,6 +1491,44 @@ async fn fetch_chunks(
                 slide_end: slide,
                 token_count: row.get("token_count"),
             }
+        })
+        .collect())
+}
+
+async fn fetch_cleaned_blocks(
+    pool: &sqlx::PgPool,
+    doc_id: Uuid,
+    parse_job_id: Option<Uuid>,
+) -> Result<Vec<CleanedBlockSummary>, AppError> {
+    let Some(parse_job_id) = parse_job_id else {
+        return Ok(vec![]);
+    };
+    let rows = sqlx::query(
+        r#"
+        SELECT block_id, block_index, block_type, cleaned_text, is_removed,
+               remove_reason, cleaning_ops, heading_path
+        FROM cleaned_blocks
+        WHERE doc_id = $1 AND parse_job_id = $2
+        ORDER BY block_index
+        LIMIT 300
+        "#,
+    )
+    .bind(doc_id)
+    .bind(parse_job_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|row| CleanedBlockSummary {
+            block_id: row.get("block_id"),
+            block_index: row.get("block_index"),
+            block_type: row.get("block_type"),
+            cleaned_text: row.get("cleaned_text"),
+            is_removed: row.get("is_removed"),
+            remove_reason: row.get("remove_reason"),
+            cleaning_ops: row.get("cleaning_ops"),
+            heading_path: row.get("heading_path"),
         })
         .collect())
 }
@@ -1406,13 +1561,23 @@ async fn fetch_tables(
         .map(|row| {
             let cells: Value = row.get("cells");
             let metadata: Value = row.get("metadata");
-            let row_count = cells.as_array().map(|a| a.len() as i32).unwrap_or(0);
-            let col_count = cells
-                .as_array()
-                .and_then(|a| a.first())
-                .and_then(|r| r.as_array())
-                .map(|r| r.len() as i32)
-                .unwrap_or(0);
+            let row_count = metadata
+                .get("row_count")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or_else(|| cells.as_array().map(|a| a.len() as i32).unwrap_or(0));
+            let col_count = metadata
+                .get("col_count")
+                .and_then(|v| v.as_i64())
+                .map(|v| v as i32)
+                .unwrap_or_else(|| {
+                    cells
+                        .as_array()
+                        .and_then(|a| a.first())
+                        .and_then(|r| r.as_array())
+                        .map(|r| r.len() as i32)
+                        .unwrap_or(0)
+                });
             let title: String = row.get("title");
             TableSummary {
                 table_id: row.get("table_id"),
@@ -1505,6 +1670,29 @@ fn render_preview_block(block: &BlockSummary) -> String {
     text.to_string()
 }
 
+fn page_range(start: Option<i32>, end: Option<i32>) -> Vec<i32> {
+    match (start, end) {
+        (Some(start), Some(end)) if end >= start => (start..=end).collect(),
+        (Some(start), _) => vec![start],
+        (_, Some(end)) => vec![end],
+        _ => vec![],
+    }
+}
+
+fn uuid_list_from_metadata(metadata: &Value, key: &str) -> Vec<Uuid> {
+    metadata
+        .get(key)
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|value| value.as_str())
+                .filter_map(|value| Uuid::parse_str(value).ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 fn append_preview_text(target: &mut String, value: &str, written: &mut usize) -> bool {
     if *written >= PREVIEW_CHAR_LIMIT {
         return false;
@@ -1544,6 +1732,7 @@ fn sanitize_file_name(value: &str) -> String {
 async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, AppError> {
     let mut file_name: Option<String> = None;
     let mut title: Option<String> = None;
+    let mut mime_type: Option<String> = None;
     let mut bytes: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart
@@ -1555,6 +1744,12 @@ async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, 
         match field_name.as_str() {
             "file" => {
                 file_name = field.file_name().map(|s| s.to_string());
+                mime_type = Some(
+                    field
+                        .content_type()
+                        .map(|m| m.to_string())
+                        .unwrap_or_else(|| "application/octet-stream".to_string()),
+                );
                 let data = field.bytes().await.map_err(|e| {
                     AppError::bad_request("UPLOAD_READ_FAILED", format!("读取上传文件失败: {e}"))
                 })?;
@@ -1579,99 +1774,80 @@ async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, 
     }
     let file_name = file_name.unwrap_or_else(|| "document".to_string());
     let title = title.unwrap_or_else(|| title_from_file_name(&file_name));
+    let mime_type = mime_type.unwrap_or_else(|| "application/octet-stream".to_string());
 
     Ok(UploadedFile {
         title,
         file_name,
+        mime_type,
         bytes,
     })
 }
 
-fn detect_file_type(file_name: &str, bytes: &[u8]) -> Result<String, AppError> {
-    let ext = Path::new(file_name)
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or_default()
-        .to_lowercase();
+fn build_parse_artifacts(task: &ParseJobTask) -> Result<ParseArtifacts, AppError> {
+    let mut bundle = ingest::parse_document(
+        task.doc_id,
+        task.parse_job_id,
+        &task.file_name,
+        &task.mime_type,
+        &task.bytes,
+    )
+    .map_err(|err| AppError::bad_request("DOCUMENT_PARSE_FAILED", err.to_string()))?;
+    bundle.parsed.title = task.title.clone();
 
-    let file_type = match ext.as_str() {
-        "pdf" if bytes.starts_with(b"%PDF") => "pdf",
-        "docx" if bytes.starts_with(b"PK") => "docx",
-        "pptx" if bytes.starts_with(b"PK") => "pptx",
-        "txt" => "txt",
-        "md" => "md",
-        _ => {
-            return Err(AppError::bad_request(
-                "UNSUPPORTED_FILE_TYPE",
-                "仅支持 pdf、docx、pptx、txt、md 文件",
-            ));
-        }
-    };
-
-    Ok(file_type.to_string())
-}
-
-fn parse_document(file_type: &str, bytes: &[u8]) -> Result<ParsedDocument> {
-    match file_type {
-        "pdf" => parse_pdf(bytes),
-        "docx" => parse_docx(bytes),
-        "pptx" => parse_pptx(bytes),
-        "txt" | "md" => parse_plain_text(bytes),
-        _ => Err(anyhow!("unsupported file type: {file_type}")),
-    }
-}
-
-fn build_parse_artifacts(
-    file_type: &str,
-    file_sha256: &str,
-    bytes: &[u8],
-) -> Result<ParseArtifacts, AppError> {
-    let parsed = parse_document(file_type, bytes)?;
-    if parsed.blocks.is_empty() {
+    if bundle.parsed.blocks.is_empty() {
         return Err(AppError::bad_request(
             "DOCUMENT_EMPTY",
             "未能从文档中提取到可检索文本",
         ));
     }
 
-    let parser_config = current_parser_config();
-    let chunk_size = parser_config
-        .get("chunk_size")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(1500) as usize;
-    let chunk_overlap = parser_config
-        .get("chunk_overlap")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(200) as usize;
-    let chunks = build_chunks(&parsed.blocks, chunk_size, chunk_overlap);
-    if chunks.is_empty() {
+    if bundle.chunks.is_empty() {
         return Err(AppError::bad_request(
             "DOCUMENT_EMPTY",
             "文档解析成功但没有生成有效切片",
         ));
     }
 
-    let parse_identity = parse_identity_for(file_sha256, &parser_config);
-    let quality_score = quality_score(&parsed.blocks);
+    let parser_config = current_parser_config();
+    let parse_identity = parse_identity_for(&task.file_sha256, &parser_config);
+    let quality_score = bundle.parsed.quality_score;
     let parse_status = parse_status_for_quality(quality_score)?;
-    let table_count = parsed
-        .blocks
-        .iter()
-        .filter(|b| b.block_type == "table")
-        .count();
     let mut parser_config = parser_config;
     if let Some(config) = parser_config.as_object_mut() {
-        config.insert("warnings".to_string(), json!(parsed.warnings.clone()));
+        config.insert(
+            "warnings".to_string(),
+            json!(bundle.parsed.warnings.clone()),
+        );
         config.insert("quality_score".to_string(), json!(quality_score));
         config.insert("parse_status".to_string(), json!(parse_status.clone()));
+        config.insert("block_count".to_string(), json!(bundle.parsed.blocks.len()));
+        config.insert(
+            "cleaned_block_count".to_string(),
+            json!(bundle.clean_stats.output_blocks),
+        );
+        config.insert(
+            "removed_block_count".to_string(),
+            json!(bundle.clean_stats.removed_blocks),
+        );
+        config.insert("table_count".to_string(), json!(bundle.parsed.tables.len()));
+        config.insert("chunk_count".to_string(), json!(bundle.chunks.len()));
+        config.insert(
+            "char_count".to_string(),
+            json!(bundle
+                .cleaned_blocks
+                .iter()
+                .filter(|b| !b.is_removed)
+                .map(|b| b.cleaned_text.chars().count())
+                .sum::<usize>()),
+        );
+        config.insert("clean_stats".to_string(), json!(bundle.clean_stats));
     }
 
     Ok(ParseArtifacts {
-        parsed,
-        chunks,
+        bundle,
         parser_config,
         parse_identity,
-        table_count,
         quality_score,
         parse_status,
     })
@@ -1679,21 +1855,17 @@ fn build_parse_artifacts(
 
 fn current_parser_config() -> serde_json::Value {
     json!({
-        "chunk_size": env_usize("RAG_CHUNK_SIZE", 1500),
-        "chunk_overlap": env_usize("RAG_CHUNK_OVERLAP", 200),
+        "parser_version": PARSER_VERSION,
+        "cleaner_version": ingest::CLEANER_VERSION,
+        "chunker_version": ingest::CHUNKER_VERSION,
+        "target_chunk_tokens": env_usize("RAG_TARGET_CHUNK_TOKENS", 800),
+        "max_chunk_tokens": env_usize("RAG_MAX_CHUNK_TOKENS", 1500),
+        "chunk_overlap_tokens": env_usize("RAG_CHUNK_OVERLAP_TOKENS", 200),
     })
 }
 
 fn parse_identity_for(file_sha256: &str, parser_config: &serde_json::Value) -> String {
-    let chunk_size = parser_config
-        .get("chunk_size")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(1500);
-    let chunk_overlap = parser_config
-        .get("chunk_overlap")
-        .and_then(|value| value.as_u64())
-        .unwrap_or(200);
-    sha256_hex(format!("{file_sha256}:{PARSER_VERSION}:{chunk_size}:{chunk_overlap}").as_bytes())
+    sha256_hex(format!("{file_sha256}:{PARSER_VERSION}:{parser_config}").as_bytes())
 }
 
 fn app_error_details(err: &AppError) -> (String, String) {
@@ -1706,412 +1878,6 @@ fn app_error_details(err: &AppError) -> (String, String) {
         | AppError::BadRequest { code, message }
         | AppError::Unauthorized { code, message } => (code.clone(), message.clone()),
         AppError::Internal(err) => ("PARSE_INTERNAL_ERROR".to_string(), err.to_string()),
-    }
-}
-
-fn parse_plain_text(bytes: &[u8]) -> Result<ParsedDocument> {
-    let text = String::from_utf8_lossy(bytes);
-    Ok(ParsedDocument {
-        blocks: text_blocks(
-            &text,
-            "paragraph",
-            vec![],
-            vec![],
-            json!({ "format": "plain" }),
-        ),
-        warnings: vec![],
-    })
-}
-
-fn parse_pdf(bytes: &[u8]) -> Result<ParsedDocument> {
-    let text = pdf_extract::extract_text_from_mem(bytes).context("extract pdf text")?;
-    let pages: Vec<&str> = text.split('\x0C').collect();
-    let mut blocks = vec![];
-    for (index, page_text) in pages.iter().enumerate() {
-        let page = index as i32 + 1;
-        blocks.extend(text_blocks(
-            page_text,
-            "paragraph",
-            vec![],
-            vec![page],
-            json!({ "format": "pdf", "page": page }),
-        ));
-    }
-    Ok(ParsedDocument {
-        blocks,
-        warnings: vec![],
-    })
-}
-
-fn parse_docx(bytes: &[u8]) -> Result<ParsedDocument> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).context("open docx zip")?;
-    let document_xml = read_zip_entry(&mut archive, "word/document.xml")?;
-    let blocks = parse_docx_document_xml(&document_xml)?;
-    Ok(ParsedDocument {
-        blocks,
-        warnings: vec![],
-    })
-}
-
-fn parse_pptx(bytes: &[u8]) -> Result<ParsedDocument> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes)).context("open pptx zip")?;
-    let mut names: Vec<String> = archive
-        .file_names()
-        .filter(|name| name.starts_with("ppt/slides/slide") && name.ends_with(".xml"))
-        .map(str::to_string)
-        .collect();
-    names.sort_by_key(|name| slide_number(name).unwrap_or(i32::MAX));
-
-    let mut blocks = vec![];
-    for name in names {
-        let slide = slide_number(&name).unwrap_or(1);
-        let xml = read_zip_entry(&mut archive, &name)?;
-        blocks.extend(parse_pptx_slide_xml(&xml, slide)?);
-    }
-    Ok(ParsedDocument {
-        blocks,
-        warnings: vec![],
-    })
-}
-
-fn parse_docx_document_xml(xml: &str) -> Result<Vec<ParsedBlock>> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut blocks = vec![];
-    let mut buf = Vec::new();
-    let mut current = String::new();
-    let mut in_text = false;
-    let mut in_paragraph = false;
-    let mut table_depth = 0usize;
-    let mut current_style: Option<String> = None;
-    let mut heading_path: Vec<String> = vec![];
-    let mut table_rows: Vec<String> = vec![];
-    let mut table_cells: Vec<String> = vec![];
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) => {
-                if name_ends_with(e.name().as_ref(), b"p") {
-                    in_paragraph = true;
-                    current.clear();
-                    current_style = None;
-                } else if name_ends_with(e.name().as_ref(), b"t") {
-                    in_text = true;
-                } else if name_ends_with(e.name().as_ref(), b"tbl") {
-                    table_depth += 1;
-                    table_rows.clear();
-                } else if name_ends_with(e.name().as_ref(), b"tc") {
-                    table_cells.clear();
-                } else if name_ends_with(e.name().as_ref(), b"pStyle") {
-                    current_style = attr_value(&e, b"val");
-                }
-            }
-            Event::Empty(e) => {
-                if name_ends_with(e.name().as_ref(), b"pStyle") {
-                    current_style = attr_value(&e, b"val");
-                }
-            }
-            Event::Text(e) => {
-                if in_text {
-                    let text = e.decode()?.into_owned();
-                    current.push_str(&text);
-                }
-            }
-            Event::End(e) => {
-                if name_ends_with(e.name().as_ref(), b"t") {
-                    in_text = false;
-                } else if name_ends_with(e.name().as_ref(), b"p") && in_paragraph {
-                    let text = normalize_text(&current);
-                    if !text.is_empty() {
-                        if table_depth > 0 {
-                            table_cells.push(text);
-                        } else {
-                            let block_type = block_type_from_docx_style(current_style.as_deref());
-                            if block_type == "heading" {
-                                heading_path = vec![text.clone()];
-                            }
-                            blocks.push(ParsedBlock {
-                                block_type: block_type.to_string(),
-                                heading_path: heading_path.clone(),
-                                page_range: vec![],
-                                content: text,
-                                metadata: json!({
-                                    "format": "docx",
-                                    "style": current_style,
-                                }),
-                            });
-                        }
-                    }
-                    current.clear();
-                    in_paragraph = false;
-                } else if name_ends_with(e.name().as_ref(), b"tc") {
-                    if !table_cells.is_empty() {
-                        table_rows.push(format!("| {} |", table_cells.join(" | ")));
-                    }
-                    table_cells.clear();
-                } else if name_ends_with(e.name().as_ref(), b"tbl") {
-                    table_depth = table_depth.saturating_sub(1);
-                    if table_depth == 0 && !table_rows.is_empty() {
-                        blocks.push(ParsedBlock {
-                            block_type: "table".to_string(),
-                            heading_path: heading_path.clone(),
-                            page_range: vec![],
-                            content: table_rows.join("\n"),
-                            metadata: json!({ "format": "docx", "source": "w:tbl" }),
-                        });
-                    }
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(blocks)
-}
-
-fn parse_pptx_slide_xml(xml: &str, slide: i32) -> Result<Vec<ParsedBlock>> {
-    let mut reader = Reader::from_str(xml);
-    reader.config_mut().trim_text(true);
-
-    let mut blocks = vec![];
-    let mut buf = Vec::new();
-    let mut current = String::new();
-    let mut in_text = false;
-    let mut paragraph_index = 0usize;
-
-    loop {
-        match reader.read_event_into(&mut buf)? {
-            Event::Start(e) => {
-                if name_ends_with(e.name().as_ref(), b"t") {
-                    in_text = true;
-                } else if name_ends_with(e.name().as_ref(), b"p") {
-                    current.clear();
-                }
-            }
-            Event::Text(e) => {
-                if in_text {
-                    current.push_str(&e.decode()?);
-                }
-            }
-            Event::End(e) => {
-                if name_ends_with(e.name().as_ref(), b"t") {
-                    in_text = false;
-                } else if name_ends_with(e.name().as_ref(), b"p") {
-                    let text = normalize_text(&current);
-                    if !text.is_empty() {
-                        paragraph_index += 1;
-                        blocks.push(ParsedBlock {
-                            block_type: "slide_text".to_string(),
-                            heading_path: vec![format!("Slide {slide}")],
-                            page_range: vec![slide],
-                            content: text,
-                            metadata: json!({
-                                "format": "pptx",
-                                "slide": slide,
-                                "paragraph_index": paragraph_index,
-                            }),
-                        });
-                    }
-                    current.clear();
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buf.clear();
-    }
-
-    Ok(blocks)
-}
-
-fn text_blocks(
-    text: &str,
-    block_type: &str,
-    heading_path: Vec<String>,
-    page_range: Vec<i32>,
-    metadata: serde_json::Value,
-) -> Vec<ParsedBlock> {
-    text.split("\n\n")
-        .flat_map(|part| part.split('\r'))
-        .map(normalize_text)
-        .filter(|part| !part.is_empty())
-        .map(|content| ParsedBlock {
-            block_type: block_type.to_string(),
-            heading_path: heading_path.clone(),
-            page_range: page_range.clone(),
-            content,
-            metadata: metadata.clone(),
-        })
-        .collect()
-}
-
-fn build_chunks(
-    blocks: &[ParsedBlock],
-    chunk_size: usize,
-    chunk_overlap: usize,
-) -> Vec<ChunkDraft> {
-    let chunk_size = chunk_size.max(300);
-    let chunk_overlap = chunk_overlap.min(chunk_size / 3);
-    let mut chunks = vec![];
-    let mut current = String::new();
-    let mut heading_path: Vec<String> = vec![];
-    let mut page_range: Vec<i32> = vec![];
-    let mut block_count = 0usize;
-
-    for block in blocks {
-        for part in split_long_text(&block.content, chunk_size, chunk_overlap) {
-            let addition = if block.heading_path.is_empty() {
-                part
-            } else {
-                format!("{}\n{}", block.heading_path.join(" > "), part)
-            };
-
-            if !current.is_empty()
-                && current.chars().count() + addition.chars().count() > chunk_size
-            {
-                chunks.push(chunk_from_parts(
-                    &current,
-                    &heading_path,
-                    &page_range,
-                    block_count,
-                ));
-                current.clear();
-                heading_path.clear();
-                page_range.clear();
-                block_count = 0;
-            }
-
-            if !current.is_empty() {
-                current.push_str("\n\n");
-            }
-            current.push_str(&addition);
-            merge_strings(&mut heading_path, &block.heading_path);
-            merge_i32(&mut page_range, &block.page_range);
-            block_count += 1;
-        }
-    }
-
-    if !current.is_empty() {
-        chunks.push(chunk_from_parts(
-            &current,
-            &heading_path,
-            &page_range,
-            block_count,
-        ));
-    }
-
-    chunks
-}
-
-fn split_long_text(text: &str, chunk_size: usize, chunk_overlap: usize) -> Vec<String> {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= chunk_size {
-        return vec![text.to_string()];
-    }
-
-    let mut parts = vec![];
-    let mut start = 0usize;
-    while start < chars.len() {
-        let end = (start + chunk_size).min(chars.len());
-        parts.push(chars[start..end].iter().collect());
-        if end == chars.len() {
-            break;
-        }
-        start = end.saturating_sub(chunk_overlap);
-    }
-    parts
-}
-
-fn chunk_from_parts(
-    content: &str,
-    heading_path: &[String],
-    page_range: &[i32],
-    block_count: usize,
-) -> ChunkDraft {
-    ChunkDraft {
-        content: content.to_string(),
-        heading_path: heading_path.to_vec(),
-        page_range: page_range.to_vec(),
-        token_count: estimate_tokens(content),
-        metadata: json!({ "block_count": block_count }),
-    }
-}
-
-fn read_zip_entry(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<String> {
-    let mut file = archive
-        .by_name(name)
-        .with_context(|| format!("zip entry missing: {name}"))?;
-    let mut xml = String::new();
-    file.read_to_string(&mut xml)?;
-    Ok(xml)
-}
-
-fn attr_value(e: &quick_xml::events::BytesStart<'_>, local_name: &[u8]) -> Option<String> {
-    for attr in e.attributes().flatten() {
-        if name_ends_with(attr.key.as_ref(), local_name) {
-            return Some(String::from_utf8_lossy(attr.value.as_ref()).to_string());
-        }
-    }
-    None
-}
-
-fn block_type_from_docx_style(style: Option<&str>) -> &'static str {
-    let Some(style) = style else {
-        return "paragraph";
-    };
-    let lower = style.to_lowercase();
-    if lower.contains("heading") || lower.contains("title") || lower.starts_with('h') {
-        "heading"
-    } else {
-        "paragraph"
-    }
-}
-
-fn name_ends_with(name: &[u8], local_name: &[u8]) -> bool {
-    name == local_name || name.ends_with(&[b":", local_name].concat())
-}
-
-fn slide_number(path: &str) -> Option<i32> {
-    let file_name = Path::new(path).file_stem()?.to_str()?;
-    file_name.strip_prefix("slide")?.parse().ok()
-}
-
-fn normalize_text(text: &str) -> String {
-    text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn merge_strings(target: &mut Vec<String>, incoming: &[String]) {
-    for value in incoming {
-        if !target.contains(value) {
-            target.push(value.clone());
-        }
-    }
-}
-
-fn merge_i32(target: &mut Vec<i32>, incoming: &[i32]) {
-    for value in incoming {
-        if !target.contains(value) {
-            target.push(*value);
-        }
-    }
-    target.sort_unstable();
-}
-
-fn estimate_tokens(text: &str) -> i32 {
-    text.chars().count().div_ceil(2) as i32
-}
-
-fn quality_score(blocks: &[ParsedBlock]) -> f64 {
-    let chars: usize = blocks.iter().map(|b| b.content.chars().count()).sum();
-    if chars >= 1000 {
-        0.95
-    } else if chars >= 200 {
-        0.85
-    } else {
-        0.65
     }
 }
 
@@ -2151,15 +1917,6 @@ fn env_usize(name: &str, default: usize) -> usize {
         .unwrap_or(default)
 }
 
-#[allow(dead_code)]
-fn _debug_block_counts(blocks: &[ParsedBlock]) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
-    for block in blocks {
-        *counts.entry(block.block_type.clone()).or_insert(0) += 1;
-    }
-    counts
-}
-
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -2190,17 +1947,28 @@ mod tests {
         "#;
         let bytes = zip_with_entries(&[("word/document.xml", xml)]);
 
-        let parsed = parse_docx(&bytes).unwrap();
+        let bundle = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "contract.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            &bytes,
+        )
+        .unwrap();
 
-        assert!(parsed
+        assert!(bundle
+            .parsed
             .blocks
             .iter()
-            .any(|b| b.block_type == "heading" && b.content == "付款条款"));
-        assert!(parsed
+            .any(|b| b.block_type == "heading" && b.text == "付款条款"));
+        assert!(bundle
+            .parsed
             .blocks
             .iter()
-            .any(|b| b.content.contains("首付款30%")));
-        assert!(parsed.blocks.iter().any(|b| b.block_type == "table"));
+            .any(|b| b.text.contains("首付款30%")));
+        assert!(bundle.parsed.blocks.iter().any(|b| b.block_type == "table"));
+        assert!(bundle.cleaned_blocks.iter().any(|b| !b.is_removed));
+        assert!(bundle.chunks.iter().any(|c| c.source_type == "table"));
     }
 
     #[test]
@@ -2213,57 +1981,59 @@ mod tests {
               </p:txBody></p:sp></p:spTree></p:cSld>
             </p:sld>
         "#;
-        let bytes = zip_with_entries(&[("ppt/slides/slide3.xml", xml)]);
+        let bytes = zip_with_entries(&[
+            ("ppt/presentation.xml", "<p:presentation/>"),
+            ("ppt/slides/slide3.xml", xml),
+        ]);
 
-        let parsed = parse_pptx(&bytes).unwrap();
+        let bundle = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "slides.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            &bytes,
+        )
+        .unwrap();
 
-        assert_eq!(parsed.blocks.len(), 1);
-        assert_eq!(parsed.blocks[0].page_range, vec![3]);
-        assert!(parsed.blocks[0].content.contains("1200万元"));
+        assert_eq!(bundle.parsed.blocks.len(), 1);
+        assert_eq!(bundle.parsed.blocks[0].slide_index, Some(1));
+        assert!(bundle.parsed.blocks[0].text.contains("1200万元"));
     }
 
     #[test]
     fn builds_chunks_from_blocks() {
-        let blocks = vec![
-            ParsedBlock {
-                block_type: "paragraph".to_string(),
-                heading_path: vec!["付款条款".to_string()],
-                page_range: vec![5],
-                content: "合同签署后支付首付款30%。".to_string(),
-                metadata: json!({}),
-            },
-            ParsedBlock {
-                block_type: "paragraph".to_string(),
-                heading_path: vec!["付款条款".to_string()],
-                page_range: vec![6],
-                content: "验收通过后支付60%。".to_string(),
-                metadata: json!({}),
-            },
-        ];
+        let text = "# 付款条款\n\n合同签署后支付首付款30%。\n\n验收通过后支付60%。";
+        let bundle = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "terms.md",
+            "text/markdown",
+            text.as_bytes(),
+        )
+        .unwrap();
 
-        let chunks = build_chunks(&blocks, 300, 50);
-
-        assert_eq!(chunks.len(), 1);
-        assert_eq!(chunks[0].page_range, vec![5, 6]);
-        assert!(chunks[0].content.contains("付款条款"));
+        assert_eq!(bundle.chunks.len(), 1);
+        assert!(bundle.chunks[0].content.contains("付款条款"));
+        assert_eq!(bundle.chunks[0].block_ids.len(), 3);
     }
 
     #[test]
     fn short_parse_is_low_confidence_and_not_indexed() {
-        let artifacts = build_parse_artifacts("txt", "sha-short", "短文本".as_bytes()).unwrap();
+        let artifacts = build_parse_artifacts(&test_task("short.txt", "短文本")).unwrap();
 
         assert_eq!(artifacts.parse_status, "parse_low_confidence");
         assert!(artifacts.quality_score >= 0.55);
-        assert_eq!(artifacts.chunks.len(), 1);
+        assert_eq!(artifacts.bundle.chunks.len(), 1);
     }
 
     #[test]
     fn long_parse_is_indexed() {
         let text = "付款节点包括首付款、验收款和质保金。".repeat(80);
-        let artifacts = build_parse_artifacts("txt", "sha-long", text.as_bytes()).unwrap();
+        let artifacts = build_parse_artifacts(&test_task("long.txt", &text)).unwrap();
 
         assert_eq!(artifacts.parse_status, "indexed");
         assert!(artifacts.quality_score >= 0.75);
+        assert!(artifacts.bundle.clean_stats.output_blocks > 0);
     }
 
     #[test]
@@ -2272,10 +2042,26 @@ mod tests {
         let file_sha256 = sha256_hex(text.as_bytes());
         let pending_identity = parse_identity_for(&file_sha256, &current_parser_config());
 
-        let artifacts = build_parse_artifacts("txt", &file_sha256, text.as_bytes()).unwrap();
+        let artifacts = build_parse_artifacts(&test_task("identity.txt", &text)).unwrap();
 
         assert_eq!(pending_identity, artifacts.parse_identity);
         assert_eq!(artifacts.parse_status, "indexed");
+    }
+
+    fn test_task(file_name: &str, text: &str) -> ParseJobTask {
+        ParseJobTask {
+            tenant_id: Uuid::new_v4(),
+            kb_id: Uuid::new_v4(),
+            doc_id: Uuid::new_v4(),
+            parse_job_id: Uuid::new_v4(),
+            parse_version: 1,
+            title: title_from_file_name(file_name),
+            file_name: file_name.to_string(),
+            mime_type: "text/plain".to_string(),
+            file_type: "txt".to_string(),
+            file_sha256: sha256_hex(text.as_bytes()),
+            bytes: text.as_bytes().to_vec(),
+        }
     }
 
     fn zip_with_entries(entries: &[(&str, &str)]) -> Vec<u8> {

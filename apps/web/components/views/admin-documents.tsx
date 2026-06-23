@@ -41,7 +41,7 @@ type UploadState =
   | { state: "error"; message: string };
 
 const statusParam = (filter: FilterValue): string | undefined => {
-  if (filter === "done") return "parsed";
+  if (filter === "done") return "done";
   if (filter === "failed") return "parse_failed";
   return undefined;
 };

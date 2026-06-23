@@ -7,7 +7,7 @@ import { Badge } from "./badge";
 import { Button } from "./button";
 import { IconButton } from "./icon-button";
 
-const tabs = ["文档信息", "原文预览", "切片列表", "表格", "解析块"];
+const tabs = ["文档信息", "原文预览", "清洗块", "切片列表", "表格", "解析块"];
 
 export function DocumentDrawer({
   detail,
@@ -129,7 +129,7 @@ export function DocumentDrawer({
             </div>
           ) : null}
 
-          {!loading && detail && activeTab === 4
+          {!loading && detail && activeTab === 5
             ? detail.blocks.map((block) => (
                 <div className="dm-chunk-row" key={block.block_id}>
                   <span>
@@ -144,6 +144,20 @@ export function DocumentDrawer({
             : null}
 
           {!loading && detail && activeTab === 2
+            ? detail.cleaned_blocks.map((block) => (
+                <div className="dm-chunk-row" key={block.block_id}>
+                  <span>
+                    清洗块 #{block.block_index} · {block.block_type}
+                    {block.is_removed ? ` · 已移除：${block.remove_reason ?? "noise"}` : ""}
+                  </span>
+                  <strong>{block.heading_path.length ? block.heading_path.join(" / ") : "Root"}</strong>
+                  <small>{block.cleaning_ops.length ? block.cleaning_ops.join(" / ") : "no-op"}</small>
+                  <p>{block.cleaned_text}</p>
+                </div>
+              ))
+            : null}
+
+          {!loading && detail && activeTab === 3
             ? detail.chunks.map((chunk) => (
                 <div className="dm-chunk-row" key={chunk.chunk_id}>
                   <span>
@@ -155,7 +169,7 @@ export function DocumentDrawer({
               ))
             : null}
 
-          {!loading && detail && activeTab === 3
+          {!loading && detail && activeTab === 4
             ? detail.tables.map((table) => (
                 <div className="dm-table-preview" key={table.table_id}>
                   <span>

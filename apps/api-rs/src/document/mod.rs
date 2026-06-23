@@ -6,7 +6,13 @@ use std::io::{Cursor, Read};
 use uuid::Uuid;
 use zip::ZipArchive;
 
-pub const PARSER_VERSION: &str = "documind-parser-rust-0.1.0";
+pub mod chunking;
+pub mod cleaning;
+
+pub use chunking::{ChunkConfig, CHUNKER_VERSION};
+pub use cleaning::{CleanStats, CleanedBlock, CLEANER_VERSION};
+
+pub const PARSER_VERSION: &str = "documind-parser@0.3.0";
 pub const SCHEMA_VERSION: &str = "parsed-document-v1";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,6 +21,8 @@ pub enum FileType {
     Pdf,
     Docx,
     Pptx,
+    Markdown,
+    Text,
 }
 
 impl FileType {
@@ -23,6 +31,8 @@ impl FileType {
             FileType::Pdf => "pdf",
             FileType::Docx => "docx",
             FileType::Pptx => "pptx",
+            FileType::Markdown => "md",
+            FileType::Text => "txt",
         }
     }
 }
@@ -113,6 +123,8 @@ pub struct ParsedBundle {
     pub file_type: FileType,
     pub file_sha256: String,
     pub parsed: ParsedDocument,
+    pub cleaned_blocks: Vec<CleanedBlock>,
+    pub clean_stats: CleanStats,
     pub chunks: Vec<ChunkDraft>,
 }
 
@@ -130,14 +142,26 @@ pub fn parse_document(
         FileType::Pdf => parse_pdf(doc_id, parse_job_id, &title, bytes)?,
         FileType::Docx => parse_docx(doc_id, parse_job_id, &title, bytes)?,
         FileType::Pptx => parse_pptx(doc_id, parse_job_id, &title, bytes)?,
+        FileType::Markdown => parse_markdown(doc_id, parse_job_id, &title, bytes)?,
+        FileType::Text => parse_plain_text(doc_id, parse_job_id, &title, bytes)?,
     };
     let quality = score_quality(&parsed);
     parsed.quality_score = quality;
-    let chunks = build_chunks(&parsed);
+    let (cleaned_blocks, clean_stats) = cleaning::clean_blocks(file_type, &parsed.blocks);
+    let chunk_cfg = ChunkConfig::default();
+    let chunks = chunking::chunk_blocks(
+        file_type,
+        Uuid::nil(),
+        parse_job_id,
+        &cleaned_blocks,
+        &chunk_cfg,
+    );
     Ok(ParsedBundle {
         file_type,
         file_sha256,
         parsed,
+        cleaned_blocks,
+        clean_stats,
         chunks,
     })
 }
@@ -154,6 +178,10 @@ pub fn detect_file_type(file_name: &str, mime_type: &str, bytes: &[u8]) -> Resul
         Some(FileType::Docx)
     } else if mime_type.contains("presentationml") || mime_type.contains("powerpoint") {
         Some(FileType::Pptx)
+    } else if mime_type.contains("markdown") {
+        Some(FileType::Markdown)
+    } else if mime_type.starts_with("text/plain") {
+        Some(FileType::Text)
     } else {
         None
     };
@@ -161,6 +189,8 @@ pub fn detect_file_type(file_name: &str, mime_type: &str, bytes: &[u8]) -> Resul
         "pdf" => Some(FileType::Pdf),
         "docx" => Some(FileType::Docx),
         "pptx" => Some(FileType::Pptx),
+        "md" | "markdown" => Some(FileType::Markdown),
+        "txt" => Some(FileType::Text),
         _ => None,
     };
     let by_header = if bytes.starts_with(b"%PDF-") {
@@ -176,6 +206,10 @@ pub fn detect_file_type(file_name: &str, mime_type: &str, bytes: &[u8]) -> Resul
         } else {
             None
         }
+    } else if matches!(by_ext, Some(FileType::Markdown | FileType::Text))
+        && std::str::from_utf8(bytes).is_ok()
+    {
+        by_ext
     } else {
         None
     };
@@ -479,6 +513,227 @@ fn parse_pdf(
     Ok(parsed)
 }
 
+fn parse_plain_text(
+    doc_id: Uuid,
+    parse_job_id: Uuid,
+    title: &str,
+    bytes: &[u8],
+) -> Result<ParsedDocument> {
+    let text = String::from_utf8(bytes.to_vec()).context("invalid_utf8_text")?;
+    let mut blocks = Vec::new();
+    for paragraph in split_paragraphs(&text) {
+        blocks.push(ParsedBlock {
+            block_id: Uuid::new_v4(),
+            block_index: blocks.len() as i32,
+            block_type: "paragraph".to_string(),
+            text: paragraph,
+            heading_level: None,
+            heading_path: vec![],
+            page_start: None,
+            page_end: None,
+            slide_index: None,
+            table_id: None,
+            bbox: None,
+            source_ref: json!({"format": "txt", "index": blocks.len()}),
+            metadata: json!({"format": "txt"}),
+        });
+    }
+    Ok(finalize_parsed(
+        doc_id,
+        parse_job_id,
+        "txt",
+        title,
+        None,
+        blocks,
+        vec![],
+    ))
+}
+
+fn parse_markdown(
+    doc_id: Uuid,
+    parse_job_id: Uuid,
+    title: &str,
+    bytes: &[u8],
+) -> Result<ParsedDocument> {
+    let text = String::from_utf8(bytes.to_vec()).context("invalid_utf8_markdown")?;
+    let mut blocks = Vec::new();
+    let mut tables = Vec::new();
+    let mut heading_path: Vec<(i32, String)> = Vec::new();
+    let mut in_frontmatter = false;
+    let mut frontmatter = Vec::new();
+    let mut in_code = false;
+    let mut code_fence = Vec::new();
+    let mut paragraph = Vec::new();
+    let mut table_lines = Vec::new();
+
+    for (line_idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        if line_idx == 0 && trimmed == "---" {
+            in_frontmatter = true;
+            continue;
+        }
+        if in_frontmatter {
+            if trimmed == "---" {
+                in_frontmatter = false;
+                if !frontmatter.is_empty() {
+                    push_markdown_block(
+                        &mut blocks,
+                        "metadata",
+                        frontmatter.join("\n"),
+                        None,
+                        &heading_path,
+                        json!({"format": "md", "source": "frontmatter"}),
+                    );
+                    frontmatter.clear();
+                }
+            } else {
+                frontmatter.push(line.to_string());
+            }
+            continue;
+        }
+
+        if trimmed.starts_with("```") || trimmed.starts_with("~~~") {
+            if in_code {
+                code_fence.push(line.to_string());
+                push_markdown_block(
+                    &mut blocks,
+                    "code",
+                    code_fence.join("\n"),
+                    None,
+                    &heading_path,
+                    json!({"format": "md", "source": "code_fence"}),
+                );
+                code_fence.clear();
+                in_code = false;
+            } else {
+                flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+                flush_markdown_table(
+                    doc_id,
+                    parse_job_id,
+                    &mut blocks,
+                    &mut tables,
+                    &mut table_lines,
+                    &heading_path,
+                );
+                in_code = true;
+                code_fence.push(line.to_string());
+            }
+            continue;
+        }
+        if in_code {
+            code_fence.push(line.to_string());
+            continue;
+        }
+
+        if let Some((level, heading)) = markdown_heading(trimmed) {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            flush_markdown_table(
+                doc_id,
+                parse_job_id,
+                &mut blocks,
+                &mut tables,
+                &mut table_lines,
+                &heading_path,
+            );
+            heading_path.retain(|(existing, _)| *existing < level);
+            heading_path.push((level, heading.clone()));
+            push_markdown_block(
+                &mut blocks,
+                "heading",
+                heading,
+                Some(level),
+                &heading_path[..heading_path.len().saturating_sub(1)],
+                json!({"format": "md", "line": line_idx + 1}),
+            );
+            continue;
+        }
+
+        if trimmed.starts_with("<!--") {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            push_markdown_block(
+                &mut blocks,
+                "comment",
+                trimmed.to_string(),
+                None,
+                &heading_path,
+                json!({"format": "md", "line": line_idx + 1}),
+            );
+            continue;
+        }
+
+        if markdown_table_line(trimmed) {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            table_lines.push(trimmed.to_string());
+            continue;
+        } else {
+            flush_markdown_table(
+                doc_id,
+                parse_job_id,
+                &mut blocks,
+                &mut tables,
+                &mut table_lines,
+                &heading_path,
+            );
+        }
+
+        if trimmed.is_empty() {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+        } else if markdown_list_item(trimmed) {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            push_markdown_block(
+                &mut blocks,
+                "list_item",
+                trimmed.to_string(),
+                None,
+                &heading_path,
+                json!({"format": "md", "line": line_idx + 1}),
+            );
+        } else if trimmed.starts_with('>') {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            push_markdown_block(
+                &mut blocks,
+                "blockquote",
+                trimmed.trim_start_matches('>').trim().to_string(),
+                None,
+                &heading_path,
+                json!({"format": "md", "line": line_idx + 1}),
+            );
+        } else if trimmed.starts_with("![") {
+            flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+            push_markdown_block(
+                &mut blocks,
+                "image",
+                trimmed.to_string(),
+                None,
+                &heading_path,
+                json!({"format": "md", "line": line_idx + 1}),
+            );
+        } else {
+            paragraph.push(trimmed.to_string());
+        }
+    }
+
+    flush_markdown_paragraph(&mut blocks, &mut paragraph, &heading_path);
+    flush_markdown_table(
+        doc_id,
+        parse_job_id,
+        &mut blocks,
+        &mut tables,
+        &mut table_lines,
+        &heading_path,
+    );
+
+    Ok(finalize_parsed(
+        doc_id,
+        parse_job_id,
+        "md",
+        title,
+        None,
+        blocks,
+        tables,
+    ))
+}
+
 fn finalize_parsed(
     doc_id: Uuid,
     parse_job_id: Uuid,
@@ -579,56 +834,18 @@ fn parse_xml_table(
     }
 }
 
-fn build_chunks(parsed: &ParsedDocument) -> Vec<ChunkDraft> {
-    parsed
-        .blocks
-        .iter()
-        .filter(|block| {
-            matches!(
-                block.block_type.as_str(),
-                "paragraph" | "list_item" | "table" | "slide_note" | "footnote"
-            ) && !block.text.trim().is_empty()
-        })
-        .enumerate()
-        .map(|(idx, block)| {
-            let mut lines = Vec::new();
-            if !block.heading_path.is_empty() {
-                lines.push(format!("标题路径：{}", block.heading_path.join(" / ")));
-            }
-            if let Some(page) = block.page_start {
-                lines.push(format!("页码：{page}"));
-            }
-            if let Some(slide) = block.slide_index {
-                lines.push(format!("Slide：{slide}"));
-            }
-            lines.push(String::new());
-            lines.push(block.text.clone());
-            let content = lines.join("\n");
-            ChunkDraft {
-                chunk_id: Uuid::new_v4(),
-                chunk_index: idx as i32,
-                source_type: block.block_type.clone(),
-                token_count: estimate_tokens(&content),
-                content,
-                heading_path: block.heading_path.clone(),
-                page_start: block.page_start,
-                page_end: block.page_end,
-                slide_start: block.slide_index,
-                slide_end: block.slide_index,
-                block_ids: vec![block.block_id],
-                table_ids: block.table_id.into_iter().collect(),
-                metadata: json!({"parser_version": PARSER_VERSION}),
-            }
-        })
-        .collect()
-}
-
 fn score_quality(parsed: &ParsedDocument) -> f64 {
     if parsed.blocks.is_empty() {
         return 0.2;
     }
     let char_count: usize = parsed.blocks.iter().map(|b| b.text.chars().count()).sum();
-    let text_score = if char_count > 100 { 1.0 } else { 0.65 };
+    let text_score = if char_count > 100 {
+        1.0
+    } else if char_count >= 20 {
+        0.65
+    } else {
+        0.2
+    };
     let structure_score = if parsed.blocks.iter().any(|b| b.block_type == "heading") {
         0.95
     } else {
@@ -760,7 +977,171 @@ fn escape_table_cell(value: &str) -> String {
     value.replace('|', "\\|").replace('\n', "<br>")
 }
 
-fn estimate_tokens(content: &str) -> i32 {
+fn markdown_heading(line: &str) -> Option<(i32, String)> {
+    let hashes = line.chars().take_while(|c| *c == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let rest = line.get(hashes..)?.trim();
+    if rest.is_empty() {
+        None
+    } else {
+        Some((hashes as i32, rest.trim_matches('#').trim().to_string()))
+    }
+}
+
+fn markdown_list_item(line: &str) -> bool {
+    line.starts_with("- ")
+        || line.starts_with("* ")
+        || line.starts_with("+ ")
+        || line
+            .split_once(". ")
+            .map(|(prefix, _)| !prefix.is_empty() && prefix.chars().all(|c| c.is_ascii_digit()))
+            .unwrap_or(false)
+}
+
+fn markdown_table_line(line: &str) -> bool {
+    line.starts_with('|') && line.ends_with('|') && line.matches('|').count() >= 2
+}
+
+fn push_markdown_block(
+    blocks: &mut Vec<ParsedBlock>,
+    block_type: &str,
+    text: String,
+    heading_level: Option<i32>,
+    heading_path: &[(i32, String)],
+    metadata: Value,
+) {
+    if text.trim().is_empty() {
+        return;
+    }
+    blocks.push(ParsedBlock {
+        block_id: Uuid::new_v4(),
+        block_index: blocks.len() as i32,
+        block_type: block_type.to_string(),
+        text,
+        heading_level,
+        heading_path: heading_path.iter().map(|(_, h)| h.clone()).collect(),
+        page_start: None,
+        page_end: None,
+        slide_index: None,
+        table_id: None,
+        bbox: None,
+        source_ref: json!({"format": "md", "index": blocks.len()}),
+        metadata,
+    });
+}
+
+fn flush_markdown_paragraph(
+    blocks: &mut Vec<ParsedBlock>,
+    paragraph: &mut Vec<String>,
+    heading_path: &[(i32, String)],
+) {
+    if paragraph.is_empty() {
+        return;
+    }
+    let text = paragraph.join("\n");
+    paragraph.clear();
+    push_markdown_block(
+        blocks,
+        "paragraph",
+        text,
+        None,
+        heading_path,
+        json!({"format": "md", "source": "paragraph"}),
+    );
+}
+
+fn flush_markdown_table(
+    _doc_id: Uuid,
+    _parse_job_id: Uuid,
+    blocks: &mut Vec<ParsedBlock>,
+    tables: &mut Vec<ParsedTable>,
+    table_lines: &mut Vec<String>,
+    heading_path: &[(i32, String)],
+) {
+    if table_lines.len() < 2 {
+        table_lines.clear();
+        return;
+    }
+
+    let rows = table_lines
+        .iter()
+        .filter(|line| !line.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')))
+        .map(|line| {
+            line.trim_matches('|')
+                .split('|')
+                .map(|cell| cell.trim().to_string())
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    table_lines.clear();
+    if rows.is_empty() {
+        return;
+    }
+
+    let block_id = Uuid::new_v4();
+    let table_id = Uuid::new_v4();
+    let headers = rows.first().cloned().unwrap_or_default();
+    let body = rows.get(1..).unwrap_or(&[]).to_vec();
+    let markdown = table_markdown(&headers, &body);
+    let mut cells = Vec::new();
+    for (row_idx, row) in rows.iter().enumerate() {
+        for (col_idx, text) in row.iter().enumerate() {
+            cells.push(ParsedTableCell {
+                cell_id: Uuid::new_v4(),
+                row_index: row_idx as i32,
+                col_index: col_idx as i32,
+                rowspan: 1,
+                colspan: 1,
+                text: text.clone(),
+                normalized_text: normalize_space(text),
+                is_header: row_idx == 0,
+                data_type: "text".to_string(),
+                bbox: None,
+                style: json!({}),
+                source_ref: json!({"format": "md", "table_index": tables.len(), "row": row_idx, "col": col_idx}),
+            });
+        }
+    }
+    let path = heading_path
+        .iter()
+        .map(|(_, h)| h.clone())
+        .collect::<Vec<_>>();
+    tables.push(ParsedTable {
+        table_id,
+        block_id,
+        table_index: tables.len() as i32,
+        title: path.last().cloned(),
+        heading_path: path.clone(),
+        page_start: None,
+        page_end: None,
+        slide_index: None,
+        headers: headers.clone(),
+        rows: body,
+        cells,
+        markdown: markdown.clone(),
+        quality: json!({"header_confidence": 0.9, "grid_confidence": 0.9, "warnings": []}),
+        source_ref: json!({"format": "md", "table_index": tables.len()}),
+    });
+    blocks.push(ParsedBlock {
+        block_id,
+        block_index: blocks.len() as i32,
+        block_type: "table".to_string(),
+        text: markdown,
+        heading_level: None,
+        heading_path: path,
+        page_start: None,
+        page_end: None,
+        slide_index: None,
+        table_id: Some(table_id),
+        bbox: None,
+        source_ref: json!({"format": "md", "node": "table", "index": tables.len()}),
+        metadata: json!({"format": "md", "source": "table"}),
+    });
+}
+
+pub(crate) fn estimate_tokens(content: &str) -> i32 {
     ((content.chars().count() as f64) / 2.4).ceil() as i32
 }
 

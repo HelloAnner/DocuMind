@@ -202,6 +202,17 @@ export interface DocumentChunk {
   token_count: number;
 }
 
+export interface CleanedDocumentBlock {
+  block_id: string;
+  block_index: number;
+  block_type: string;
+  cleaned_text: string;
+  is_removed: boolean;
+  remove_reason?: string;
+  cleaning_ops: string[];
+  heading_path: string[];
+}
+
 export interface DocumentTable {
   table_id: string;
   table_index: number;
@@ -227,6 +238,7 @@ export interface AdminDocumentDetail {
   latest_job?: ParseJobSummary;
   preview: DocumentPreview;
   blocks: DocumentBlock[];
+  cleaned_blocks: CleanedDocumentBlock[];
   chunks: DocumentChunk[];
   tables: DocumentTable[];
 }
@@ -297,9 +309,8 @@ export async function downloadAdminDocumentOriginal(docId: string, fileName: str
 
 export async function uploadAdminDocument(kbId: string, file: File): Promise<AdminDocument> {
   const form = new FormData();
-  form.set("kb_id", kbId);
   form.set("file", file);
-  const response = await fetch(`${BASE}/api/admin/documents`, {
+  const response = await fetch(`${BASE}/api/knowledge-bases/${kbId}/documents`, {
     method: "POST",
     headers: getAuthHeaders(),
     body: form,
@@ -308,7 +319,9 @@ export async function uploadAdminDocument(kbId: string, file: File): Promise<Adm
     const text = await response.text().catch(() => "Unknown error");
     throw new Error(`API error ${response.status}: ${text}`);
   }
-  return response.json() as Promise<AdminDocument>;
+  const uploaded = (await response.json()) as UploadDocumentResponse;
+  const detail = await getAdminDocument(uploaded.document_id);
+  return detail.document;
 }
 
 // Cloud-side aliases for backward compatibility

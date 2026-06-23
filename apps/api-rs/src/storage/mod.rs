@@ -185,4 +185,3 @@ impl ObjectStorage for LocalStorage {
         }
     }
 }
-
