@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
 use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State};
@@ -312,7 +312,7 @@ async fn upload_document(
     let parser_config = current_parser_config();
     let parse_identity = parse_identity_for(&file_sha256, &parser_config);
 
-    persist_original_file(&storage_root(), &storage_key, &uploaded.bytes).await?;
+    state.storage.put(&storage_key, &uploaded.bytes).await?;
 
     let mut tx = pool.begin().await?;
 
@@ -417,7 +417,7 @@ async fn delete_document(
         .execute(pool)
         .await?;
 
-    let _ = tokio::fs::remove_file(storage_root().join(doc.storage_key)).await;
+    let _ = state.storage.delete(&doc.storage_key).await;
 
     Ok(Json(DeleteDocumentResponse {
         document_id: doc_id,
@@ -639,7 +639,7 @@ async fn download_original(
     })?;
     let file_name: String = row.get("file_name");
     let storage_key: String = row.get("storage_key");
-    let bytes = tokio::fs::read(storage_root().join(&storage_key)).await?;
+    let bytes = state.storage.get(&storage_key).await?;
 
     let mut headers = HeaderMap::new();
     headers.insert(
@@ -677,11 +677,10 @@ async fn reprocess_or_retry_document(
     let doc = fetch_document(pool, actor.tenant_id, doc_id).await?;
     require_kb_permission(actor, doc.kb_id, "write")?;
 
-    let original_path = storage_root().join(&doc.storage_key);
-    let bytes = tokio::fs::read(&original_path).await.map_err(|e| {
+    let bytes = state.storage.get(&doc.storage_key).await.map_err(|e| {
         AppError::bad_request(
             "ORIGINAL_FILE_MISSING",
-            format!("无法读取原始文件 {}: {e}", original_path.display()),
+            format!("无法读取原始文件 {}: {e}", doc.storage_key),
         )
     })?;
 
@@ -2143,21 +2142,6 @@ fn title_from_file_name(file_name: &str) -> String {
         .unwrap_or("未命名文档")
         .trim()
         .to_string()
-}
-
-fn storage_root() -> PathBuf {
-    std::env::var("DOCUMENT_STORAGE_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("data/documents"))
-}
-
-async fn persist_original_file(root: &Path, storage_key: &str, bytes: &[u8]) -> Result<()> {
-    let path = root.join(storage_key);
-    if let Some(parent) = path.parent() {
-        tokio::fs::create_dir_all(parent).await?;
-    }
-    tokio::fs::write(path, bytes).await?;
-    Ok(())
 }
 
 fn env_usize(name: &str, default: usize) -> usize {

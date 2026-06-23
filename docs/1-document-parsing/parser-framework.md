@@ -18,15 +18,7 @@ Upload API
 
 解析任务由异步 worker 执行。上传接口只负责落原文件和创建任务，不在请求线程内完成解析。
 
-## 框架选型
-
-| 格式 | 解析方式 | Rust 依赖建议 | 重点保留信息 |
-|---|---|---|---|
-| PDF | 文本层提取 + 布局坐标分析 | `pdf-extract`、`lopdf` | 页码、文本坐标、读取顺序、表格候选区域 |
-| Word `.docx` | OpenXML 解包解析 | `zip`、`quick-xml`、`docx-rs` | 标题样式、段落、列表、表格、脚注、页眉页脚 |
-| PPT `.pptx` | OpenXML 解包解析 | `zip`、`quick-xml` | slide、shape 顺序、文本框、表格、备注 |
-
-默认坚持纯 Rust 解析，避免引入 Python 服务依赖。对于扫描版 PDF 或图片型文档，OCR 作为后续增强能力，不进入第一版默认链路。
+整体技术架构、框架选型、链式设计见 [DocuMind 技术架构总览](../tech.md)。本文档聚焦解析流程和格式-specific 逻辑。
 
 ## 文件识别
 

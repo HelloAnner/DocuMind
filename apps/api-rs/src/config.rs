@@ -11,8 +11,15 @@ pub struct AppConfig {
     pub redis_url: Option<String>,
     pub rabbitmq_url: Option<String>,
     pub elasticsearch_url: Option<String>,
+    pub object_storage_provider: String,
     pub object_storage_endpoint: Option<String>,
+    pub object_storage_region: String,
     pub object_storage_bucket: String,
+    pub object_storage_access_key: Option<String>,
+    pub object_storage_secret_key: Option<String>,
+    pub object_storage_force_path_style: bool,
+    pub object_storage_tls_verify: bool,
+    pub object_storage_presign_expire_seconds: u64,
     pub blob_storage_dir: String,
     pub jwt_secret: String,
     pub auth_token_expire_hours: i64,
@@ -108,9 +115,21 @@ pub fn load_config() -> Result<AppConfig> {
     let redis_url = env::var("REDIS_URL").ok();
     let rabbitmq_url = env::var("RABBITMQ_URL").ok();
     let elasticsearch_url = env::var("ELASTICSEARCH_URL").ok();
+    let object_storage_provider = env::var("OBJECT_STORAGE_PROVIDER")
+        .unwrap_or_else(|_| "minio".to_string());
     let object_storage_endpoint = env::var("OBJECT_STORAGE_ENDPOINT").ok();
-    let object_storage_bucket =
-        env::var("OBJECT_STORAGE_BUCKET").unwrap_or_else(|_| "documind".to_string());
+    let object_storage_region = env::var("OBJECT_STORAGE_REGION")
+        .unwrap_or_else(|_| "us-east-1".to_string());
+    let object_storage_bucket = env::var("OBJECT_STORAGE_BUCKET")
+        .unwrap_or_else(|_| "documind".to_string());
+    let object_storage_access_key = env::var("OBJECT_STORAGE_ACCESS_KEY").ok();
+    let object_storage_secret_key = env::var("OBJECT_STORAGE_SECRET_KEY").ok();
+    let object_storage_force_path_style = env_bool("OBJECT_STORAGE_FORCE_PATH_STYLE", true);
+    let object_storage_tls_verify = env_bool("OBJECT_STORAGE_TLS_VERIFY", false);
+    let object_storage_presign_expire_seconds = env::var("OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(900);
     let blob_storage_dir = env::var("BLOB_STORAGE_DIR")
         .or_else(|_| env::var("OBJECT_STORAGE_LOCAL_DIR"))
         .unwrap_or_else(|_| "./data/objects".to_string());
@@ -288,8 +307,15 @@ pub fn load_config() -> Result<AppConfig> {
         redis_url,
         rabbitmq_url,
         elasticsearch_url,
+        object_storage_provider,
         object_storage_endpoint,
+        object_storage_region,
         object_storage_bucket,
+        object_storage_access_key,
+        object_storage_secret_key,
+        object_storage_force_path_style,
+        object_storage_tls_verify,
+        object_storage_presign_expire_seconds,
         blob_storage_dir,
         jwt_secret,
         auth_token_expire_hours,

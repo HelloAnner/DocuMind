@@ -2,7 +2,7 @@
 
 Conversation 域中的 Agent 不是通用聊天机器人，而是企业文档问答编排器。它的提示词目标是：理解真实问题、决定是否需要改写或澄清、调用 RAG 工具、基于证据生成答案，并在证据不足时明确拒答。
 
-Agent 的产品人格、温度、角色灵活度和行为边界归属独立的 [Agent 域](../agent/agent.md)。本文只保留 Conversation 调用 Agent 时需要的提示词契约。
+Agent 的产品人格、温度、角色灵活度和行为边界归属独立的 [Agent 域](../11-agent/agent.md)。本文只保留 Conversation 调用 Agent 时需要的提示词契约。
 
 ## Agent 角色
 

@@ -15,6 +15,7 @@ use crate::repositories::{
     AnswerCache, InMemoryAnswerCache, InMemoryConversationRepository, RedisAnswerCache,
     SqlxConversationRepository,
 };
+use crate::storage::{build_storage, ObjectStorage};
 
 #[derive(Clone)]
 pub struct AppState {
@@ -24,6 +25,7 @@ pub struct AppState {
     pub cache: Arc<dyn AnswerCache>,
     pub db_pool: Option<PgPool>,
     pub redis_client: Option<redis::Client>,
+    pub storage: Arc<dyn ObjectStorage>,
 }
 
 pub async fn build_state(config: AppConfig) -> Result<AppState> {
@@ -99,6 +101,8 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         Arc::new(RuleBasedClaimVerifier::new()),
     );
 
+    let storage = build_storage(&config);
+
     Ok(AppState {
         config,
         repository,
@@ -106,5 +110,6 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         cache,
         db_pool,
         redis_client,
+        storage,
     })
 }

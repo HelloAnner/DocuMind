@@ -794,6 +794,6 @@ CREATE TABLE audit_log (
 ## 相关文档
 
 - [权限控制](./access-control.md)
-- [知识库管理](../knowledge-base/knowledge-base.md)
+- [知识库管理](../5-knowledge-base/knowledge-base.md)
 - [产品需求文档](../prd.md)
 - [设计系统](../../DESIGN.md)

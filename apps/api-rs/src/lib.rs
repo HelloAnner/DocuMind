@@ -9,6 +9,7 @@ pub mod models;
 pub mod rag;
 pub mod repositories;
 pub mod state;
+pub mod storage;
 
 use std::net::SocketAddr;
 
@@ -89,9 +90,13 @@ async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
         "role": cfg.default_role,
         "auth": "jwt",
         "storage": {
+            "provider": &cfg.object_storage_provider,
             "blob_dir": &cfg.blob_storage_dir,
             "object_endpoint": &cfg.object_storage_endpoint,
+            "object_region": &cfg.object_storage_region,
             "object_bucket": &cfg.object_storage_bucket,
+            "object_force_path_style": cfg.object_storage_force_path_style,
+            "object_tls_verify": cfg.object_storage_tls_verify,
             "elasticsearch": &cfg.elasticsearch_url,
             "rabbitmq": &cfg.rabbitmq_url,
             "redis": &cfg.redis_url,

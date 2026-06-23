@@ -226,7 +226,7 @@ OBJECT_STORAGE_SECRET_KEY=change-me
 OBJECT_STORAGE_FORCE_PATH_STYLE=true
 ```
 
-对象路径建议与 `docs/document-parsing/storage-model.md` 保持一致：
+对象路径建议与 `docs/1-document-parsing/storage-model.md` 保持一致：
 
 ```text
 tenants/{tenant_id}/knowledge-bases/{kb_id}/documents/{doc_id}/original/{file_sha256}.{ext}

@@ -13,7 +13,7 @@
 - [问题保真与灵活性](./question-fidelity.md)：如何保留用户真实意图，同时支持追问、改写和澄清
 - [RAG 框架选型](./rag-framework.md)：DocuMind RAG Agent 的工程框架、组件边界和可替换策略
 
-更完整的 Agent 产品人格、角色灵活度和行为边界见 [Agent 域](../agent/agent.md)。Conversation 域只负责会话生命周期，Agent 域负责“它应该如何思考、如何回应、如何有温度但不越界”。
+更完整的 Agent 产品人格、角色灵活度和行为边界见 [Agent 域](../11-agent/agent.md)。Conversation 域只负责会话生命周期，Agent 域负责“它应该如何思考、如何回应、如何有温度但不越界”。
 
 ## 核心职责
 
