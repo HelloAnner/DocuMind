@@ -108,6 +108,15 @@ async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
             "rerankTopK": cfg.rag.retrieval.rrf_top_k,
             "threshold": cfg.rag.rerank.min_score
         },
+        "llm": {
+            "use_real_llm": cfg.rag.generation.use_real_llm,
+            "model": &cfg.rag.generation.model,
+            "base_url": &cfg.rag.generation.base_url,
+            "streaming_enabled": cfg.rag.generation.use_real_llm,
+            "mock_enabled": !cfg.rag.generation.use_real_llm,
+            "temperature": cfg.rag.generation.temperature,
+            "max_output_tokens": cfg.rag.generation.max_output_tokens
+        },
         "agent": {
             "default_tone": cfg.agent.default_tone,
             "proactive_followup": cfg.agent.proactive_followup,

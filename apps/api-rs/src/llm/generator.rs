@@ -67,9 +67,28 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
 
         tokio::spawn(async move {
             let mut full_answer = String::new();
-            while let Some(text) = text_rx.recv().await {
-                full_answer.push_str(&text);
-                let _ = tx.send(AnswerStreamItem::Delta { text });
+            while let Some(item) = text_rx.recv().await {
+                match item {
+                    Ok(text) => {
+                        full_answer.push_str(&text);
+                        let _ = tx.send(AnswerStreamItem::Delta { text });
+                    }
+                    Err(err) => {
+                        let _ = tx.send(AnswerStreamItem::Failed {
+                            code: err.code,
+                            message: err.message,
+                        });
+                        return;
+                    }
+                }
+            }
+
+            if full_answer.trim().is_empty() {
+                let _ = tx.send(AnswerStreamItem::Failed {
+                    code: "LLM_STREAM_ERROR".to_string(),
+                    message: "LLM provider finished without returning answer content".to_string(),
+                });
+                return;
             }
 
             for citation in citations.clone() {

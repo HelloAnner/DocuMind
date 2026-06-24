@@ -129,6 +129,12 @@ impl AgentKernel {
         let answer_stream: AnswerStream;
         let mode_reason: String;
         let mut no_answer_reason = None;
+        let mut prompt_versions = PromptVersions {
+            persona: "persona-v2".to_string(),
+            guardrail: "grounded-guardrail-v2".to_string(),
+            mode: format!("mode-{mode}-v2"),
+            task: "grounded-task-v2".to_string(),
+        };
 
         if rewrite.needs_clarification {
             mode_reason = "pronoun unclear or scope ambiguous".to_string();
@@ -242,6 +248,12 @@ impl AgentKernel {
                         &req.options,
                     )
                     .await?;
+                prompt_versions = PromptVersions {
+                    persona: prompt.persona_version.clone(),
+                    guardrail: prompt.guardrail_version.clone(),
+                    mode: prompt.mode_version.clone(),
+                    task: prompt.task_version.clone(),
+                };
 
                 emit_progress(
                     &progress,
@@ -261,13 +273,6 @@ impl AgentKernel {
                     .await?;
             }
         }
-
-        let prompt_versions = PromptVersions {
-            persona: "persona-v1".to_string(),
-            guardrail: "grounded-guardrail-v1".to_string(),
-            mode: format!("mode-{mode}-v1"),
-            task: "grounded-task-v1".to_string(),
-        };
 
         let trace = AgentTrace {
             mode_reason,

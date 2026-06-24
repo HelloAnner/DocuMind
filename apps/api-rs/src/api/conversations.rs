@@ -450,6 +450,12 @@ async fn run_agent_pipeline(
         &original_query,
         &doc_version_hash,
     );
+    let answer_cache_enabled = !config.rag.generation.use_real_llm && should_cache(&original_query);
+    let cached_answer = if answer_cache_enabled {
+        cache.get(&cache_key).await?
+    } else {
+        None
+    };
 
     let mut stream: tokio::sync::mpsc::UnboundedReceiver<AnswerStreamItem>;
     let mut trace;
@@ -458,7 +464,7 @@ async fn run_agent_pipeline(
     let mut agent_no_answer_reason: Option<NoAnswerReason> = None;
     let mut pipeline_retrieval_traces: Vec<RetrievalTrace> = vec![];
 
-    if let Some(cached) = cache.get(&cache_key).await? {
+    if let Some(cached) = cached_answer {
         mode = crate::models::agent::AgentMode::Answerer;
         rewritten_query = Some(original_query.clone());
         trace = crate::models::agent::AgentTrace {
@@ -680,7 +686,7 @@ async fn run_agent_pipeline(
     }
 
     // Cache answer if high confidence and has citations
-    if confidence == Confidence::High && !citations.is_empty() && should_cache(&original_query) {
+    if confidence == Confidence::High && !citations.is_empty() && answer_cache_enabled {
         let cached = CachedAnswer {
             answer: answer_text,
             citations: citations.clone(),

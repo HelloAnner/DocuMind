@@ -2,6 +2,7 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -54,6 +55,41 @@ pub struct StreamChunk {
     pub choices: Option<Vec<DeltaChoice>>,
 }
 
+#[derive(Debug, Clone)]
+pub struct LlmStreamError {
+    pub code: String,
+    pub message: String,
+}
+
+impl LlmStreamError {
+    pub fn provider(status: StatusCode, message: String) -> Self {
+        let code = if status == StatusCode::UNAUTHORIZED {
+            "LLM_UNAUTHORIZED"
+        } else {
+            "LLM_PROVIDER_ERROR"
+        };
+        Self {
+            code: code.to_string(),
+            message,
+        }
+    }
+
+    pub fn stream(message: impl Into<String>) -> Self {
+        Self {
+            code: "LLM_STREAM_ERROR".to_string(),
+            message: message.into(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum ParsedStreamEvent {
+    Delta(String),
+    Done,
+    Error(String),
+    Empty,
+}
+
 #[async_trait]
 pub trait LlmClient: Send + Sync {
     async fn complete_json<T>(&self, prompt: String, system: Option<String>) -> Result<T>
@@ -66,7 +102,7 @@ pub trait LlmClient: Send + Sync {
         system: Option<String>,
         temperature: f64,
         max_tokens: u32,
-    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<String>>;
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<String, LlmStreamError>>>;
 }
 
 pub struct OpenAiClient {
@@ -146,7 +182,7 @@ impl LlmClient for OpenAiClient {
         system: Option<String>,
         temperature: f64,
         max_tokens: u32,
-    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<String>> {
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<String, LlmStreamError>>> {
         let mut messages = vec![];
         if let Some(s) = system {
             messages.push(ChatMessage {
@@ -174,8 +210,19 @@ impl LlmClient for OpenAiClient {
             .header("Content-Type", "application/json")
             .json(&req)
             .send()
-            .await?
-            .error_for_status()?;
+            .await?;
+
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp
+                .text()
+                .await
+                .unwrap_or_else(|_| "LLM provider returned an unreadable error body".to_string());
+            let message = provider_error_message(status, &body);
+            let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+            let _ = tx.send(Err(LlmStreamError::provider(status, message)));
+            return Ok(rx);
+        }
 
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let mut stream = resp.bytes_stream();
@@ -186,24 +233,40 @@ impl LlmClient for OpenAiClient {
                 match chunk {
                     Ok(bytes) => {
                         buffer.push_str(&String::from_utf8_lossy(&bytes));
-                        while let Some(pos) = buffer.find("\n\n") {
-                            let event = buffer.split_off(pos);
-                            buffer.truncate(buffer.len() - pos); // keep remaining in buffer
-                            let _ = buffer;
-                            // Actually we need to split properly.
-                            // Simpler: take the prefix before "\n\n".
-                            let event_text = std::mem::take(&mut buffer);
-                            buffer = event;
-                            buffer = buffer.trim_start_matches("\n\n").to_string();
-                            if let Some(text) = parse_sse_event(&event_text) {
-                                let _ = tx.send(text);
+                        while let Some((pos, sep_len)) = find_sse_separator(&buffer) {
+                            let event_text = buffer[..pos].to_string();
+                            buffer = buffer[pos + sep_len..].to_string();
+                            match parse_sse_event(&event_text) {
+                                ParsedStreamEvent::Delta(text) => {
+                                    let _ = tx.send(Ok(text));
+                                }
+                                ParsedStreamEvent::Error(message) => {
+                                    let _ = tx.send(Err(LlmStreamError::stream(message)));
+                                    return;
+                                }
+                                ParsedStreamEvent::Done => return,
+                                ParsedStreamEvent::Empty => {}
                             }
                         }
                     }
                     Err(e) => {
                         tracing::error!("llm stream error: {e}");
+                        let _ = tx.send(Err(LlmStreamError::stream(e.to_string())));
                         break;
                     }
+                }
+            }
+
+            let rest = buffer.trim();
+            if !rest.is_empty() {
+                match parse_sse_event(rest) {
+                    ParsedStreamEvent::Delta(text) => {
+                        let _ = tx.send(Ok(text));
+                    }
+                    ParsedStreamEvent::Error(message) => {
+                        let _ = tx.send(Err(LlmStreamError::stream(message)));
+                    }
+                    ParsedStreamEvent::Done | ParsedStreamEvent::Empty => {}
                 }
             }
         });
@@ -212,14 +275,24 @@ impl LlmClient for OpenAiClient {
     }
 }
 
-fn parse_sse_event(event_text: &str) -> Option<String> {
+fn find_sse_separator(buffer: &str) -> Option<(usize, usize)> {
+    match (buffer.find("\n\n"), buffer.find("\r\n\r\n")) {
+        (Some(a), Some(b)) if a < b => Some((a, 2)),
+        (Some(_), Some(b)) => Some((b, 4)),
+        (Some(a), None) => Some((a, 2)),
+        (None, Some(b)) => Some((b, 4)),
+        (None, None) => None,
+    }
+}
+
+fn parse_sse_event(event_text: &str) -> ParsedStreamEvent {
     let mut data = String::new();
     for line in event_text.lines() {
         let trimmed = line.trim();
         if trimmed.starts_with("data:") {
             let payload = trimmed.trim_start_matches("data:").trim();
             if payload == "[DONE]" {
-                return None;
+                return ParsedStreamEvent::Done;
             }
             if !data.is_empty() {
                 data.push('\n');
@@ -228,16 +301,61 @@ fn parse_sse_event(event_text: &str) -> Option<String> {
         }
     }
     if data.is_empty() {
-        return None;
+        return ParsedStreamEvent::Empty;
     }
-    let chunk: StreamChunk = serde_json::from_str(&data).ok()?;
-    let choices = chunk.choices?;
-    let choice = choices.first()?;
+    let value: Value = match serde_json::from_str(&data) {
+        Ok(value) => value,
+        Err(_) => return ParsedStreamEvent::Empty,
+    };
+    if let Some(message) = value
+        .get("error")
+        .and_then(|error| error.get("message"))
+        .and_then(Value::as_str)
+    {
+        return ParsedStreamEvent::Error(message.to_string());
+    }
+    let chunk: StreamChunk = match serde_json::from_value(value) {
+        Ok(chunk) => chunk,
+        Err(_) => return ParsedStreamEvent::Empty,
+    };
+    let Some(choices) = chunk.choices else {
+        return ParsedStreamEvent::Empty;
+    };
+    let Some(choice) = choices.first() else {
+        return ParsedStreamEvent::Empty;
+    };
     if choice.finish_reason.is_some() {
-        return None;
+        return ParsedStreamEvent::Done;
     }
-    let delta = choice.delta.as_ref()?;
-    delta["content"].as_str().map(|s| s.to_string())
+    let Some(delta) = choice.delta.as_ref() else {
+        return ParsedStreamEvent::Empty;
+    };
+    delta["content"]
+        .as_str()
+        .filter(|s| !s.is_empty())
+        .map(|s| ParsedStreamEvent::Delta(s.to_string()))
+        .unwrap_or(ParsedStreamEvent::Empty)
+}
+
+fn provider_error_message(status: StatusCode, body: &str) -> String {
+    if let Ok(value) = serde_json::from_str::<Value>(body) {
+        if let Some(message) = value
+            .get("error")
+            .and_then(|error| error.get("message"))
+            .and_then(Value::as_str)
+        {
+            return format!("LLM provider returned {status}: {message}");
+        }
+        if let Some(message) = value.get("message").and_then(Value::as_str) {
+            return format!("LLM provider returned {status}: {message}");
+        }
+    }
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        format!("LLM provider returned {status}")
+    } else {
+        format!("LLM provider returned {status}: {trimmed}")
+    }
 }
 
 fn strip_json_fences(text: &str) -> String {
@@ -270,6 +388,30 @@ mod tests {
     #[test]
     fn parses_sse_data_line() {
         let event = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}";
-        assert_eq!(parse_sse_event(event), Some("hello".to_string()));
+        assert_eq!(
+            parse_sse_event(event),
+            ParsedStreamEvent::Delta("hello".to_string())
+        );
+    }
+
+    #[test]
+    fn parses_sse_done_line() {
+        let event = "data: [DONE]";
+        assert_eq!(parse_sse_event(event), ParsedStreamEvent::Done);
+    }
+
+    #[test]
+    fn parses_provider_error_event() {
+        let event = "data: {\"error\":{\"message\":\"bad key\"}}";
+        assert_eq!(
+            parse_sse_event(event),
+            ParsedStreamEvent::Error("bad key".to_string())
+        );
+    }
+
+    #[test]
+    fn finds_lf_and_crlf_separators() {
+        assert_eq!(find_sse_separator("a\n\nb"), Some((1, 2)));
+        assert_eq!(find_sse_separator("a\r\n\r\nb"), Some((1, 4)));
     }
 }

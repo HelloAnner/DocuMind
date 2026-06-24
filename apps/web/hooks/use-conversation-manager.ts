@@ -196,9 +196,9 @@ export function useConversationManager() {
 
       setStages([
         { label: "查询改写", done: false, running: true },
-        { label: "混合检索", done: false, running: true },
-        { label: "重排序", done: false, running: true },
-        { label: "生成答案", done: false, running: true },
+        { label: "混合检索", done: false },
+        { label: "重排序", done: false },
+        { label: "生成答案", done: false },
       ]);
 
       let assistantId = assistantTempId;
@@ -219,12 +219,56 @@ export function useConversationManager() {
             assistantId = data.assistant_message_id;
             abortControllersRef.current.set(assistantId, controller);
             setStreamingId(assistantId);
-            setStages([
-              { label: "查询改写", done: true },
-              { label: "混合检索", done: true },
-              { label: "重排序", done: true },
-              { label: "生成答案", done: false, running: true },
-            ]);
+          } else if (sse.event === "status.updated") {
+            const data = sse.data as { message_id: string; status: string };
+            if (data.message_id !== assistantId && data.message_id !== assistantTempId) continue;
+            if (data.status === "rewriting") {
+              setStages([
+                { label: "查询改写", done: false, running: true },
+                { label: "混合检索", done: false },
+                { label: "重排序", done: false },
+                { label: "生成答案", done: false },
+              ]);
+            } else if (data.status === "retrieving") {
+              setStages([
+                { label: "查询改写", done: true },
+                { label: "混合检索", done: false, running: true },
+                { label: "重排序", done: false },
+                { label: "生成答案", done: false },
+              ]);
+            } else if (data.status === "reranking") {
+              setStages([
+                { label: "查询改写", done: true },
+                { label: "混合检索", done: true },
+                { label: "重排序", done: false, running: true },
+                { label: "生成答案", done: false },
+              ]);
+            } else if (data.status === "generating") {
+              setStages([
+                { label: "查询改写", done: true },
+                { label: "混合检索", done: true },
+                { label: "重排序", done: true },
+                { label: "生成答案", done: false, running: true },
+              ]);
+            }
+          } else if (sse.event === "rewrite.completed") {
+            setStages((s) =>
+              s.map((stage) =>
+                stage.label === "查询改写" ? { ...stage, done: true, running: false } : stage
+              )
+            );
+          } else if (sse.event === "retrieval.completed") {
+            setStages((s) =>
+              s.map((stage) =>
+                stage.label === "混合检索" ? { ...stage, done: true, running: false } : stage
+              )
+            );
+          } else if (sse.event === "rerank.completed") {
+            setStages((s) =>
+              s.map((stage) =>
+                stage.label === "重排序" ? { ...stage, done: true, running: false } : stage
+              )
+            );
           } else if (sse.event === "answer.delta") {
             const data = sse.data as { message_id: string; text: string };
             setMessages((prev) =>
@@ -263,6 +307,7 @@ export function useConversationManager() {
               status: "failed",
               content: data.message,
             });
+            setStages((s) => s.map((stage) => ({ ...stage, running: false })));
           }
         }
       } catch (e) {
