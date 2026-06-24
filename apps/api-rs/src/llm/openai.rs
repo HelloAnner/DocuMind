@@ -103,6 +103,13 @@ pub trait LlmClient: Send + Sync {
         temperature: f64,
         max_tokens: u32,
     ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<String, LlmStreamError>>>;
+
+    async fn stream_chat(
+        &self,
+        messages: Vec<ChatMessage>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<String, LlmStreamError>>>;
 }
 
 pub struct OpenAiClient {
@@ -195,6 +202,15 @@ impl LlmClient for OpenAiClient {
             content: prompt,
         });
 
+        self.stream_chat(messages, temperature, max_tokens).await
+    }
+
+    async fn stream_chat(
+        &self,
+        messages: Vec<ChatMessage>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Result<tokio::sync::mpsc::UnboundedReceiver<Result<String, LlmStreamError>>> {
         let req = ChatCompletionRequest {
             model: self.config.model.clone(),
             messages,
@@ -413,5 +429,30 @@ mod tests {
     fn finds_lf_and_crlf_separators() {
         assert_eq!(find_sse_separator("a\n\nb"), Some((1, 2)));
         assert_eq!(find_sse_separator("a\r\n\r\nb"), Some((1, 4)));
+    }
+
+    #[test]
+    fn chat_completion_request_serializes_messages() {
+        let req = ChatCompletionRequest {
+            model: "qwen-turbo".to_string(),
+            messages: vec![
+                ChatMessage {
+                    role: "system".to_string(),
+                    content: "system content".to_string(),
+                },
+                ChatMessage {
+                    role: "user".to_string(),
+                    content: "user content".to_string(),
+                },
+            ],
+            temperature: 0.2,
+            max_tokens: 1200,
+            stream: true,
+        };
+        let json = serde_json::to_value(&req).unwrap();
+        assert_eq!(json["model"], "qwen-turbo");
+        assert_eq!(json["messages"].as_array().unwrap().len(), 2);
+        assert_eq!(json["messages"][0]["role"], "system");
+        assert_eq!(json["messages"][1]["content"], "user content");
     }
 }

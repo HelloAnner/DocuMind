@@ -219,13 +219,16 @@ impl AgentKernel {
                 .collect();
 
             if filtered_reranked.is_empty() {
-                mode_reason = "no relevant chunks above threshold".to_string();
-                no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
-                answer_stream = single_text_stream(
-                    "文档中未找到与该问题直接相关的信息。".to_string(),
-                    Confidence::Low,
-                    Some(NoAnswerReason::NoRelevantChunks),
-                );
+                mode_reason = "no evidence: fallback to conversational response".to_string();
+                no_answer_reason = None;
+                answer_stream = self
+                    .answer_generator
+                    .chat(
+                        req.original_query.clone(),
+                        req.history.clone(),
+                        req.options.generation.clone(),
+                    )
+                    .await?;
             } else {
                 mode_reason = format!("selected mode {mode} based on query intent");
                 evidence = self

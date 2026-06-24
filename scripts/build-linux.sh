@@ -6,8 +6,8 @@ TARGET_DIR="${DEPLOY_TARGET_DIR:-target/deploy-linux-x86_64-musl}"
 BIN_NAME="${BIN_NAME:-documind}"
 RUSTFLAGS_VALUE="${DEPLOY_TARGET_RUSTFLAGS:--C target-feature=+crt-static -C relocation-model=static}"
 CROSS_PLATFORM="${CROSS_DOCKER_PLATFORM:-linux/amd64}"
-CROSS_IMAGE_NAME="${CROSS_BUILD_IMAGE:-localhost/documind-rust-musl-cross:1.90-bookworm}"
-CROSS_BASE_IMAGE_NAME="${CROSS_BASE_IMAGE:-rust:1.90-bookworm}"
+CROSS_IMAGE_NAME="${CROSS_BUILD_IMAGE:-localhost/documind-rust-musl-cross:1.91-bookworm}"
+CROSS_BASE_IMAGE_NAME="${CROSS_BASE_IMAGE:-rust:1.91-bookworm}"
 DOCKER_IO_MIRROR_PREFIX="${DOCKER_IO_MIRROR_PREFIX:-m.daocloud.io/docker.io/}"
 
 if ! command -v docker >/dev/null 2>&1; then

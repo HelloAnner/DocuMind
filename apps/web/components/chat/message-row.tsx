@@ -4,9 +4,10 @@ import { useState } from "react";
 import { Bot, Check, Copy, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { CitationCard, isCitationDeleted } from "./citation-card";
+import { isCitationDeleted } from "./citation-card";
 import { AnswerContent } from "./answer-content";
 import type { Citation, Message } from "@/lib/types";
+import type { PipelineStage } from "@/hooks/use-conversation-manager";
 
 function CitationChip({
   citation,
@@ -41,6 +42,7 @@ interface MessageRowProps {
   onCancel: () => void;
   onFeedback: (id: string) => void;
   onCitationClick: (c: Citation) => void;
+  stages?: PipelineStage[];
 }
 
 function StreamingIndicator() {
@@ -63,6 +65,7 @@ export function MessageRow({
   onCancel,
   onFeedback,
   onCitationClick,
+  stages,
 }: MessageRowProps) {
   const [copied, setCopied] = useState(false);
 
@@ -94,15 +97,34 @@ export function MessageRow({
         </span>
         <div>
           <strong>DocuMind</strong>
-          <p>
-            {hasCitations
-              ? `基于 ${message.citations.length} 个来源`
-              : "未找到相关来源"}
-            {message.confidence ? ` · 置信度 ${confidenceLabel(message.confidence)}` : ""}
-            {deletedAll ? " · 来源已删除" : ""}
-          </p>
+          {hasCitations && (
+            <p>
+              {`基于 ${message.citations.length} 个来源`}
+              {message.confidence ? ` · 置信度 ${confidenceLabel(message.confidence)}` : ""}
+              {deletedAll ? " · 来源已删除" : ""}
+            </p>
+          )}
         </div>
       </div>
+
+      {stages && stages.length > 0 && (
+        <div className="dm-process-card">
+          <div className="dm-process-card-head">
+            <span>执行过程</span>
+            <small>{isStreaming ? "运行中" : "已完成"}</small>
+          </div>
+          {stages.map((stage) => (
+            <div className="dm-stage" key={stage.label}>
+              <span
+                className={`dm-stage-dot ${stage.done ? "done" : stage.running ? "running" : ""}`}
+              >
+                {stage.done ? "✓" : ""}
+              </span>
+              <span>{stage.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {failed || cancelled ? (
         <div className="dm-answer-error">

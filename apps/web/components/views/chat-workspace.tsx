@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Bot,
   ChevronUp,
   ChevronDown,
+  Plus,
   PanelRightClose,
   PanelRightOpen,
+  Square,
   ThumbsDown,
   ThumbsUp,
   X,
@@ -30,6 +32,7 @@ const suggestions = [
 export function ChatWorkspace() {
   const {
     messages,
+    conversations,
     loading,
     streamingId,
     stages,
@@ -43,6 +46,8 @@ export function ChatWorkspace() {
   } = useConversation();
 
   const [input, setInput] = useState("");
+  const [isComposing, setIsComposing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
   const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | undefined>();
   const [feedbackComment, setFeedbackComment] = useState("");
@@ -51,6 +56,7 @@ export function ChatWorkspace() {
 
   const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
   const sourceDocs = latestAssistant?.citations ?? [];
+  const currentConversation = conversations.find((c) => c.conversation_id === currentId);
 
   const currentSourceIndex = selectedCitation
     ? sourceDocs.findIndex((c) => c.index === selectedCitation.index)
@@ -71,10 +77,14 @@ export function ChatWorkspace() {
     const text = input.trim();
     if (!text) return;
     setInput("");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+    }
     await sendMessage(text);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isComposing) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -122,23 +132,14 @@ export function ChatWorkspace() {
           onCancel={() => cancelMessage(message.message_id)}
           onFeedback={(id) => setFeedbackMessageId(id)}
           onCitationClick={handleCitationClick}
+          stages={
+            message.message_id === streamingId ||
+            (message.role === "assistant" && message.message_id === latestAssistant?.message_id)
+              ? stages
+              : undefined
+          }
         />
       ))}
-
-      {messages.length > 0 && streamingId && (
-        <div className="dm-process-card">
-          {stages.map((stage) => (
-            <div className="dm-stage" key={stage.label}>
-              <span
-                className={`dm-stage-dot ${stage.done ? "done" : stage.running ? "running" : ""}`}
-              >
-                {stage.done ? "✓" : ""}
-              </span>
-              <span>{stage.label}</span>
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 
@@ -222,26 +223,52 @@ export function ChatWorkspace() {
 
   return (
     <>
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div className="dm-chat-workspace">
         <div className="dm-chat-main">
+          <div className="dm-chat-session-header">
+            <div className="dm-chat-session-title">
+              <strong>{currentConversation?.title ?? "新会话"}</strong>
+              <span>DocuMind Agent · 知识库问答</span>
+            </div>
+            <div className="dm-chat-session-actions">
+              <IconButton
+                aria-label={rightOpen ? "收起引用来源" : "展开引用来源"}
+                onClick={() => setRightOpen(!rightOpen)}
+              >
+                {rightOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+              </IconButton>
+            </div>
+          </div>
+
           {messages.length === 0 && !loading ? renderEmpty() : renderStream()}
 
           <div className="dm-composer">
             <div className="dm-composer-box">
-              <input
-                placeholder="输入问题，Shift + Enter 换行"
+              <button type="button" className="dm-composer-tool" aria-label="添加附件">
+                <Plus size={17} />
+              </button>
+              <textarea
+                ref={textareaRef}
+                placeholder={streamingId ? "DocuMind 正在处理…" : "输入问题，Shift + Enter 换行"}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
+                onInput={(e) => {
+                  e.currentTarget.style.height = "auto";
+                  e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 180)}px`;
+                }}
                 onKeyDown={handleKeyDown}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={() => setIsComposing(false)}
                 disabled={!!streamingId}
+                rows={1}
               />
               <button
-                className="dm-send-button"
-                aria-label="发送"
-                onClick={handleSend}
-                disabled={!input.trim() || !!streamingId}
+                className={`dm-send-button ${streamingId ? "running" : ""}`}
+                aria-label={streamingId ? "停止" : "发送"}
+                onClick={streamingId ? () => streamingId && cancelMessage(streamingId) : handleSend}
+                disabled={!streamingId && !input.trim()}
               >
-                <ArrowUp size={16} />
+                {streamingId ? <Square size={14} fill="currentColor" /> : <ArrowUp size={16} />}
               </button>
             </div>
           </div>

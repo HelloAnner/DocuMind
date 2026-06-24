@@ -23,6 +23,7 @@ import type {
   MessageStatus,
   Rating,
   RetryMessageRequest,
+  RuntimeEventEnvelope,
   SendMessageRequest,
 } from "@/lib/types";
 
@@ -39,6 +40,37 @@ export type FeedbackState = {
   comment?: string;
   correction?: string;
 };
+
+function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
+  if (!data || typeof data !== "object") return false;
+  const event = data as Partial<RuntimeEventEnvelope>;
+  return event.schema_version === "moss.execution.event.v1" && typeof event.event_type === "string";
+}
+
+function stageLabelFromRuntime(event: RuntimeEventEnvelope): string | null {
+  const display = event.payload.display;
+  if (display && typeof display === "object") {
+    const data = (display as { data?: unknown }).data;
+    if (data && typeof data === "object") {
+      const label = (data as { label?: unknown }).label;
+      if (typeof label === "string") return label;
+    }
+  }
+
+  const displayName = event.payload.display_name;
+  if (typeof displayName === "string") return displayName;
+
+  const name = event.step?.name ?? event.payload.name;
+  if (name === "query_rewrite") return "查询改写";
+  if (name === "hybrid_retrieval") return "混合检索";
+  if (name === "rerank") return "重排序";
+  if (name === "answer_generation") return "生成答案";
+  return null;
+}
+
+function confidenceFromRuntime(value: unknown): "high" | "medium" | "low" {
+  return value === "high" || value === "medium" || value === "low" ? value : "medium";
+}
 
 export function useConversationManager() {
   const router = useRouter();
@@ -207,6 +239,125 @@ export function useConversationManager() {
           if (controller.signal.aborted) {
             break;
           }
+          const runtime = isRuntimeEvent(sse.data) ? sse.data : null;
+          if (runtime) {
+            if (runtime.event_type === "execution.started") {
+              const data = runtime.payload as {
+                user_message_id?: string;
+                assistant_message_id?: string;
+              };
+              if (!isRetry && data.user_message_id) {
+                updateMessage(userTempId, { message_id: data.user_message_id });
+              }
+              const runtimeAssistantId = data.assistant_message_id ?? runtime.response_message_id;
+              updateMessage(assistantTempId, { message_id: runtimeAssistantId });
+              assistantId = runtimeAssistantId;
+              abortControllersRef.current.set(assistantId, controller);
+              setStreamingId(assistantId);
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.started") {
+              const label = stageLabelFromRuntime(runtime);
+              if (label) {
+                setStages((prev) =>
+                  prev.map((stage) => ({
+                    ...stage,
+                    running: stage.label === label,
+                    done: stage.label === label ? false : stage.done,
+                  }))
+                );
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.result") {
+              const label = stageLabelFromRuntime(runtime);
+              if (label) {
+                setStages((prev) =>
+                  prev.map((stage) =>
+                    stage.label === label ? { ...stage, done: true, running: false } : stage
+                  )
+                );
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "response.delta") {
+              const delta = runtime.payload.delta;
+              if (typeof delta !== "string") continue;
+              const messageId = runtime.response_message_id;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.message_id === messageId || m.message_id === assistantTempId
+                    ? { ...m, content: m.content + delta }
+                    : m
+                )
+              );
+              continue;
+            }
+
+            if (runtime.event_type === "sources.reported") {
+              const sources = runtime.payload.sources;
+              if (!Array.isArray(sources)) continue;
+              const citations = sources
+                .map((source) =>
+                  source && typeof source === "object"
+                    ? (source as { documind_citation?: Citation }).documind_citation
+                    : undefined
+                )
+                .filter((citation): citation is Citation => !!citation);
+              if (citations.length === 0) continue;
+              const messageId = runtime.response_message_id;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.message_id === messageId || m.message_id === assistantTempId
+                    ? { ...m, citations: [...m.citations, ...citations] }
+                    : m
+                )
+              );
+              continue;
+            }
+
+            if (runtime.event_type === "response.completed") {
+              const confidence = confidenceFromRuntime(runtime.payload.confidence);
+              updateMessage(runtime.response_message_id, {
+                status: "completed",
+                confidence,
+              });
+              setStages((s) =>
+                s.map((stage) =>
+                  stage.label === "生成答案" ? { ...stage, done: true, running: false } : stage
+                )
+              );
+              continue;
+            }
+
+            if (runtime.event_type === "execution.completed") {
+              updateMessage(runtime.response_message_id, { status: "completed" });
+              setStages((s) => s.map((stage) => ({ ...stage, done: true, running: false })));
+              continue;
+            }
+
+            if (runtime.event_type === "execution.cancelled") {
+              updateMessage(runtime.response_message_id, { status: "cancelled" as MessageStatus });
+              setStages((s) => s.map((stage) => ({ ...stage, running: false })));
+              continue;
+            }
+
+            if (runtime.event_type === "execution.failed") {
+              const error = runtime.payload.error as { message?: string } | undefined;
+              updateMessage(runtime.response_message_id, {
+                status: "failed",
+                content: error?.message ?? "生成失败，请重试",
+              });
+              setStages((s) => s.map((stage) => ({ ...stage, running: false })));
+              continue;
+            }
+
+            continue;
+          }
+
           if (sse.event === "message.created") {
             const data = sse.data as {
               user_message_id: string;

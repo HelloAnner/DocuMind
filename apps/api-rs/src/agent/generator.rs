@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::agent::prompt::Prompt;
 use crate::agent::verifier::ClaimVerifier;
-use crate::models::agent::{AnswerStreamItem, CitationOutput, GenerationConfig};
+use crate::models::agent::{AnswerStreamItem, CitationOutput, ConversationTurn, GenerationConfig};
 use crate::models::rag::EvidencePack;
 
 pub type AnswerStream = UnboundedReceiver<AnswerStreamItem>;
@@ -19,6 +19,13 @@ pub trait AnswerGenerator: Send + Sync {
         prompt: Prompt,
         config: GenerationConfig,
         verifier: Arc<dyn ClaimVerifier>,
+    ) -> Result<AnswerStream>;
+
+    async fn chat(
+        &self,
+        query: String,
+        history: Vec<ConversationTurn>,
+        config: GenerationConfig,
     ) -> Result<AnswerStream>;
 }
 
@@ -93,6 +100,33 @@ impl AnswerGenerator for MockAnswerGenerator {
             });
         });
 
+        Ok(rx)
+    }
+
+    async fn chat(
+        &self,
+        query: String,
+        _history: Vec<ConversationTurn>,
+        _config: GenerationConfig,
+    ) -> Result<AnswerStream> {
+        let (tx, rx) = unbounded_channel();
+        let answer = format!(
+            "你好！我是 DocuMind。当前未接入真实大模型，所以这是模拟回复。如果是真实模型，我会针对「{}」给出流式回答。",
+            query
+        );
+        tokio::spawn(async move {
+            for segment in split_answer(&answer) {
+                let _ = tx.send(AnswerStreamItem::Delta { text: segment });
+                tokio::task::yield_now().await;
+            }
+            let _ = tx.send(AnswerStreamItem::Completed {
+                confidence: crate::models::Confidence::Medium,
+                usage: Some(crate::models::Usage {
+                    input_tokens: 0,
+                    output_tokens: answer.len() as u32,
+                }),
+            });
+        });
         Ok(rx)
     }
 }

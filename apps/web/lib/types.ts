@@ -149,6 +149,29 @@ export interface SSEEvent {
   data: unknown;
 }
 
+export interface RuntimeEventEnvelope {
+  schema_version: "moss.execution.event.v1";
+  event_id: string;
+  job_id: UUID;
+  tenant_id: UUID;
+  user_id: UUID;
+  agent_id: string;
+  session_id: UUID;
+  execution_id: UUID;
+  event_seq: number;
+  event_type: string;
+  occurred_at: string;
+  response_message_id: UUID;
+  trace_id: string;
+  step?: {
+    step_id: string;
+    parent_step_id?: string | null;
+    step_type: string;
+    name: string;
+  } | null;
+  payload: Record<string, unknown>;
+}
+
 export interface AnswerDeltaData {
   message_id: UUID;
   text: string;

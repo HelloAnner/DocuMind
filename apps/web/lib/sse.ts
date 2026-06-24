@@ -8,7 +8,11 @@ export async function* streamSse(
 ): AsyncGenerator<SSEEvent, void, unknown> {
   const response = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", ...getAuthHeaders() },
+    headers: {
+      "Content-Type": "application/json",
+      "X-DocuMind-Event-Protocol": "atom",
+      ...getAuthHeaders(),
+    },
     body: JSON.stringify(body),
     signal,
   });

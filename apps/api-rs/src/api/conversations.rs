@@ -1,7 +1,8 @@
 use std::convert::Infallible;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, Query, State};
+use axum::http::HeaderMap;
 use axum::response::sse::{Event, Sse};
 use axum::response::IntoResponse;
 use axum::Json;
@@ -12,6 +13,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::error;
 use uuid::Uuid;
 
+use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
 use crate::agent::{AgentKernel, AgentProgress};
 use crate::auth::ActorExtractor;
 use crate::error::AppError;
@@ -314,6 +316,7 @@ async fn send_message(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path(conversation_id): Path<Uuid>,
+    headers: HeaderMap,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
     let content = req.content.trim().to_string();
@@ -393,12 +396,22 @@ async fn send_message(
     let cache = state.cache.clone();
     let kernel = state.agent_kernel;
     let config = state.config.clone();
-
-    let _ = tx2.send(Ok(SseEvent::MessageCreated {
-        user_message_id: user_message.id,
+    let protocol = SseProtocol::from_headers(&headers);
+    let mut runtime_events = RuntimeEventFactory::new(
+        actor.tenant_id,
+        actor.user_id,
+        session.id,
         assistant_message_id,
-    }
-    .to_sse_event()));
+    );
+
+    send_execution_started(
+        &tx2,
+        protocol,
+        &mut runtime_events,
+        user_message.id,
+        assistant_message_id,
+        &content,
+    );
 
     tokio::spawn(async move {
         if let Err(e) = run_agent_pipeline(
@@ -413,6 +426,8 @@ async fn send_message(
             content,
             effective_kb_ids,
             tx2,
+            protocol,
+            runtime_events,
         )
         .await
         {
@@ -436,7 +451,10 @@ async fn run_agent_pipeline(
     original_query: String,
     effective_kb_ids: Vec<Uuid>,
     tx: tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: RuntimeEventFactory,
 ) -> Result<(), AppError> {
+    let runtime_events = Arc::new(Mutex::new(runtime_events));
     // Build history from previous completed QA pairs.
     let history = build_history(&repo, actor.tenant_id, conversation_id, user_message_id).await?;
     let doc_version_hash = repo
@@ -503,10 +521,17 @@ async fn run_agent_pipeline(
     } else {
         let (progress_tx, mut progress_rx) = unbounded_channel::<AgentProgress>();
         let progress_sse_tx = tx.clone();
+        let progress_protocol = protocol;
+        let progress_runtime_events = runtime_events.clone();
         tokio::spawn(async move {
             while let Some(progress) = progress_rx.recv().await {
-                let event = progress_to_sse_event(assistant_message_id, progress);
-                let _ = progress_sse_tx.send(Ok(event.to_sse_event()));
+                send_progress_event(
+                    &progress_sse_tx,
+                    progress_protocol,
+                    &progress_runtime_events,
+                    assistant_message_id,
+                    progress,
+                );
             }
         });
 
@@ -532,6 +557,8 @@ async fn run_agent_pipeline(
                     "PIPELINE_ERROR".to_string(),
                     message.clone(),
                     &tx,
+                    protocol,
+                    &runtime_events,
                 )
                 .await?;
                 return Ok(());
@@ -553,24 +580,29 @@ async fn run_agent_pipeline(
 
     while let Some(item) = stream.recv().await {
         if assistant_message_cancelled(&repo, actor.tenant_id, assistant_message_id).await? {
+            send_execution_cancelled(&tx, protocol, &runtime_events);
             return Ok(());
         }
         match item {
             AnswerStreamItem::Delta { text } => {
                 answer_text.push_str(&text);
-                let _ = tx.send(Ok(SseEvent::AnswerDelta {
-                    message_id: assistant_message_id,
+                send_answer_delta(
+                    &tx,
+                    protocol,
+                    &runtime_events,
+                    assistant_message_id,
                     text,
-                }
-                .to_sse_event()));
+                );
             }
             AnswerStreamItem::Citation { citation } => {
                 citations.push(citation.clone());
-                let _ = tx.send(Ok(SseEvent::CitationDelta {
-                    message_id: assistant_message_id,
+                send_citation_delta(
+                    &tx,
+                    protocol,
+                    &runtime_events,
+                    assistant_message_id,
                     citation,
-                }
-                .to_sse_event()));
+                );
             }
             AnswerStreamItem::Completed {
                 confidence: c,
@@ -592,12 +624,14 @@ async fn run_agent_pipeline(
     };
 
     if let Some((code, message)) = failed {
-        let _ = tx.send(Ok(SseEvent::AnswerFailed {
-            message_id: assistant_message_id,
-            code: code.clone(),
-            message: message.clone(),
-        }
-        .to_sse_event()));
+        send_answer_failed(
+            &tx,
+            protocol,
+            &runtime_events,
+            assistant_message_id,
+            code.clone(),
+            message.clone(),
+        );
         let mut msg = repo
             .get_message(actor.tenant_id, assistant_message_id)
             .await?
@@ -612,6 +646,7 @@ async fn run_agent_pipeline(
 
     // Persist assistant message
     if assistant_message_cancelled(&repo, actor.tenant_id, assistant_message_id).await? {
+        send_execution_cancelled(&tx, protocol, &runtime_events);
         return Ok(());
     }
     let mut msg = repo
@@ -697,12 +732,14 @@ async fn run_agent_pipeline(
         cache.set(&cache_key, cached).await?;
     }
 
-    let _ = tx.send(Ok(SseEvent::AnswerCompleted {
-        message_id: assistant_message_id,
+    send_answer_completed(
+        &tx,
+        protocol,
+        &runtime_events,
+        assistant_message_id,
         confidence,
-        usage: usage.clone(),
-    }
-    .to_sse_event()));
+        usage.clone(),
+    );
 
     // Trace is kept in memory only for stub; could be persisted here.
     let _ = (mode, trace);
@@ -750,13 +787,17 @@ async fn fail_assistant_message(
     code: String,
     message: String,
     tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
 ) -> Result<(), AppError> {
-    let _ = tx.send(Ok(SseEvent::AnswerFailed {
-        message_id: assistant_message_id,
-        code: code.clone(),
-        message: message.clone(),
-    }
-    .to_sse_event()));
+    send_answer_failed(
+        tx,
+        protocol,
+        runtime_events,
+        assistant_message_id,
+        code.clone(),
+        message.clone(),
+    );
     let mut msg = repo
         .get_message(tenant_id, assistant_message_id)
         .await?
@@ -767,6 +808,338 @@ async fn fail_assistant_message(
     msg.completed_at = Some(now());
     repo.update_message(msg).await?;
     Ok(())
+}
+
+fn send_legacy_event(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    event: SseEvent,
+) {
+    let _ = tx.send(Ok(event.to_sse_event()));
+}
+
+fn send_runtime_event(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    event_type: &str,
+    payload: serde_json::Value,
+) {
+    match runtime_events.lock() {
+        Ok(mut factory) => {
+            let _ = tx.send(Ok(factory.event(event_type, payload)));
+        }
+        Err(err) => {
+            error!("runtime event factory lock failed: {err}");
+        }
+    }
+}
+
+fn send_runtime_step_event(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    event_type: &str,
+    tool_call_id: &str,
+    name: &str,
+    payload: serde_json::Value,
+) {
+    match runtime_events.lock() {
+        Ok(mut factory) => {
+            let _ = tx.send(Ok(factory.event_with_step(
+                event_type,
+                Some(tool_step(tool_call_id, name)),
+                payload,
+            )));
+        }
+        Err(err) => {
+            error!("runtime event factory lock failed: {err}");
+        }
+    }
+}
+
+fn send_execution_started(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &mut RuntimeEventFactory,
+    user_message_id: Uuid,
+    assistant_message_id: Uuid,
+    task: &str,
+) {
+    match protocol {
+        SseProtocol::Legacy => send_legacy_event(
+            tx,
+            SseEvent::MessageCreated {
+                user_message_id,
+                assistant_message_id,
+            },
+        ),
+        SseProtocol::Atom => {
+            let event = runtime_events.event(
+                "execution.started",
+                json!({
+                    "task": task,
+                    "plan_mode": false,
+                    "user_message_id": user_message_id,
+                    "assistant_message_id": assistant_message_id,
+                }),
+            );
+            let _ = tx.send(Ok(event));
+        }
+    }
+}
+
+fn send_progress_event(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    progress: AgentProgress,
+) {
+    if protocol == SseProtocol::Legacy {
+        let event = progress_to_sse_event(message_id, progress);
+        send_legacy_event(tx, event);
+        return;
+    }
+
+    match progress {
+        AgentProgress::StatusUpdated { status } => {
+            let (tool_call_id, name, display) = atom_step_for_status(status);
+            send_runtime_step_event(
+                tx,
+                runtime_events,
+                "tool.call.started",
+                &tool_call_id,
+                &name,
+                json!({
+                    "tool_call_id": tool_call_id,
+                    "name": name,
+                    "arguments": { "stage": status },
+                    "display_name": display,
+                }),
+            );
+        }
+        AgentProgress::RewriteCompleted {
+            rewritten_query,
+            keywords,
+        } => send_runtime_step_event(
+            tx,
+            runtime_events,
+            "tool.call.result",
+            "query_rewrite",
+            "query_rewrite",
+            json!({
+                "tool_call_id": "query_rewrite",
+                "name": "query_rewrite",
+                "status": "succeeded",
+                "result": rewritten_query,
+                "display": {
+                    "component": "DocuMindStageCard",
+                    "data": {
+                        "label": "查询改写",
+                        "keywords": keywords,
+                    }
+                }
+            }),
+        ),
+        AgentProgress::RetrievalCompleted { chunk_count } => send_runtime_step_event(
+            tx,
+            runtime_events,
+            "tool.call.result",
+            "hybrid_retrieval",
+            "hybrid_retrieval",
+            json!({
+                "tool_call_id": "hybrid_retrieval",
+                "name": "hybrid_retrieval",
+                "status": "succeeded",
+                "result": format!("retrieved {chunk_count} chunks"),
+                "display": {
+                    "component": "DocuMindStageCard",
+                    "data": {
+                        "label": "混合检索",
+                        "chunk_count": chunk_count,
+                    }
+                }
+            }),
+        ),
+        AgentProgress::RerankCompleted { top_chunk_ids } => send_runtime_step_event(
+            tx,
+            runtime_events,
+            "tool.call.result",
+            "rerank",
+            "rerank",
+            json!({
+                "tool_call_id": "rerank",
+                "name": "rerank",
+                "status": "succeeded",
+                "result": "rerank completed",
+                "display": {
+                    "component": "DocuMindStageCard",
+                    "data": {
+                        "label": "重排序",
+                        "top_chunk_ids": top_chunk_ids,
+                    }
+                }
+            }),
+        ),
+    }
+}
+
+fn send_answer_delta(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    text: String,
+) {
+    match protocol {
+        SseProtocol::Legacy => send_legacy_event(tx, SseEvent::AnswerDelta { message_id, text }),
+        SseProtocol::Atom => send_runtime_event(
+            tx,
+            runtime_events,
+            "response.delta",
+            json!({ "delta": text }),
+        ),
+    }
+}
+
+fn send_citation_delta(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    citation: CitationOutput,
+) {
+    match protocol {
+        SseProtocol::Legacy => {
+            send_legacy_event(tx, SseEvent::CitationDelta { message_id, citation });
+        }
+        SseProtocol::Atom => send_runtime_event(
+            tx,
+            runtime_events,
+            "sources.reported",
+            json!({
+                "sources": [{
+                    "title": citation.doc_title.clone(),
+                    "uri": citation.doc_id.to_string(),
+                    "documind_citation": citation,
+                }]
+            }),
+        ),
+    }
+}
+
+fn send_answer_completed(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    confidence: Confidence,
+    usage: Option<crate::models::Usage>,
+) {
+    match protocol {
+        SseProtocol::Legacy => send_legacy_event(
+            tx,
+            SseEvent::AnswerCompleted {
+                message_id,
+                confidence,
+                usage,
+            },
+        ),
+        SseProtocol::Atom => {
+            send_runtime_event(
+                tx,
+                runtime_events,
+                "response.completed",
+                json!({ "finish_reason": "stop", "confidence": confidence.to_string() }),
+            );
+            if let Some(usage) = usage {
+                let total_tokens = usage.input_tokens + usage.output_tokens;
+                send_runtime_event(
+                    tx,
+                    runtime_events,
+                    "usage.reported",
+                    json!({
+                        "prompt_tokens": usage.input_tokens,
+                        "completion_tokens": usage.output_tokens,
+                        "total_tokens": total_tokens,
+                    }),
+                );
+            }
+            send_runtime_event(
+                tx,
+                runtime_events,
+                "execution.completed",
+                json!({ "summary": "执行成功" }),
+            );
+        }
+    }
+}
+
+fn send_answer_failed(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    code: String,
+    message: String,
+) {
+    match protocol {
+        SseProtocol::Legacy => send_legacy_event(
+            tx,
+            SseEvent::AnswerFailed {
+                message_id,
+                code,
+                message,
+            },
+        ),
+        SseProtocol::Atom => send_runtime_event(
+            tx,
+            runtime_events,
+            "execution.failed",
+            json!({
+                "error": {
+                    "code": code,
+                    "message": message,
+                    "source": "agent",
+                    "recoverable": true,
+                }
+            }),
+        ),
+    }
+}
+
+fn send_execution_cancelled(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+) {
+    if protocol == SseProtocol::Atom {
+        send_runtime_event(tx, runtime_events, "execution.cancelled", json!({}));
+    }
+}
+
+fn atom_step_for_status(status: &str) -> (String, String, &'static str) {
+    match status {
+        "rewriting" => (
+            "query_rewrite".to_string(),
+            "query_rewrite".to_string(),
+            "查询改写",
+        ),
+        "retrieving" => (
+            "hybrid_retrieval".to_string(),
+            "hybrid_retrieval".to_string(),
+            "混合检索",
+        ),
+        "reranking" => ("rerank".to_string(), "rerank".to_string(), "重排序"),
+        "generating" => (
+            "answer_generation".to_string(),
+            "answer_generation".to_string(),
+            "生成答案",
+        ),
+        _ => (
+            status.to_string(),
+            status.to_string(),
+            "执行步骤",
+        ),
+    }
 }
 
 fn should_cache(query: &str) -> bool {
@@ -827,7 +1200,6 @@ async fn build_history(
     exclude_user_message_id: Uuid,
 ) -> Result<Vec<ConversationTurn>, AppError> {
     let messages = repo.get_messages(tenant_id, conversation_id).await?;
-    let mut turns: Vec<ConversationTurn> = vec![];
     let mut user_map: std::collections::HashMap<Uuid, ConversationMessage> =
         std::collections::HashMap::new();
     let mut assistant_map: std::collections::HashMap<Uuid, ConversationMessage> =
@@ -847,24 +1219,29 @@ async fn build_history(
         }
     }
 
-    let mut assistant_msgs: Vec<&ConversationMessage> = assistant_map.values().collect();
-    assistant_msgs.sort_by_key(|m| m.created_at);
-    assistant_msgs.reverse();
+    let mut turns: Vec<ConversationTurn> = vec![];
 
-    for a in assistant_msgs.into_iter().take(5) {
-        if let Some(parent_id) = a.parent_message_id {
-            if let Some(u) = user_map.get(&parent_id) {
-                if a.status == MessageStatus::Completed && !a.content.is_empty() {
-                    turns.push(ConversationTurn {
-                        user_message: u.content.clone(),
-                        assistant_answer: a.content.clone(),
-                        citations: vec![],
-                    });
-                }
+    // Walk through user messages in chronological order and pair each with its
+    // completed assistant response. Retry/cancelled assistant messages are
+    // excluded because they are not completed.
+    let mut user_msgs: Vec<&ConversationMessage> = user_map.values().collect();
+    user_msgs.sort_by_key(|m| m.created_at);
+
+    for u in user_msgs {
+        if let Some(a) = assistant_map
+            .values()
+            .find(|a| a.parent_message_id == Some(u.id))
+        {
+            if a.status == MessageStatus::Completed && !a.content.is_empty() {
+                turns.push(ConversationTurn {
+                    user_message: u.content.clone(),
+                    assistant_answer: a.content.clone(),
+                    citations: vec![],
+                });
             }
         }
     }
-    turns.reverse();
+
     Ok(turns)
 }
 
@@ -938,6 +1315,7 @@ async fn retry_message(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+    headers: HeaderMap,
     Json(_req): Json<RetryMessageRequest>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
     let (session, effective_kb_ids) =
@@ -992,11 +1370,21 @@ async fn retry_message(
 
     let (tx, rx) = unbounded_channel::<Result<Event, Infallible>>();
     let tx2 = tx.clone();
-    let _ = tx2.send(Ok(SseEvent::MessageCreated {
-        user_message_id: parent_id,
+    let protocol = SseProtocol::from_headers(&headers);
+    let mut runtime_events = RuntimeEventFactory::new(
+        actor.tenant_id,
+        actor.user_id,
+        session.id,
         assistant_message_id,
-    }
-    .to_sse_event()));
+    );
+    send_execution_started(
+        &tx2,
+        protocol,
+        &mut runtime_events,
+        parent_id,
+        assistant_message_id,
+        &user_message.content,
+    );
 
     let repo = state.repository.clone();
     let cache = state.cache.clone();
@@ -1016,6 +1404,8 @@ async fn retry_message(
             user_message.content,
             effective_kb_ids,
             tx2,
+            protocol,
+            runtime_events,
         )
         .await
         {

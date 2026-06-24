@@ -4,6 +4,7 @@ pub mod conversations;
 pub mod documents;
 pub mod history;
 pub mod knowledge;
+pub mod runtime_events;
 pub mod system;
 
 pub use admin::router as admin_router;
