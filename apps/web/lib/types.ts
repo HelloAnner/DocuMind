@@ -28,6 +28,17 @@ export interface Citation {
   quote: string;
   score?: number;
   source_status?: "available" | "deleted" | string;
+  anchor?: CitationAnchor;
+}
+
+export interface CitationAnchor {
+  format?: string;
+  kind?: string;
+  page?: number;
+  slide?: number;
+  block_ids?: UUID[];
+  table_ids?: UUID[];
+  location_status?: "exact" | "structural_only" | "page_only" | "slide_only" | "unavailable" | string;
 }
 
 export interface PromptVersions {
@@ -47,10 +58,35 @@ export interface Message {
   agent_mode?: string;
   prompt_versions?: PromptVersions;
   citations: Citation[];
+  thinking?: string;
+  tool_calls?: RuntimeToolCall[];
+  follow_up_questions?: FollowUpQuestion[];
+  duration_ms?: number;
+  usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
   parent_message_id?: UUID;
   retry_of_message_id?: UUID;
   created_at: string;
   completed_at?: string;
+}
+
+export interface RuntimeToolCall {
+  id: string;
+  name: string;
+  arguments?: unknown;
+  arguments_preview?: string;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  result?: string;
+  progress?: number;
+  message?: string;
+  display?: unknown;
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+}
+
+export interface FollowUpQuestion {
+  id: string;
+  text: string;
 }
 
 export interface CreateConversationRequest {

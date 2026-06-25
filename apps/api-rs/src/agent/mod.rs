@@ -1,3 +1,4 @@
+pub mod citation_resolver;
 pub mod generator;
 pub mod kernel;
 pub mod mode;

@@ -4,6 +4,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
 use super::{Confidence, Usage};
+use crate::models::citation::CitationAnchor;
 use crate::models::trace::{ResolvedRef, RetrievalPlan, RetrievalTrace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -200,6 +201,8 @@ pub struct CitationOutput {
     pub score: f64,
     #[serde(default = "default_citation_source_status")]
     pub source_status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<CitationAnchor>,
 }
 
 fn default_citation_source_status() -> String {

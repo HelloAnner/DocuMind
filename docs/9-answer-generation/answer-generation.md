@@ -251,6 +251,7 @@ confidence = f(rerank_score, chunk_overlap, keyword_match_rate, citation_coverag
 
 ## 11. 相关文档
 
+- [引用定位与原文预览设计](./citation-location-preview.md)
 - [精排](../8-reranking/reranking.md)
 - [混合检索](../7-hybrid-search/hybrid-search.md)
 - [Agent 提示词设计](../10-conversation/agent-prompting.md)

@@ -1,6 +1,24 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CitationAnchor {
+    #[serde(default)]
+    pub format: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub page: Option<i32>,
+    #[serde(default)]
+    pub slide: Option<i32>,
+    #[serde(default)]
+    pub block_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub table_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub location_status: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Citation {
     pub id: Uuid,
@@ -14,4 +32,5 @@ pub struct Citation {
     pub quote: String,
     pub score: f64,
     pub source_status: String,
+    pub anchor: Option<CitationAnchor>,
 }

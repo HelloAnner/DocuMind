@@ -163,11 +163,15 @@ mod tests {
                     chunk_id: Uuid::new_v4(),
                     doc_id: Uuid::new_v4(),
                     doc_title: "2025年Q3采购合同.pdf".to_string(),
+                    file_type: "pdf".to_string(),
                     content:
                         "付款节点：合同签署后支付首付款30%，验收通过后支付60%，质保期结束支付10%。"
                             .to_string(),
                     heading_path: vec![],
                     page_range: vec![5],
+                    block_ids: vec![],
+                    table_ids: vec![],
+                    metadata: serde_json::json!({"source_type": "paragraph"}),
                     score: 0.9,
                     source: RetrievalSource::Rerank,
                 },

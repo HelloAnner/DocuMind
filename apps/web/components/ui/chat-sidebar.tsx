@@ -4,12 +4,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  Bookmark,
   MessageSquare,
+  MoreHorizontal,
   Pencil,
   Plus,
   Search,
   Settings,
-  Star,
   Trash2,
 } from "lucide-react";
 import { IconButton } from "./icon-button";
@@ -28,7 +29,7 @@ function formatGroupLabel(date: string) {
   if (d.toDateString() === yesterday) return "昨天";
   const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (diff < 7) return "近 7 天";
-  return d.toLocaleDateString("zh-CN", { month: "long", day: "numeric" });
+  return "更早";
 }
 
 function groupByDate(items: Conversation[]) {
@@ -37,7 +38,7 @@ function groupByDate(items: Conversation[]) {
     const label = formatGroupLabel(item.updated_at);
     groups.set(label, [...(groups.get(label) || []), item]);
   }
-  const order = ["今天", "昨天", "近 7 天"];
+  const order = ["今天", "昨天", "近 7 天", "更早"];
   return Array.from(groups.entries()).sort(([a], [b]) => {
     const ai = order.indexOf(a);
     const bi = order.indexOf(b);
@@ -90,6 +91,7 @@ export function ChatSidebar() {
 
   const [search, setSearch] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [menuId, setMenuId] = useState<string | null>(null);
   const { aliases, setAlias } = useAliases();
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -157,6 +159,7 @@ export function ChatSidebar() {
     const active = conv.conversation_id === currentId;
     const favorited = isFavorite(conv.conversation_id);
     const hovered = hoveredId === conv.conversation_id;
+    const menuOpen = menuId === conv.conversation_id;
     const renaming = renamingId === conv.conversation_id;
 
     return (
@@ -190,40 +193,53 @@ export function ChatSidebar() {
         </button>
 
         <div className="dm-history-item-actions">
-          {(hovered || renaming) && !renaming && (
-            <>
-              <IconButton
-                aria-label="重命名"
-                className="dm-history-item-action"
-                onClick={(e) => {
-                  e.stopPropagation();
+          {(hovered || menuOpen || renaming) && !renaming && (
+            <IconButton
+              aria-label="会话操作"
+              className="dm-history-item-action dm-history-menu-trigger"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMenuId((id) => (id === conv.conversation_id ? null : conv.conversation_id));
+              }}
+            >
+              <MoreHorizontal size={18} />
+            </IconButton>
+          )}
+          {menuOpen && (
+            <div className="dm-history-menu" onClick={(e) => e.stopPropagation()}>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuId(null);
                   handleRename(conv);
                 }}
               >
-                <Pencil size={14} />
-              </IconButton>
-              <IconButton
-                aria-label="删除"
-                className="dm-history-item-action"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleDelete(conv);
+                <Pencil size={18} />
+                <span>重命名</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMenuId(null);
+                  toggleFavorite(conv.conversation_id);
                 }}
               >
-                <Trash2 size={14} />
-              </IconButton>
-            </>
+                <Bookmark size={18} fill={favorited ? "currentColor" : "none"} />
+                <span>{favorited ? "取消收藏" : "收藏"}</span>
+              </button>
+              <button
+                type="button"
+                className="danger"
+                onClick={async () => {
+                  setMenuId(null);
+                  await handleDelete(conv);
+                }}
+              >
+                <Trash2 size={18} />
+                <span>删除</span>
+              </button>
+            </div>
           )}
-          <IconButton
-            aria-label={favorited ? "取消收藏" : "收藏"}
-            className={`dm-history-item-action ${favorited ? "favorited" : ""}`}
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleFavorite(conv.conversation_id);
-            }}
-          >
-            <Star size={14} fill={favorited ? "currentColor" : "none"} />
-          </IconButton>
         </div>
       </div>
     );

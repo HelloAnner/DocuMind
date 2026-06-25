@@ -294,7 +294,7 @@ export function adminDocumentOriginalUrl(docId: string): string {
   return `${BASE}/api/admin/documents/${docId}/original`;
 }
 
-export async function downloadAdminDocumentOriginal(docId: string, fileName: string): Promise<void> {
+export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blob> {
   const response = await fetch(adminDocumentOriginalUrl(docId), {
     headers: getAuthHeaders(),
   });
@@ -302,7 +302,11 @@ export async function downloadAdminDocumentOriginal(docId: string, fileName: str
     const text = await response.text().catch(() => "Unknown error");
     throw new Error(`API error ${response.status}: ${text}`);
   }
-  const blob = await response.blob();
+  return response.blob();
+}
+
+export async function downloadAdminDocumentOriginal(docId: string, fileName: string): Promise<void> {
+  const blob = await fetchAdminDocumentOriginalBlob(docId);
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;

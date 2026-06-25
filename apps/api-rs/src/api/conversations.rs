@@ -689,11 +689,10 @@ async fn run_agent_pipeline(
     // Save citations
     let citation_models: Vec<Citation> = citations
         .iter()
-        .enumerate()
-        .map(|(i, c)| Citation {
+        .map(|c| Citation {
             id: Uuid::new_v4(),
             assistant_message_id,
-            index: i as i32 + 1,
+            index: c.index,
             chunk_id: c.chunk_id,
             doc_id: c.doc_id,
             doc_title: c.doc_title.clone(),
@@ -702,6 +701,7 @@ async fn run_agent_pipeline(
             quote: c.quote.clone(),
             score: c.score,
             source_status: c.source_status.clone(),
+            anchor: c.anchor.clone(),
         })
         .collect();
     repo.save_citations(citation_models.clone()).await?;

@@ -23,6 +23,7 @@ import type {
   MessageStatus,
   Rating,
   RetryMessageRequest,
+  RuntimeToolCall,
   RuntimeEventEnvelope,
   SendMessageRequest,
 } from "@/lib/types";
@@ -70,6 +71,26 @@ function stageLabelFromRuntime(event: RuntimeEventEnvelope): string | null {
 
 function confidenceFromRuntime(value: unknown): "high" | "medium" | "low" {
   return value === "high" || value === "medium" || value === "low" ? value : "medium";
+}
+
+function firstRuntimeString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function runtimeToolId(event: RuntimeEventEnvelope) {
+  return firstRuntimeString(event.payload.tool_call_id, event.step?.step_id, event.step?.name);
+}
+
+function normalizeToolStatus(value: unknown): RuntimeToolCall["status"] {
+  if (value === "failed" || value === "cancelled" || value === "succeeded") return value;
+  return "running";
+}
+
+function runtimeToolName(event: RuntimeEventEnvelope, fallback: string) {
+  return firstRuntimeString(event.payload.name, event.step?.name, event.payload.display_name, fallback);
 }
 
 export function useConversationManager() {
@@ -234,6 +255,31 @@ export function useConversationManager() {
       ]);
 
       let assistantId = assistantTempId;
+      const updateAssistantInStream = (patch: Partial<Message>) => {
+        const messageId = assistantId;
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.message_id === messageId || m.message_id === assistantTempId ? { ...m, ...patch } : m
+          )
+        );
+      };
+      const updateToolCallInStream = (
+        toolId: string,
+        recipe: (tool?: RuntimeToolCall) => RuntimeToolCall
+      ) => {
+        const messageId = assistantId;
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.message_id !== messageId && m.message_id !== assistantTempId) return m;
+            const tools = m.tool_calls ?? [];
+            const exists = tools.some((tool) => tool.id === toolId);
+            const nextTools = exists
+              ? tools.map((tool) => (tool.id === toolId ? recipe(tool) : tool))
+              : [...tools, recipe(undefined)];
+            return { ...m, tool_calls: nextTools };
+          })
+        );
+      };
       try {
         for await (const sse of streamSse(url, req, controller.signal)) {
           if (controller.signal.aborted) {
@@ -257,6 +303,46 @@ export function useConversationManager() {
               continue;
             }
 
+            if (runtime.event_type === "thinking.delta") {
+              const delta = runtime.payload.delta;
+              if (typeof delta === "string") {
+                const messageId = assistantId;
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.message_id === messageId || m.message_id === assistantTempId
+                      ? { ...m, thinking: `${m.thinking ?? ""}${delta}` }
+                      : m
+                  )
+                );
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "response.replace") {
+              const content = runtime.payload.content;
+              if (typeof content === "string") {
+                updateAssistantInStream({ content });
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.preview") {
+              const toolId = runtimeToolId(runtime);
+              if (!toolId) continue;
+              updateToolCallInStream(toolId, (tool) => ({
+                id: toolId,
+                name: runtimeToolName(runtime, tool?.name ?? toolId),
+                arguments_preview: firstRuntimeString(
+                  runtime.payload.arguments_preview,
+                  tool?.arguments_preview
+                ),
+                status: "running",
+                started_at: tool?.started_at ?? runtime.occurred_at,
+                display: runtime.payload.display ?? tool?.display,
+              }));
+              continue;
+            }
+
             if (runtime.event_type === "tool.call.started") {
               const label = stageLabelFromRuntime(runtime);
               if (label) {
@@ -268,6 +354,37 @@ export function useConversationManager() {
                   }))
                 );
               }
+              const toolId = runtimeToolId(runtime);
+              if (toolId) {
+                updateToolCallInStream(toolId, (tool) => ({
+                  id: toolId,
+                  name: runtimeToolName(runtime, tool?.name ?? toolId),
+                  arguments: runtime.payload.arguments ?? tool?.arguments,
+                  arguments_preview: tool?.arguments_preview,
+                  status: "running",
+                  started_at: tool?.started_at ?? runtime.occurred_at,
+                  display: runtime.payload.display ?? tool?.display,
+                }));
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.update") {
+              const toolId = runtimeToolId(runtime);
+              if (!toolId) continue;
+              const progress = runtime.payload.progress;
+              const message = runtime.payload.message;
+              updateToolCallInStream(toolId, (tool) => ({
+                id: toolId,
+                name: runtimeToolName(runtime, tool?.name ?? toolId),
+                arguments: tool?.arguments,
+                arguments_preview: tool?.arguments_preview,
+                status: tool?.status ?? "running",
+                progress: typeof progress === "number" ? progress : tool?.progress,
+                message: typeof message === "string" ? message : tool?.message,
+                started_at: tool?.started_at,
+                display: runtime.payload.display ?? tool?.display,
+              }));
               continue;
             }
 
@@ -279,6 +396,31 @@ export function useConversationManager() {
                     stage.label === label ? { ...stage, done: true, running: false } : stage
                   )
                 );
+              }
+              const toolId = runtimeToolId(runtime);
+              if (toolId) {
+                updateToolCallInStream(toolId, (tool) => ({
+                  id: toolId,
+                  name: runtimeToolName(runtime, tool?.name ?? toolId),
+                  arguments: runtime.payload.arguments ?? tool?.arguments,
+                  arguments_preview: tool?.arguments_preview,
+                  status: normalizeToolStatus(runtime.payload.status),
+                  result: typeof runtime.payload.result === "string"
+                    ? runtime.payload.result
+                    : tool?.result,
+                  progress: typeof runtime.payload.progress === "number"
+                    ? runtime.payload.progress
+                    : tool?.progress,
+                  message: typeof runtime.payload.message === "string"
+                    ? runtime.payload.message
+                    : tool?.message,
+                  display: runtime.payload.display ?? tool?.display,
+                  started_at: tool?.started_at,
+                  completed_at: runtime.occurred_at,
+                  duration_ms: typeof runtime.payload.duration_ms === "number"
+                    ? runtime.payload.duration_ms
+                    : tool?.duration_ms,
+                }));
               }
               continue;
             }
@@ -333,8 +475,59 @@ export function useConversationManager() {
               continue;
             }
 
+            if (runtime.event_type === "followup.suggested") {
+              const questions = runtime.payload.questions ?? runtime.payload.items;
+              if (Array.isArray(questions)) {
+                updateAssistantInStream({
+                  follow_up_questions: questions
+                    .map((item, index) => {
+                      if (typeof item === "string") return { id: `followup-${index}`, text: item };
+                      if (item && typeof item === "object") {
+                        const text = (item as { text?: unknown }).text;
+                        const id = (item as { id?: unknown }).id;
+                        if (typeof text === "string") {
+                          return {
+                            id: typeof id === "string" ? id : `followup-${index}`,
+                            text,
+                          };
+                        }
+                      }
+                      return null;
+                    })
+                    .filter((item): item is { id: string; text: string } => !!item),
+                });
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "usage.reported") {
+              updateAssistantInStream({
+                usage: {
+                  input_tokens:
+                    typeof runtime.payload.prompt_tokens === "number"
+                      ? runtime.payload.prompt_tokens
+                      : undefined,
+                  output_tokens:
+                    typeof runtime.payload.completion_tokens === "number"
+                      ? runtime.payload.completion_tokens
+                      : undefined,
+                  total_tokens:
+                    typeof runtime.payload.total_tokens === "number"
+                      ? runtime.payload.total_tokens
+                      : undefined,
+                },
+              });
+              continue;
+            }
+
             if (runtime.event_type === "execution.completed") {
-              updateMessage(runtime.response_message_id, { status: "completed" });
+              updateMessage(runtime.response_message_id, {
+                status: "completed",
+                duration_ms:
+                  typeof runtime.payload.duration_ms === "number"
+                    ? runtime.payload.duration_ms
+                    : undefined,
+              });
               setStages((s) => s.map((stage) => ({ ...stage, done: true, running: false })));
               continue;
             }

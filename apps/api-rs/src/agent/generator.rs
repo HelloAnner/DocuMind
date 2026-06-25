@@ -5,7 +5,7 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
 use crate::agent::prompt::Prompt;
 use crate::agent::verifier::ClaimVerifier;
-use crate::models::agent::{AnswerStreamItem, CitationOutput, ConversationTurn, GenerationConfig};
+use crate::models::agent::{AnswerStreamItem, ConversationTurn, GenerationConfig};
 use crate::models::rag::EvidencePack;
 
 pub type AnswerStream = UnboundedReceiver<AnswerStreamItem>;
@@ -55,21 +55,7 @@ impl AnswerGenerator for MockAnswerGenerator {
     ) -> Result<AnswerStream> {
         let (tx, rx) = unbounded_channel();
         let answer = build_answer(&query, &evidence);
-        let citations: Vec<CitationOutput> = evidence
-            .chunks
-            .iter()
-            .enumerate()
-            .map(|(i, c)| CitationOutput {
-                index: i as i32 + 1,
-                chunk_id: c.chunk.chunk_id,
-                doc_id: c.chunk.doc_id,
-                doc_title: c.chunk.doc_title.clone(),
-                page_range: c.chunk.page_range.clone(),
-                quote: c.chunk.content.clone(),
-                score: c.score,
-                source_status: "available".to_string(),
-            })
-            .collect();
+        let citations = crate::agent::citation_resolver::resolve_citations(&answer, &evidence);
 
         let report = verifier.verify(&answer, &evidence).await;
         let confidence = report.confidence;

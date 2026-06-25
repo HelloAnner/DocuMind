@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   ArrowUp,
+  Bookmark,
   Bot,
-  ChevronUp,
-  ChevronDown,
+  Folder,
   Plus,
-  PanelRightClose,
-  PanelRightOpen,
   Square,
   ThumbsDown,
   ThumbsUp,
@@ -18,7 +16,6 @@ import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatCard } from "@/components/ui/stat-card";
 import { MessageRow } from "@/components/chat/message-row";
-import { CitationCard } from "@/components/chat/citation-card";
 import { DocumentPreview } from "@/components/chat/document-preview";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
@@ -57,21 +54,10 @@ export function ChatWorkspace() {
   const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
   const sourceDocs = latestAssistant?.citations ?? [];
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
-
-  const currentSourceIndex = selectedCitation
-    ? sourceDocs.findIndex((c) => c.index === selectedCitation.index)
-    : -1;
-
-  const navigateCitation = (dir: -1 | 1) => {
-    if (sourceDocs.length === 0) return;
-    const idx =
-      currentSourceIndex === -1
-        ? dir === 1
-          ? 0
-          : sourceDocs.length - 1
-        : (currentSourceIndex + dir + sourceDocs.length) % sourceDocs.length;
-    setSelectedCitation(sourceDocs[idx]);
-  };
+  const activeCitation =
+    selectedCitation && sourceDocs.some((c) => c.index === selectedCitation.index)
+      ? selectedCitation
+      : sourceDocs[0] ?? null;
 
   const handleSend = async () => {
     const text = input.trim();
@@ -132,6 +118,7 @@ export function ChatWorkspace() {
           onCancel={() => cancelMessage(message.message_id)}
           onFeedback={(id) => setFeedbackMessageId(id)}
           onCitationClick={handleCitationClick}
+          onFollowUp={(text) => sendMessage(text)}
           stages={
             message.message_id === streamingId ||
             (message.role === "assistant" && message.message_id === latestAssistant?.message_id)
@@ -144,77 +131,23 @@ export function ChatWorkspace() {
   );
 
   const renderRightRail = () => {
-    if (!rightOpen) {
-      return (
-        <div className="dm-right-rail-collapsed">
-          <IconButton aria-label="展开引用来源" onClick={() => setRightOpen(true)}>
-            <PanelRightOpen size={16} />
-          </IconButton>
-          <div className="dm-rail-dots">
-            {sourceDocs.slice(0, 4).map((_, i) => (
-              <span key={i} />
-            ))}
-          </div>
-        </div>
-      );
-    }
+    if (!rightOpen) return null;
 
     return (
       <aside className="dm-right-rail">
-        <div className="dm-right-rail-head">
-          <h3>文档预览</h3>
-          <div className="dm-right-rail-head-actions">
-            <IconButton
-              aria-label="上一条"
-              onClick={() => navigateCitation(-1)}
-              disabled={sourceDocs.length === 0}
-            >
-              <ChevronUp size={16} />
-            </IconButton>
-            <span className="dm-right-rail-paging">
-              {sourceDocs.length > 0
-                ? `${currentSourceIndex >= 0 ? currentSourceIndex + 1 : 1} / ${sourceDocs.length}`
-                : "- / -"}
-            </span>
-            <IconButton
-              aria-label="下一条"
-              onClick={() => navigateCitation(1)}
-              disabled={sourceDocs.length === 0}
-            >
-              <ChevronDown size={16} />
-            </IconButton>
-            <IconButton aria-label="收起" onClick={() => setRightOpen(false)}>
-              <PanelRightClose size={16} />
-            </IconButton>
-          </div>
-        </div>
+        <IconButton
+          aria-label="关闭文件预览"
+          className="dm-right-rail-close"
+          onClick={() => setRightOpen(false)}
+        >
+          <X size={16} />
+        </IconButton>
 
         <div className="dm-right-rail-body">
-          <div className="dm-rail-section dm-rail-source-section">
-            <div className="dm-rail-section-head">
-              <span className="dm-rail-section-title">来源文档</span>
-              <span className="dm-rail-section-hint">{sourceDocs.length} 个来源</span>
-            </div>
-            {sourceDocs.length === 0 ? (
-              <p className="dm-rail-empty">完成回答后显示引用来源</p>
-            ) : (
-              <div className="dm-rail-source-list">
-                {sourceDocs.map((doc) => (
-                  <CitationCard
-                    key={doc.index}
-                    citation={doc}
-                    active={selectedCitation?.index === doc.index}
-                    onClick={handleCitationClick}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          {selectedCitation && (
-            <div className="dm-rail-section dm-rail-preview-section">
-              <DocumentPreview citation={selectedCitation} />
-            </div>
+          {activeCitation ? (
+            <DocumentPreview citation={activeCitation} />
+          ) : (
+            <p className="dm-rail-empty">点击答案下方来源后预览原文</p>
           )}
         </div>
       </aside>
@@ -223,19 +156,27 @@ export function ChatWorkspace() {
 
   return (
     <>
-      <div className="dm-chat-workspace">
+      <div className={`dm-chat-workspace ${rightOpen ? "has-right-rail" : ""}`}>
         <div className="dm-chat-main">
           <div className="dm-chat-session-header">
             <div className="dm-chat-session-title">
               <strong>{currentConversation?.title ?? "新会话"}</strong>
-              <span>DocuMind Agent · 知识库问答</span>
+              <IconButton aria-label="收藏会话" className="dm-chat-title-bookmark">
+                <Bookmark size={18} />
+              </IconButton>
             </div>
             <div className="dm-chat-session-actions">
               <IconButton
-                aria-label={rightOpen ? "收起引用来源" : "展开引用来源"}
-                onClick={() => setRightOpen(!rightOpen)}
+                aria-label={rightOpen ? "收起文件预览" : "展开文件预览"}
+                className="dm-file-preview-toggle"
+                onClick={() => {
+                  if (!rightOpen && !selectedCitation && sourceDocs[0]) {
+                    setSelectedCitation(sourceDocs[0]);
+                  }
+                  setRightOpen(!rightOpen);
+                }}
               >
-                {rightOpen ? <PanelRightClose size={16} /> : <PanelRightOpen size={16} />}
+                <Folder size={19} />
               </IconButton>
             </div>
           </div>
@@ -244,12 +185,9 @@ export function ChatWorkspace() {
 
           <div className="dm-composer">
             <div className="dm-composer-box">
-              <button type="button" className="dm-composer-tool" aria-label="添加附件">
-                <Plus size={17} />
-              </button>
               <textarea
                 ref={textareaRef}
-                placeholder={streamingId ? "DocuMind 正在处理…" : "输入问题，Shift + Enter 换行"}
+                placeholder={streamingId ? "DocuMind 正在处理…" : "描述需求，@引用文件"}
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onInput={(e) => {
@@ -262,6 +200,9 @@ export function ChatWorkspace() {
                 disabled={!!streamingId}
                 rows={1}
               />
+              <button type="button" className="dm-composer-tool" aria-label="添加附件">
+                <Plus size={19} />
+              </button>
               <button
                 className={`dm-send-button ${streamingId ? "running" : ""}`}
                 aria-label={streamingId ? "停止" : "发送"}
@@ -272,6 +213,7 @@ export function ChatWorkspace() {
               </button>
             </div>
           </div>
+          <div className="dm-chat-footer-note">内容由 AI 生成，请仔细甄别</div>
         </div>
 
         {renderRightRail()}

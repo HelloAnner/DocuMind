@@ -476,10 +476,20 @@ fn parse_pdf(
     title: &str,
     bytes: &[u8],
 ) -> Result<ParsedDocument> {
-    let text = pdf_extract::extract_text_from_mem(bytes).context("pdf_text_extract_failed")?;
+    let pages = pdf_extract::extract_text_from_mem_by_pages(bytes)
+        .or_else(|_| {
+            pdf_extract::extract_text_from_mem(bytes).map(|text| {
+                if text.contains('\x0C') {
+                    text.split('\x0C').map(str::to_string).collect()
+                } else {
+                    vec![text]
+                }
+            })
+        })
+        .context("pdf_text_extract_failed")?;
     let mut blocks = Vec::new();
     let mut warnings = Vec::new();
-    for (page_idx, page_text) in text.split('\x0C').enumerate() {
+    for (page_idx, page_text) in pages.iter().enumerate() {
         let page = (page_idx + 1) as i32;
         for paragraph in split_paragraphs(page_text) {
             let trimmed = paragraph.trim();

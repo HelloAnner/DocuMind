@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use super::{Confidence, MessageRole, MessageStatus, NoAnswerReason};
 use crate::models::agent::{AgentMode, PromptVersions};
-use crate::models::citation::Citation;
+use crate::models::citation::{Citation, CitationAnchor};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMessage {
@@ -54,6 +54,8 @@ pub struct CitationResponse {
     pub page_range: Vec<i32>,
     pub quote: String,
     pub source_status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub anchor: Option<CitationAnchor>,
 }
 
 impl From<&Citation> for CitationResponse {
@@ -66,6 +68,7 @@ impl From<&Citation> for CitationResponse {
             page_range: c.page_range.clone(),
             quote: c.quote.clone(),
             source_status: c.source_status.clone(),
+            anchor: c.anchor.clone(),
         }
     }
 }
@@ -111,6 +114,7 @@ mod tests {
             quote: "历史引用快照".to_string(),
             score: 0.8,
             source_status: "deleted".to_string(),
+            anchor: None,
         };
 
         let response = CitationResponse::from(&citation);

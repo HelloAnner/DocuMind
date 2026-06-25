@@ -7,7 +7,7 @@ use crate::agent::generator::{AnswerGenerator, AnswerStream};
 use crate::agent::prompt::Prompt;
 use crate::agent::verifier::ClaimVerifier;
 use crate::llm::openai::{ChatMessage, LlmClient, OpenAiClient};
-use crate::models::agent::{AnswerStreamItem, CitationOutput, ConversationTurn, GenerationConfig};
+use crate::models::agent::{AnswerStreamItem, ConversationTurn, GenerationConfig};
 use crate::models::rag::EvidencePack;
 
 pub struct OpenAiAnswerGenerator {
@@ -30,22 +30,6 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
         config: GenerationConfig,
         verifier: Arc<dyn ClaimVerifier>,
     ) -> Result<AnswerStream> {
-        let citations: Vec<CitationOutput> = evidence
-            .chunks
-            .iter()
-            .enumerate()
-            .map(|(i, c)| CitationOutput {
-                index: i as i32 + 1,
-                chunk_id: c.chunk.chunk_id,
-                doc_id: c.chunk.doc_id,
-                doc_title: c.chunk.doc_title.clone(),
-                page_range: c.chunk.page_range.clone(),
-                quote: c.chunk.content.clone(),
-                score: c.score,
-                source_status: "available".to_string(),
-            })
-            .collect();
-
         let system = Some("你是 DocuMind 的企业文档问答 Agent。".to_string());
         let prompt_text = prompt.full_text.clone();
         let mut text_rx = self
@@ -91,7 +75,9 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
                 return;
             }
 
-            for citation in citations.clone() {
+            let citations =
+                crate::agent::citation_resolver::resolve_citations(&full_answer, &evidence_for_verify);
+            for citation in citations {
                 let _ = tx.send(AnswerStreamItem::Citation { citation });
             }
 

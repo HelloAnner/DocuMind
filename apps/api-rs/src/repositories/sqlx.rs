@@ -404,8 +404,8 @@ impl ConversationRepository for SqlxConversationRepository {
             sqlx::query(
                 "INSERT INTO conversation_citations (
                     id, assistant_message_id, index, chunk_id, doc_id, doc_title,
-                    page_range, heading_path, quote, score
-                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
+                    page_range, heading_path, quote, score, anchor, location_status
+                 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
             )
             .bind(citation.id)
             .bind(citation.assistant_message_id)
@@ -417,6 +417,14 @@ impl ConversationRepository for SqlxConversationRepository {
             .bind(serde_json::to_value(&citation.heading_path).unwrap())
             .bind(citation.quote)
             .bind(citation.score)
+            .bind(serde_json::to_value(&citation.anchor).unwrap_or(serde_json::Value::Null))
+            .bind(
+                citation
+                    .anchor
+                    .as_ref()
+                    .map(|anchor| anchor.location_status.as_str())
+                    .unwrap_or("unavailable"),
+            )
             .execute(&self.pool)
             .await?;
         }
@@ -426,7 +434,7 @@ impl ConversationRepository for SqlxConversationRepository {
     async fn get_citations(&self, assistant_message_id: Uuid) -> anyhow::Result<Vec<Citation>> {
         let rows = sqlx::query(
             "SELECT c.id, c.assistant_message_id, c.index, c.chunk_id, c.doc_id, c.doc_title,
-                    c.page_range, c.heading_path, c.quote, c.score,
+                    c.page_range, c.heading_path, c.quote, c.score, c.anchor,
                     CASE
                         WHEN d.id IS NULL THEN 'deleted'
                         WHEN d.parse_status = 'deleted' THEN 'deleted'
@@ -459,6 +467,11 @@ impl ConversationRepository for SqlxConversationRepository {
                 quote: row.try_get("quote").unwrap(),
                 score: row.try_get("score").unwrap(),
                 source_status: row.try_get("source_status").unwrap(),
+                anchor: row
+                    .try_get::<Option<serde_json::Value>, _>("anchor")
+                    .ok()
+                    .flatten()
+                    .and_then(|value| serde_json::from_value(value).ok()),
             });
         }
         Ok(citations)

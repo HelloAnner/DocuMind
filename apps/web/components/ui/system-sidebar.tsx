@@ -8,14 +8,17 @@ import {
   ClipboardList,
   Cpu,
   Database,
+  FileText,
+  FolderOpen,
   LayoutDashboard,
   ListChecks,
+  MessageSquare,
   Settings,
   Users,
 } from "lucide-react";
 import { NavItem } from "./nav-item";
 
-const nav = [
+const systemNav = [
   { label: "概览", href: "/system", icon: LayoutDashboard },
   { label: "租户", href: "/system/tenants", icon: Building2 },
   { label: "用户", href: "/system/users", icon: Users },
@@ -26,11 +29,18 @@ const nav = [
   { label: "系统设置", href: "/system/settings", icon: Settings },
 ];
 
+const knowledgeNav = [
+  { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
+  { label: "文档管理", href: "/admin/documents", icon: FileText },
+  { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
+  { label: "用户管理", href: "/admin/members", icon: Users },
+];
+
 export function SystemSidebar() {
   const pathname = usePathname();
   const isActive = (href: string) => {
     if (href === "/system") return pathname === "/system";
-    return pathname.startsWith(href);
+    return pathname === href || pathname.startsWith(`${href}/`);
   };
 
   return (
@@ -43,7 +53,15 @@ export function SystemSidebar() {
 
       <nav className="dm-nav">
         <div className="dm-nav-section">
-          {nav.map((item) => (
+          <div className="dm-nav-group-title">系统</div>
+          {systemNav.map((item) => (
+            <NavItem key={item.href} {...item} active={isActive(item.href)} />
+          ))}
+        </div>
+
+        <div className="dm-nav-section">
+          <div className="dm-nav-group-title">知识库后台</div>
+          {knowledgeNav.map((item) => (
             <NavItem key={item.href} {...item} active={isActive(item.href)} />
           ))}
         </div>

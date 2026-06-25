@@ -8,9 +8,13 @@ pub struct RetrievedChunk {
     pub chunk_id: Uuid,
     pub doc_id: Uuid,
     pub doc_title: String,
+    pub file_type: String,
     pub content: String,
     pub heading_path: Vec<String>,
     pub page_range: Vec<i32>,
+    pub block_ids: Vec<Uuid>,
+    pub table_ids: Vec<Uuid>,
+    pub metadata: serde_json::Value,
     pub score: f64,
     pub source: RetrievalSource,
 }
