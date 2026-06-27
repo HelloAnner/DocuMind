@@ -10,10 +10,13 @@
 | 文档元数据 | 文件名、类型、大小、hash、状态 | PostgreSQL `documents` | 管理后台、权限、状态追踪 |
 | 解析任务 | parser version、耗时、错误、质量分 | PostgreSQL `document_parse_jobs` | 重试、审计、版本管理 |
 | 解析快照 | 完整 `ParsedDocument` JSON | PostgreSQL JSONB + 可选对象存储 | 调试、重跑清洗 / chunk |
+| 原文锚点 | `SourceAnchor` | PostgreSQL `document_source_anchors` | 引用定位、FileView 高亮 |
+| chunk 锚点映射 | chunk ↔ anchor 关系 | PostgreSQL `chunk_anchor_map` | 多对多锚点关联 |
 | 块级结构 | heading / paragraph / table blocks | PostgreSQL `document_blocks` | 清洗、切割、引用定位 |
 | 表格结构 | 表级和单元格级数据 | PostgreSQL `document_tables` / `document_table_cells` | 表格问答、导出、回表 |
 | 切片 | chunk 文本和元数据 | PostgreSQL `chunks` | 检索结果展示、引用链 |
-| 向量索引 | chunk embedding + BM25 文本 | Elasticsearch | 混合检索 |
+| 引用快照 | 历史回答的 anchor 快照 | PostgreSQL `conversation_citation_snapshots` | 历史引用可追溯 |
+| 向量索引 | chunk embedding + BM25 文本 + anchor 字段 | Elasticsearch | 混合检索 |
 
 ## 原始文件保存
 
@@ -102,6 +105,44 @@ CREATE TABLE document_parse_results (
 
 小到中等文档可直接存 JSONB；超大文档可把完整 JSON 放对象存储，PG 中仍保存精简索引字段和 `parsed_json_object_key`。
 
+## document_source_anchors
+
+保存解析阶段生成的所有原文锚点，是引用定位与 FileView 高亮的权威来源。
+
+```sql
+CREATE TABLE document_source_anchors (
+  anchor_id UUID PRIMARY KEY,
+  doc_id UUID NOT NULL REFERENCES documents(doc_id) ON DELETE CASCADE,
+  parse_job_id UUID NOT NULL REFERENCES document_parse_jobs(parse_job_id) ON DELETE CASCADE,
+  tenant_id UUID NOT NULL,
+  format TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  page INT,
+  slide INT,
+  block_id UUID,
+  table_id UUID,
+  cell_range JSONB,
+  char_range JSONB,
+  bbox JSONB,
+  source_ref JSONB NOT NULL DEFAULT '{}',
+  text TEXT NOT NULL DEFAULT '',
+  text_hash TEXT,
+  anchor_quality TEXT NOT NULL DEFAULT 'unknown',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX idx_source_anchors_doc_parse
+  ON document_source_anchors(doc_id, parse_job_id);
+
+CREATE INDEX idx_source_anchors_block
+  ON document_source_anchors(block_id);
+
+CREATE INDEX idx_source_anchors_tenant_doc
+  ON document_source_anchors(tenant_id, doc_id);
+```
+
+`anchor_quality` 取值：`bbox` / `structural` / `page_only` / `slide_only` / `unknown`。
+
 ## document_blocks
 
 ```sql
@@ -120,6 +161,7 @@ CREATE TABLE document_blocks (
   slide_index INT,
   table_id UUID,
   bbox JSONB,
+  anchor_ids UUID[] NOT NULL DEFAULT '{}',
   source_ref JSONB NOT NULL DEFAULT '{}',
   metadata JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -153,6 +195,9 @@ CREATE TABLE chunks (
   slide_end INT,
   token_count INT NOT NULL,
   block_ids UUID[] NOT NULL DEFAULT '{}',
+  anchor_ids UUID[] NOT NULL DEFAULT '{}',
+  primary_anchor_id UUID,
+  anchor_quality TEXT NOT NULL DEFAULT 'unknown',
   metadata JSONB NOT NULL DEFAULT '{}',
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE(parse_job_id, chunk_index)
@@ -166,6 +211,21 @@ CREATE INDEX idx_chunks_kb_source
 ```
 
 chunk 内容进入 Elasticsearch；PostgreSQL 保留权威元数据、引用链和管理后台预览所需内容。
+
+## chunk_anchor_map
+
+chunk 与 anchor 的多对多关系。一个 chunk 可能覆盖多个 anchor（overlap、parent context），一个 anchor 也可能被多个 chunk 引用。
+
+```sql
+CREATE TABLE chunk_anchor_map (
+  chunk_id UUID NOT NULL REFERENCES chunks(chunk_id) ON DELETE CASCADE,
+  anchor_id UUID NOT NULL REFERENCES document_source_anchors(anchor_id) ON DELETE CASCADE,
+  relation TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, anchor_id)
+);
+```
+
+`relation` 取值：`primary` / `covered` / `overlap` / `parent_context` / `table_header`。
 
 ## chunk_tables
 
@@ -191,22 +251,60 @@ Elasticsearch 保存检索需要的数据：
 
 ```json
 {
-  "chunk_id": "uuid",
-  "doc_id": "uuid",
-  "kb_id": "uuid",
-  "tenant_id": "uuid",
+  "chunk_id": "chunk_001",
+  "doc_id": "doc_001",
+  "parse_job_id": "parse_001",
+  "kb_id": "kb_001",
+  "tenant_id": "tenant_001",
   "content": "标题路径：年度策略 / Q1 目标\n...",
   "heading_path": ["年度策略", "Q1 目标"],
-  "page_start": 3,
-  "page_end": 4,
   "source_type": "paragraph",
+  "page_range": { "gte": 3, "lte": 4 },
+  "anchor_ids": ["anchor_001", "anchor_002"],
+  "primary_anchor_id": "anchor_001",
+  "anchor_quality": "bbox",
   "token_count": 612,
   "table_ids": [],
   "embedding": [0.012, -0.034]
 }
 ```
 
+检索返回时必须带：
+
+```json
+{
+  "chunk_id": "chunk_001",
+  "score": 0.82,
+  "content": "...",
+  "anchor_refs": ["anchor_001", "anchor_002"],
+  "primary_anchor": { "...": "..." }
+}
+```
+
 ES 不是权威存储，可以随时从 PostgreSQL 的 chunks 表和 embedding worker 重建。
+
+## conversation_citation_snapshots
+
+历史回答必须保存当时的 anchor 快照，否则文档重新解析后，历史回答引用会失效或错位。
+
+```sql
+CREATE TABLE conversation_citation_snapshots (
+  citation_id UUID PRIMARY KEY,
+  message_id UUID NOT NULL,
+  doc_id UUID NOT NULL,
+  parse_job_id UUID NOT NULL,
+  anchor_id UUID,
+  citation_index INT NOT NULL,
+  quote TEXT,
+  anchor_snapshot JSONB NOT NULL,
+  claim_refs JSONB NOT NULL DEFAULT '[]',
+  source_status TEXT NOT NULL,
+  location_status TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+`anchor_snapshot` 保存生成答案时的完整 `SourceAnchor` JSON；`source_status` 表示当前来源是否仍可用；`location_status` 表示当前可定位精度。
 
 ## 版本与幂等
 
@@ -242,10 +340,14 @@ document_parse_jobs
   parser_version = documind-parser@0.1.0
   quality_score = 0.94
 
+document_source_anchors
+  anchor_001: slide 1, shape_id = rId2, bbox normalized, kind = text_span
+  anchor_002: slide 3, table_id = tbl_001, cell_range (0,0)-(1,2)
+
 document_blocks
-  block 1: heading, slide 1, "年度销售策略"
-  block 2: paragraph, slide 1, "本策略覆盖..."
-  block 9: table, slide 3, table_id = tbl_001
+  block 1: heading, slide 1, "年度销售策略", anchor_ids = [anchor_001]
+  block 2: paragraph, slide 1, "本策略覆盖...", anchor_ids = [anchor_001]
+  block 9: table, slide 3, table_id = tbl_001, anchor_ids = [anchor_002]
 
 document_tables
   tbl_001: raw_json + markdown + quality
@@ -255,21 +357,24 @@ document_table_cells
   tbl_001 row 1 col 0 = "华东"
 
 chunks
-  chunk_001: paragraph chunk, block_ids = [block_1, block_2]
-  chunk_006: table chunk, table_ids = [tbl_001]
+  chunk_001: paragraph chunk, block_ids = [block_1, block_2], primary_anchor_id = anchor_001
+  chunk_006: table chunk, table_ids = [tbl_001], primary_anchor_id = anchor_002
+
+chunk_anchor_map
+  chunk_001 -> anchor_001 (primary)
+  chunk_006 -> anchor_002 (primary)
 
 Elasticsearch
-  chunk_001 embedding + BM25 content
-  chunk_006 embedding + BM25 table markdown
+  chunk_001 embedding + BM25 content + anchor_ids
+  chunk_006 embedding + BM25 table markdown + anchor_ids
 ```
 
 用户回答引用时的链路：
 
 ```text
 answer citation
-  -> chunk_id
-  -> chunks.block_ids / chunk_tables.table_id
-  -> document_blocks.source_ref / document_tables.source_ref
-  -> documents.storage_key
-  -> 原文页码、slide 或 bbox
+  -> CitationResolver 选择支撑 claim 的 anchor
+  -> document_source_anchors.anchor_id
+  -> documents.storage_key + parse_job_id
+  -> FileView 按 anchor 跳页/跳 slide、高亮 bbox / shape / cell
 ```

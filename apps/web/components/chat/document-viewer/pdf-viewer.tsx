@@ -10,6 +10,7 @@ interface PdfViewerProps {
   cacheKey?: string;
   initialPage?: number | null;
   highlightText?: string;
+  anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   fileName?: string;
   onReady?: () => void;
 }
@@ -78,6 +79,7 @@ export function PdfViewer({
   cacheKey,
   initialPage,
   highlightText,
+  anchorBox,
   onReady,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -187,6 +189,7 @@ export function PdfViewer({
                 totalPages={totalPages}
                 isTarget={isTarget}
                 highlightText={isTarget ? highlightText : undefined}
+                anchorBox={isTarget ? anchorBox : undefined}
                 onRender={
                   isTarget
                     ? () => {
@@ -225,6 +228,7 @@ interface SinglePdfPageProps {
   totalPages: number;
   isTarget: boolean;
   highlightText?: string;
+  anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   onRender?: () => void;
 }
 
@@ -243,11 +247,13 @@ function SinglePdfPage({
   totalPages,
   isTarget,
   highlightText,
+  anchorBox,
   onRender,
 }: SinglePdfPageProps) {
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
+  const overlayRef = useRef<HTMLDivElement | null>(null);
   const pageRef = useRef<PDFPageProxy | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [size, setSize] = useState<PageSize | null>(null);
@@ -338,6 +344,7 @@ function SinglePdfPage({
         if (highlightText && isTarget) {
           highlightInElement(textLayerDiv, highlightText);
         }
+        renderAnchorBoxOverlay(overlayRef.current, anchorBox, size, isTarget);
       } catch {
         // text layer 是可选能力，失败不影响阅读
       }
@@ -347,7 +354,7 @@ function SinglePdfPage({
       task.cancel?.();
       textLayerTask?.cancel();
     };
-  }, [size, highlightText, isTarget]);
+  }, [size, highlightText, anchorBox, isTarget]);
 
   return (
     <div
@@ -375,6 +382,11 @@ function SinglePdfPage({
           <div
             ref={textLayerRef}
             className="dm-pdf-text-layer"
+            style={{ width: size.cssWidth, height: size.cssHeight }}
+          />
+          <div
+            ref={overlayRef}
+            className="dm-pdf-anchor-overlay"
             style={{ width: size.cssWidth, height: size.cssHeight }}
           />
         </div>
@@ -419,4 +431,53 @@ function highlightInElement(root: HTMLElement, text: string) {
     parent.insertBefore(document.createTextNode(after), textNode);
     parent.removeChild(textNode);
   }
+}
+
+function renderAnchorBoxOverlay(
+  overlay: HTMLDivElement | null,
+  anchorBox: SinglePdfPageProps["anchorBox"],
+  size: PageSize | null,
+  isTarget: boolean
+) {
+  if (!overlay || !anchorBox || !size || !isTarget) {
+    if (overlay) overlay.innerHTML = "";
+    return;
+  }
+  overlay.innerHTML = "";
+  const rotation = anchorBox.rotation ?? 0;
+  const effectiveRotation = ((rotation % 360) + 360) % 360;
+  let left = anchorBox.x0 * size.cssWidth;
+  let top = anchorBox.y0 * size.cssHeight;
+  let width = (anchorBox.x1 - anchorBox.x0) * size.cssWidth;
+  let height = (anchorBox.y1 - anchorBox.y0) * size.cssHeight;
+
+  // PDF 用户坐标原点在左下角；渲染容器原点在左上角，因此垂直翻转。
+  top = size.cssHeight - top - height;
+
+  // 处理 90/180/270 简单旋转：交换宽高并重新映射左上角。
+  if (effectiveRotation === 90 || effectiveRotation === 270) {
+    const tmp = width;
+    width = height;
+    height = tmp;
+  }
+  if (effectiveRotation === 90) {
+    left = anchorBox.y0 * size.cssWidth;
+    top = (1.0 - anchorBox.x1) * size.cssHeight;
+  } else if (effectiveRotation === 180) {
+    left = (1.0 - anchorBox.x1) * size.cssWidth;
+    top = anchorBox.y0 * size.cssHeight;
+  } else if (effectiveRotation === 270) {
+    left = (1.0 - anchorBox.y1) * size.cssWidth;
+    top = anchorBox.x0 * size.cssHeight;
+  }
+
+  if (width <= 0 || height <= 0) return;
+
+  const box = document.createElement("div");
+  box.className = "dm-anchor-box";
+  box.style.left = `${Math.max(0, left)}px`;
+  box.style.top = `${Math.max(0, top)}px`;
+  box.style.width = `${Math.min(width, size.cssWidth - left)}px`;
+  box.style.height = `${Math.min(height, size.cssHeight - top)}px`;
+  overlay.appendChild(box);
 }

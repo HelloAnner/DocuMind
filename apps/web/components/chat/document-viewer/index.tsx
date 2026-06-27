@@ -11,6 +11,7 @@ export interface DocumentViewerProps {
   fileName?: string;
   initialPage?: number | null;
   highlightText?: string;
+  anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   docId?: string;
   cacheKey?: string;
   onReady?: () => void;
@@ -22,6 +23,7 @@ export function DocumentViewer({
   fileName,
   initialPage,
   highlightText,
+  anchorBox,
   docId,
   cacheKey,
   onReady,
@@ -33,6 +35,7 @@ export function DocumentViewer({
         cacheKey={cacheKey}
         initialPage={initialPage}
         highlightText={highlightText}
+        anchorBox={anchorBox}
         fileName={fileName}
         onReady={onReady}
       />

@@ -5,6 +5,13 @@ use uuid::Uuid;
 use super::cleaning::CleanedBlock;
 use super::{estimate_tokens, ChunkDraft, FileType};
 
+fn anchor_quality_for(file_type: FileType) -> &'static str {
+    match file_type {
+        FileType::Pdf => "bbox",
+        _ => "structural",
+    }
+}
+
 pub const CHUNKER_VERSION: &str = "documind-chunker@0.1.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -234,6 +241,18 @@ fn chunk_from_group(
         .iter()
         .filter_map(|b| b.block.table_id)
         .collect::<Vec<_>>();
+    let anchor_ids: Vec<Uuid> = group
+        .blocks
+        .iter()
+        .flat_map(|b| b.block.anchor_ids.iter().copied())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
+    let primary_anchor_id = group
+        .blocks
+        .iter()
+        .find_map(|b| b.block.anchor_ids.first().copied());
+    let anchor_quality = anchor_quality_for(file_type).to_string();
 
     let mut content_parts = Vec::new();
     if !heading_path.is_empty() {
@@ -269,6 +288,9 @@ fn chunk_from_group(
         slide_end,
         block_ids,
         table_ids,
+        anchor_ids,
+        primary_anchor_id,
+        anchor_quality,
         metadata: json!({
             "format": file_type.as_str(),
             "chunker_version": CHUNKER_VERSION,

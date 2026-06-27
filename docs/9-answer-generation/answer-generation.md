@@ -23,11 +23,22 @@ Prompt Composition
 LLM Stream Generation
     │  SSE 输出 token
     ▼
+Claim Extractor
+    │  答案拆 claim
+    ▼
+CitationResolver
+    │  claim -> evidence -> anchor 匹配、去重、排序
+    ▼
+CitationVerifier
+    │  数字/日期/金额/实体/权限/版本校验
+    ▼
 Post-processing
-    │  引用格式化、置信度计算、Claim 校验、敏感信息脱敏
+    │  引用格式化、置信度计算、敏感信息脱敏
     ▼
 Answer + Citations + Confidence
 ```
+
+> 注意：LLM 只负责生成答案；最终 citation 由 `CitationResolver` 根据实际答案和 evidence 生成，而不是把 Top-K evidence 全量映射为引用。
 
 ## 3. Context Assembly（上下文组装）
 
@@ -149,23 +160,42 @@ frequency_penalty: 0
 
 前端展示时附带锚点，点击可跳转原文高亮。
 
-### 6.2 置信度计算
+### 6.2 CitationResolver 流程
+
+详见 [Citation Resolver 详细设计](./citation-resolver.md)。核心步骤：
 
 ```text
-confidence = f(rerank_score, chunk_overlap, keyword_match_rate, citation_coverage)
+Answer Draft
+  -> Claim Extractor 拆 claim
+  -> 对每个 claim：
+       候选 evidence = answer 使用的 evidence + 语义匹配 claim 的 evidence
+       过滤权限、parse 版本、来源状态
+       按 entailment + rerank + exact match + anchor quality 评分
+       数字/日期/金额/实体逐项校验
+       选择最小覆盖 anchor 集合
+  -> 去重合并（按 canonical anchor key）
+  -> 分配 citation index（按答案出现顺序 + 文档顺序）
+  -> CitationVerifier 最终校验
+```
+
+### 6.3 置信度计算
+
+```text
+confidence = f(rerank_score, chunk_overlap, keyword_match_rate, citation_coverage, anchor_quality)
 ```
 
 | 置信度 | 条件 |
 |---|---|
-| high | 多个高分 chunk 直接覆盖结论，引用完整 |
-| medium | 有引用支撑，但证据不完整或只覆盖部分条件 |
-| low | 召回弱、证据间接、存在版本冲突或需要澄清 |
+| high | 多个高分 chunk 直接覆盖结论，引用完整，anchor 质量为 bbox |
+| medium | 有引用支撑，但证据不完整、anchor 仅为 structural 或只覆盖部分条件 |
+| low | 召回弱、证据间接、存在版本冲突、anchor 为 page_only 或需要澄清 |
 
-### 6.3 Citation 校验
+### 6.4 Citation 校验
 
 - 生成后检查每个 `[n]` 是否对应真实 chunk。
 - 无 citation 支撑的结论：降置信度或改写为「文档中未找到明确说明」。
 - 数字、日期、金额、条款编号必须在 evidence 中出现。
+- citation 必须绑定 `anchor_id`，`location_status` 决定前端 FileView 行为。
 
 ## 7. 后处理
 
@@ -208,10 +238,23 @@ confidence = f(rerank_score, chunk_overlap, keyword_match_rate, citation_coverag
       "chunk_id": "chunk_003",
       "doc_id": "doc_001",
       "doc_title": "2025年Q3采购合同.pdf",
+      "source_status": "available",
       "page_range": [5, 6],
       "heading_path": ["三、付款条款", "3.1 付款节点"],
       "quote": "合同签署后，甲方应在5个工作日内支付首付款30%……",
-      "score": 0.87
+      "score": 0.87,
+      "anchor": {
+        "anchor_id": "anchor_003",
+        "parse_job_id": "parse_001",
+        "format": "pdf",
+        "kind": "text_span",
+        "page": 5,
+        "bbox": { "x0": 0.12, "y0": 0.34, "x1": 0.86, "y1": 0.38, "unit": "normalized" },
+        "location_status": "exact"
+      },
+      "claim_refs": [
+        { "claim_id": "claim_001", "answer_char_range": { "start": 12, "end": 38 } }
+      ]
     }
   ],
   "confidence": "high",
@@ -252,6 +295,7 @@ confidence = f(rerank_score, chunk_overlap, keyword_match_rate, citation_coverag
 ## 11. 相关文档
 
 - [引用定位与原文预览设计](./citation-location-preview.md)
+- [Citation Resolver 详细设计](./citation-resolver.md)
 - [精排](../8-reranking/reranking.md)
 - [混合检索](../7-hybrid-search/hybrid-search.md)
 - [Agent 提示词设计](../10-conversation/agent-prompting.md)

@@ -5549,6 +5549,32 @@ a {
   box-shadow: 0 0 0 1px rgba(222, 106, 67, 0.25);
 }
 
+.dm-pdf-anchor-overlay {
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+}
+
+.dm-anchor-box {
+  animation: dm-anchor-pulse 1.6s ease-in-out infinite;
+  background: rgba(222, 106, 67, 0.18);
+  border: 2px solid rgba(222, 106, 67, 0.75);
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.4);
+  position: absolute;
+}
+
+@keyframes dm-anchor-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(222, 106, 67, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(222, 106, 67, 0);
+  }
+}
+
 /* Image viewer */
 
 .dm-image-viewer {

@@ -6,6 +6,8 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
+use crate::models::source_anchor::NormalizedBBox;
+
 #[derive(Debug, Clone)]
 pub struct ElasticsearchConfig {
     pub base_url: String,
@@ -37,6 +39,13 @@ pub struct IndexedChunk {
     pub token_count: i32,
     pub block_ids: Vec<Uuid>,
     pub table_ids: Vec<Uuid>,
+    pub anchor_ids: Vec<Uuid>,
+    pub primary_anchor_id: Option<Uuid>,
+    pub anchor_quality: String,
+    pub anchor_page: Option<i32>,
+    pub anchor_slide: Option<i32>,
+    pub anchor_bbox: Option<NormalizedBBox>,
+    pub anchor_text: String,
     pub embedding_model: String,
     pub embedding: Vec<f64>,
     pub metadata: Value,
@@ -188,6 +197,13 @@ fn index_definition(dims: usize) -> Value {
                 "token_count": { "type": "integer" },
                 "block_ids": { "type": "keyword" },
                 "table_ids": { "type": "keyword" },
+                "anchor_ids": { "type": "keyword" },
+                "primary_anchor_id": { "type": "keyword" },
+                "anchor_quality": { "type": "keyword" },
+                "anchor_page": { "type": "integer" },
+                "anchor_slide": { "type": "integer" },
+                "anchor_bbox": { "type": "object" },
+                "anchor_text": { "type": "text", "index": false },
                 "embedding_model": { "type": "keyword" },
                 "embedding": {
                     "type": "dense_vector",

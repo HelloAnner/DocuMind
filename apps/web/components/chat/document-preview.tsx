@@ -50,6 +50,10 @@ function targetPage(citation: Citation) {
   return citation.anchor?.page ?? citation.page_range[0] ?? null;
 }
 
+function citationAnchorBox(citation: Citation) {
+  return citation.anchor?.bbox ?? null;
+}
+
 function citationSearchText(citation: Citation) {
   const beforeFollowingContext = citation.quote.split("【下文】")[0] ?? citation.quote;
   const normalized = beforeFollowingContext
@@ -88,6 +92,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const type = fileType(citation);
   const page = targetPage(citation);
+  const anchorBox = useMemo(() => citationAnchorBox(citation), [citation]);
   const searchText = useMemo(() => citationSearchText(citation), [citation]);
 
   useEffect(() => {
@@ -165,6 +170,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
               fileName={state.fileName}
               initialPage={page}
               highlightText={searchText}
+              anchorBox={anchorBox ?? undefined}
             />
           </ErrorBoundary>
         )}

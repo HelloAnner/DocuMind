@@ -103,19 +103,33 @@ fn cited_evidence_indexes(answer: &str) -> BTreeSet<i32> {
 }
 
 fn anchor_for_chunk(chunk: &RerankedChunk) -> CitationAnchor {
-    let page = chunk.chunk.page_range.first().copied();
-    let slide = metadata_i32(&chunk.chunk.metadata, "slide_start")
+    let primary = chunk.chunk.primary_anchor.as_ref();
+    let page = primary
+        .and_then(|a| a.page)
+        .or_else(|| chunk.chunk.page_range.first().copied());
+    let slide = primary
+        .and_then(|a| a.slide)
+        .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide_start"))
         .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide"))
         .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide_end"));
-    let kind = if !chunk.chunk.table_ids.is_empty() || chunk.chunk.source_type() == "table" {
-        "table_region"
-    } else if slide.is_some() {
-        "slide_shape"
-    } else {
-        "paragraph"
-    };
-    let location_status = if !chunk.chunk.block_ids.is_empty() || !chunk.chunk.table_ids.is_empty()
-    {
+    let kind = primary
+        .map(|a| a.kind.clone())
+        .unwrap_or_else(|| {
+            if !chunk.chunk.table_ids.is_empty() || chunk.chunk.source_type() == "table" {
+                "table_region".to_string()
+            } else if slide.is_some() {
+                "slide_shape".to_string()
+            } else {
+                "paragraph".to_string()
+            }
+        });
+    let bbox = primary.and_then(|a| a.bbox.clone());
+    let anchor_id = primary.map(|a| a.anchor_id);
+    let parse_job_id = primary.map(|a| a.parse_job_id);
+
+    let location_status = if bbox.is_some() {
+        "exact"
+    } else if !chunk.chunk.block_ids.is_empty() || !chunk.chunk.table_ids.is_empty() {
         "structural_only"
     } else if slide.is_some() {
         "slide_only"
@@ -126,12 +140,15 @@ fn anchor_for_chunk(chunk: &RerankedChunk) -> CitationAnchor {
     };
 
     CitationAnchor {
-        format: chunk.chunk.file_type.clone(),
-        kind: kind.to_string(),
+        anchor_id,
+        parse_job_id,
+        format: primary.map(|a| a.format.clone()).unwrap_or_else(|| chunk.chunk.file_type.clone()),
+        kind,
         page,
         slide,
         block_ids: chunk.chunk.block_ids.clone(),
         table_ids: chunk.chunk.table_ids.clone(),
+        bbox,
         location_status: location_status.to_string(),
     }
 }

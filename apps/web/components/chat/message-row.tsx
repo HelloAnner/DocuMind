@@ -163,15 +163,27 @@ function ReasoningTrace({
   stages,
   isStreaming,
   durationMs,
+  hasSources,
+  noAnswerReason,
 }: {
   thinking?: string;
   toolCalls?: RuntimeToolCall[];
   stages?: PipelineStage[];
   isStreaming: boolean;
   durationMs?: number;
+  hasSources?: boolean;
+  noAnswerReason?: string;
 }) {
-  const hasAtomTrace = Boolean(thinking?.trim()) || Boolean(toolCalls?.length);
+  // 默认 RAG 管道阶段（查询改写/混合检索/重排序/生成答案）本身只是进度节点，
+  // 不属于需要展示摘要的“工具调用”。只有真实工具/思考/来源/无答案原因才展示。
+  const stageToolNames = new Set(["query_rewrite", "hybrid_retrieval", "rerank", "answer_generation"]);
+  const meaningfulToolCalls = toolCalls?.filter((tool) => !stageToolNames.has(tool.name));
+  const hasAtomTrace = Boolean(thinking?.trim()) || Boolean(meaningfulToolCalls?.length);
+  const hasMeaningfulTrace = hasAtomTrace || hasSources || Boolean(noAnswerReason);
 
+  // 纯寒暄/闲聊回复（无溯源、无真实工具链、无无答案原因）不需要展示执行过程摘要，
+  // 避免用户一开口就只看到“全部工作已完成”。
+  if (!isStreaming && !hasMeaningfulTrace) return null;
   if (!hasAtomTrace && (!stages || stages.length === 0)) return null;
 
   const statusText = isStreaming
@@ -407,6 +419,7 @@ export function MessageRow({
   const failed = message.status === "failed";
   const cancelled = message.status === "cancelled";
   const deletedAll = hasCitations && message.citations.every(isCitationDeleted);
+  const hasContent = message.content.trim().length > 0;
 
   return (
     <article className={`dm-answer-card ${isStreaming ? "streaming" : ""}`}>
@@ -422,15 +435,17 @@ export function MessageRow({
         stages={stages}
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
+        hasSources={hasDisplayCitations}
+        noAnswerReason={message.no_answer_reason}
       />
 
       {failed || cancelled ? (
         <div className="dm-answer-error">
           {cancelled ? "生成已取消" : message.content || "生成失败，请重试"}
         </div>
-      ) : isStreaming && !message.content ? (
+      ) : isStreaming && !hasContent ? (
         <StreamingIndicator />
-      ) : (
+      ) : hasContent ? (
         <AnswerContent
           content={message.content}
           citations={displayCitations}
@@ -439,7 +454,7 @@ export function MessageRow({
             if (c) onCitationClick(c);
           }}
         />
-      )}
+      ) : null}
 
       <FollowUpQuestions questions={message.follow_up_questions} onClick={onFollowUp} />
 

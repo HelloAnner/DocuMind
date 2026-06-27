@@ -6,6 +6,8 @@ use std::io::{Cursor, Read};
 use uuid::Uuid;
 use zip::ZipArchive;
 
+use crate::models::{NormalizedBBox, SourceAnchor};
+
 pub mod chunking;
 pub mod cleaning;
 
@@ -46,6 +48,7 @@ pub struct ParsedDocument {
     pub pages: Option<i32>,
     pub blocks: Vec<ParsedBlock>,
     pub tables: Vec<ParsedTable>,
+    pub anchors: Vec<SourceAnchor>,
     pub warnings: Vec<String>,
     pub quality_score: f64,
 }
@@ -63,6 +66,7 @@ pub struct ParsedBlock {
     pub slide_index: Option<i32>,
     pub table_id: Option<Uuid>,
     pub bbox: Option<Value>,
+    pub anchor_ids: Vec<Uuid>,
     pub source_ref: Value,
     pub metadata: Value,
 }
@@ -115,6 +119,9 @@ pub struct ChunkDraft {
     pub token_count: i32,
     pub block_ids: Vec<Uuid>,
     pub table_ids: Vec<Uuid>,
+    pub anchor_ids: Vec<Uuid>,
+    pub primary_anchor_id: Option<Uuid>,
+    pub anchor_quality: String,
     pub metadata: Value,
 }
 
@@ -288,6 +295,7 @@ fn parse_docx(
                     slide_index: None,
                     table_id: None,
                     bbox: None,
+                    anchor_ids: vec![],
                     source_ref: json!({"format": "docx", "node": "w:p", "index": blocks.len()}),
                     metadata: json!({"style": style}),
                 });
@@ -318,6 +326,7 @@ fn parse_docx(
                     slide_index: None,
                     table_id: Some(table.table_id),
                     bbox: None,
+                    anchor_ids: vec![],
                     source_ref: json!({"format": "docx", "node": "w:tbl", "index": tables.len()}),
                     metadata: json!({}),
                 });
@@ -335,6 +344,7 @@ fn parse_docx(
         None,
         blocks,
         tables,
+        vec![],
     ))
 }
 
@@ -402,6 +412,7 @@ fn parse_pptx(
                 slide_index: Some((slide_idx + 1) as i32),
                 table_id: Some(table.table_id),
                 bbox: None,
+                anchor_ids: vec![],
                 source_ref: json!({"format": "pptx", "slide": slide_idx + 1, "node": "a:tbl"}),
                 metadata: json!({}),
             });
@@ -447,6 +458,7 @@ fn parse_pptx(
                 slide_index: Some((slide_idx + 1) as i32),
                 table_id: None,
                 bbox: None,
+                anchor_ids: vec![],
                 source_ref: json!({"format": "pptx", "slide": slide_idx + 1, "node": "a:p"}),
                 metadata: json!({}),
             });
@@ -465,6 +477,7 @@ fn parse_pptx(
         Some(slide_names.len() as i32),
         blocks,
         tables,
+        vec![],
     );
     parsed.warnings.extend(warnings);
     Ok(parsed)
@@ -487,19 +500,52 @@ fn parse_pdf(
             })
         })
         .context("pdf_text_extract_failed")?;
+
+    let page_sizes = pdf_page_sizes(bytes).unwrap_or_default();
     let mut blocks = Vec::new();
+    let mut anchors = Vec::new();
     let mut warnings = Vec::new();
+
     for (page_idx, page_text) in pages.iter().enumerate() {
         let page = (page_idx + 1) as i32;
-        for paragraph in split_paragraphs(page_text) {
+        let paragraphs = split_paragraphs(page_text);
+        let _page_height = page_sizes
+            .get(page_idx)
+            .map(|(_, h)| *h)
+            .unwrap_or(842.0);
+        let band_height = if paragraphs.is_empty() {
+            0.0
+        } else {
+            0.8 / paragraphs.len().max(1) as f64
+        };
+
+        for (para_idx, paragraph) in paragraphs.iter().enumerate() {
             let trimmed = paragraph.trim();
             if trimmed.is_empty() {
                 continue;
             }
             let is_heading = trimmed.chars().count() <= 80
                 && !trimmed.ends_with(['.', '。', '；', ';', '，', ',']);
+            let block_id = Uuid::new_v4();
+
+            // 为每个 PDF 段落生成一个归一化 bbox（按页面垂直分带，留出页边距）
+            let y1 = 0.9 - para_idx as f64 * band_height;
+            let y0 = (y1 - band_height).max(0.1);
+            let bbox = NormalizedBBox::normalized(0.05, y0, 0.95, y1);
+            let anchor = SourceAnchor::for_pdf_paragraph(
+                doc_id,
+                parse_job_id,
+                Uuid::nil(), // tenant_id 将在上层填充
+                block_id,
+                page,
+                trimmed,
+                bbox,
+            );
+            let anchor_id = anchor.anchor_id;
+            anchors.push(anchor);
+
             blocks.push(ParsedBlock {
-                block_id: Uuid::new_v4(),
+                block_id,
                 block_index: blocks.len() as i32,
                 block_type: if is_heading { "heading" } else { "paragraph" }.to_string(),
                 text: trimmed.to_string(),
@@ -510,6 +556,7 @@ fn parse_pdf(
                 slide_index: None,
                 table_id: None,
                 bbox: None,
+                anchor_ids: vec![anchor_id],
                 source_ref: json!({"format": "pdf", "page": page}),
                 metadata: json!({"layout": "text_layer"}),
             });
@@ -518,9 +565,69 @@ fn parse_pdf(
     if blocks.is_empty() {
         warnings.push("scanned_pdf_no_text_layer".to_string());
     }
-    let mut parsed = finalize_parsed(doc_id, parse_job_id, "pdf", title, None, blocks, vec![]);
+    let mut parsed = finalize_parsed(
+        doc_id,
+        parse_job_id,
+        "pdf",
+        title,
+        Some(pages.len() as i32),
+        blocks,
+        vec![],
+        anchors,
+    );
     parsed.warnings.extend(warnings);
     Ok(parsed)
+}
+
+/// 使用 lopdf 提取每页的 CropBox/MediaBox 尺寸（点）。
+fn pdf_page_sizes(bytes: &[u8]) -> Result<Vec<(f64, f64)>> {
+    let doc = lopdf::Document::load_mem(bytes).context("lopdf_load_failed")?;
+    let pages = doc.get_pages();
+    let mut sizes = Vec::new();
+    for page_num in 1..=pages.len() as u32 {
+        let page_id = pages
+            .get(&page_num)
+            .copied()
+            .ok_or_else(|| anyhow!("lopdf_missing_page_{}", page_num))?;
+        let bounds = page_bounds(&doc, page_id);
+        if let lopdf::Object::Array(arr) = bounds {
+            if arr.len() >= 4 {
+                let x0 = as_f64(&arr[0]).unwrap_or(0.0);
+                let y0 = as_f64(&arr[1]).unwrap_or(0.0);
+                let x1 = as_f64(&arr[2]).unwrap_or(595.0);
+                let y1 = as_f64(&arr[3]).unwrap_or(842.0);
+                sizes.push(((x1 - x0).abs(), (y1 - y0).abs()));
+            }
+        }
+    }
+    Ok(sizes)
+}
+
+fn page_bounds(doc: &lopdf::Document, page_id: lopdf::ObjectId) -> lopdf::Object {
+    let default = lopdf::Object::Array(vec![
+        lopdf::Object::Integer(0),
+        lopdf::Object::Integer(0),
+        lopdf::Object::Integer(595),
+        lopdf::Object::Integer(842),
+    ]);
+    let Ok(page) = doc.get_dictionary(page_id) else {
+        return default;
+    };
+    let resolve = |obj: &lopdf::Object| doc.get_object(obj.as_reference().unwrap_or((0, 0))).ok();
+    page.get(b"CropBox")
+        .ok()
+        .and_then(resolve)
+        .or_else(|| page.get(b"MediaBox").ok().and_then(resolve))
+        .cloned()
+        .unwrap_or(default)
+}
+
+fn as_f64(obj: &lopdf::Object) -> Option<f64> {
+    match obj {
+        lopdf::Object::Integer(i) => Some(*i as f64),
+        lopdf::Object::Real(f) => Some((*f).into()),
+        _ => None,
+    }
 }
 
 fn parse_plain_text(
@@ -531,9 +638,25 @@ fn parse_plain_text(
 ) -> Result<ParsedDocument> {
     let text = String::from_utf8(bytes.to_vec()).context("invalid_utf8_text")?;
     let mut blocks = Vec::new();
+    let mut anchors = Vec::new();
     for paragraph in split_paragraphs(&text) {
+        let block_id = Uuid::new_v4();
+        let anchor = SourceAnchor::structural(
+            doc_id,
+            parse_job_id,
+            Uuid::nil(),
+            "txt",
+            "paragraph",
+            block_id,
+            None,
+            None,
+            json!({"format": "txt", "index": blocks.len()}),
+            &paragraph,
+        );
+        let anchor_id = anchor.anchor_id;
+        anchors.push(anchor);
         blocks.push(ParsedBlock {
-            block_id: Uuid::new_v4(),
+            block_id,
             block_index: blocks.len() as i32,
             block_type: "paragraph".to_string(),
             text: paragraph,
@@ -544,6 +667,7 @@ fn parse_plain_text(
             slide_index: None,
             table_id: None,
             bbox: None,
+            anchor_ids: vec![anchor_id],
             source_ref: json!({"format": "txt", "index": blocks.len()}),
             metadata: json!({"format": "txt"}),
         });
@@ -556,6 +680,7 @@ fn parse_plain_text(
         None,
         blocks,
         vec![],
+        anchors,
     ))
 }
 
@@ -733,6 +858,26 @@ fn parse_markdown(
         &heading_path,
     );
 
+    let mut anchors = Vec::new();
+    for block in &mut blocks {
+        if block.anchor_ids.is_empty() {
+            let anchor = SourceAnchor::structural(
+                doc_id,
+                parse_job_id,
+                Uuid::nil(),
+                "md",
+                &block.block_type,
+                block.block_id,
+                block.page_start,
+                block.slide_index,
+                block.source_ref.clone(),
+                &block.text,
+            );
+            block.anchor_ids.push(anchor.anchor_id);
+            anchors.push(anchor);
+        }
+    }
+
     Ok(finalize_parsed(
         doc_id,
         parse_job_id,
@@ -741,6 +886,7 @@ fn parse_markdown(
         None,
         blocks,
         tables,
+        anchors,
     ))
 }
 
@@ -752,6 +898,7 @@ fn finalize_parsed(
     pages: Option<i32>,
     blocks: Vec<ParsedBlock>,
     tables: Vec<ParsedTable>,
+    anchors: Vec<SourceAnchor>,
 ) -> ParsedDocument {
     ParsedDocument {
         doc_id,
@@ -761,6 +908,7 @@ fn finalize_parsed(
         pages,
         blocks,
         tables,
+        anchors,
         warnings: vec![],
         quality_score: 0.0,
     }
@@ -1037,6 +1185,7 @@ fn push_markdown_block(
         slide_index: None,
         table_id: None,
         bbox: None,
+        anchor_ids: vec![],
         source_ref: json!({"format": "md", "index": blocks.len()}),
         metadata,
     });
@@ -1146,6 +1295,7 @@ fn flush_markdown_table(
         slide_index: None,
         table_id: Some(table_id),
         bbox: None,
+        anchor_ids: vec![],
         source_ref: json!({"format": "md", "node": "table", "index": tables.len()}),
         metadata: json!({"format": "md", "source": "table"}),
     });

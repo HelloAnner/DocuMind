@@ -32,12 +32,22 @@ export interface Citation {
 }
 
 export interface CitationAnchor {
+  anchor_id?: UUID;
+  parse_job_id?: UUID;
   format?: string;
   kind?: string;
   page?: number;
   slide?: number;
   block_ids?: UUID[];
   table_ids?: UUID[];
+  bbox?: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    unit?: string;
+    rotation?: number;
+  };
   location_status?: "exact" | "structural_only" | "page_only" | "slide_only" | "unavailable" | string;
 }
 

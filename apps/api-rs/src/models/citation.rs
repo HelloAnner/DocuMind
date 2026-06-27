@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::source_anchor::NormalizedBBox;
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CitationAnchor {
+    pub anchor_id: Option<Uuid>,
+    pub parse_job_id: Option<Uuid>,
     #[serde(default)]
     pub format: String,
     #[serde(default)]
@@ -15,6 +19,8 @@ pub struct CitationAnchor {
     pub block_ids: Vec<Uuid>,
     #[serde(default)]
     pub table_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub bbox: Option<NormalizedBBox>,
     #[serde(default)]
     pub location_status: String,
 }

@@ -10,15 +10,60 @@ Upload API
   -> 创建 parse job
   -> 识别文件类型
   -> 调用格式 Parser
+       ├── 纯 Rust Parser（默认）
+       └── 可选 Python Document Intelligence Worker
   -> 生成 ParsedDocument
-  -> 写入 document_parse_results / document_blocks / document_tables
-  -> 质量校验
+  -> 生成 document_source_anchors
+  -> 写入 document_parse_results / document_blocks / document_tables / document_source_anchors
+  -> 质量校验（含 anchor 覆盖率）
   -> 成功进入 Text Cleaning
 ```
 
 解析任务由异步 worker 执行。上传接口只负责落原文件和创建任务，不在请求线程内完成解析。
 
 整体技术架构、框架选型、链式设计见 [DocuMind 技术架构总览](../tech.md)。本文档聚焦解析流程和格式-specific 逻辑。
+
+解析任务由异步 worker 执行。上传接口只负责落原文件和创建任务，不在请求线程内完成解析。
+
+整体技术架构、框架选型、链式设计见 [DocuMind 技术架构总览](../tech.md)。本文档聚焦解析流程和格式-specific 逻辑。
+
+## Parser 实现选项
+
+### 选项 A：纯 Rust Parser（默认）
+
+- PDF：`pdf-extract` + `lopdf`
+- DOCX：`docx-rs` + `quick-xml`
+- PPTX：`quick-xml`
+- Markdown：原生 Rust markdown parser
+
+适合：部署简单、无 Python 运行时依赖、版式规整的文档。
+
+### 选项 B：Python Document Intelligence Worker（可选增强）
+
+当需要高质量版面恢复、表格结构、OCR、扫描件处理时，可接入 Python Worker：
+
+```text
+Rust API / Orchestrator
+  -> RabbitMQ / 任务队列
+  -> Python doc-intel-worker
+       - Docling（多格式统一解析、layout、reading order、table structure）
+       - PyMuPDF（PDF text run + bbox）
+       - OCR（扫描件 fallback）
+       - layout/table 模型
+       - anchor generation
+  -> ParsedDocument JSON
+  -> PostgreSQL + MinIO + Elasticsearch
+```
+
+这不是“后端改 Python”，而是：
+
+```text
+Rust 负责产品系统与强类型业务主链路
+Python 负责文档智能/模型生态适配
+两者用 JSON contract 隔离
+```
+
+Worker 输出必须满足与 Rust Parser 相同的 `ParsedDocument` + `SourceAnchor` 契约，上层无感切换。
 
 ## 文件识别
 
@@ -99,17 +144,85 @@ PDF block 生成规则：
 | 表格区域 | `table` + `document_tables` |
 | 重复页眉页脚 | 标记为 `header_footer`，默认不进入清洗后正文 |
 
-PDF 解析必须保留 page coordinate：
+PDF 解析必须保留 page coordinate。`bbox` 优先存归一化坐标，便于前端在不同缩放、旋转、DPR 下稳定渲染：
 
 ```json
 {
   "page": 3,
-  "bbox": { "x0": 72.1, "y0": 120.4, "x1": 520.2, "y1": 168.9 },
-  "rotation": 0
+  "bbox": {
+    "x0": 0.121,
+    "y0": 0.276,
+    "x1": 0.812,
+    "y1": 0.315,
+    "unit": "normalized",
+    "rotation": 0
+  }
 }
 ```
 
+归一化换算：
+
+```text
+x0 = raw_x0 / page_width
+y0 = raw_y0 / page_height
+x1 = raw_x1 / page_width
+y1 = raw_y1 / page_height
+```
+
 后续引用定位可以用页码 + bbox 高亮原文区域。
+
+## SourceAnchor 生成
+
+解析阶段必须为每个可引用位置生成 `SourceAnchor`。Anchor 是后续 CitationResolver 和 FileView 的唯一合法输入。
+
+```json
+{
+  "anchor_id": "uuid",
+  "doc_id": "uuid",
+  "parse_job_id": "uuid",
+  "format": "pdf",
+  "kind": "text_span",
+  "page": 3,
+  "slide": null,
+  "block_id": "uuid",
+  "table_id": null,
+  "cell_range": null,
+  "char_range": { "start": 128, "end": 196 },
+  "bbox": {
+    "x0": 0.121,
+    "y0": 0.276,
+    "x1": 0.812,
+    "y1": 0.315,
+    "unit": "normalized",
+    "rotation": 0
+  },
+  "source_ref": {
+    "pdf_text_run_ids": ["run_0031", "run_0032"]
+  },
+  "text_hash": "sha256..."
+}
+```
+
+### 各格式 Anchor 主键
+
+| 格式 | Anchor 主键 | 说明 |
+|---|---|---|
+| PDF | `page + text_run_ids + bbox` | text run 是最小原子；paragraph 由连续 run 聚合 |
+| DOCX | `paragraph_index + run_index_range` / `table_index + row + col` | 结构锚点为主；有预览布局时补 `render_ref` |
+| PPTX | `slide + shape_id + bbox` / `table_id + cell_range` | shape 是定位主键；表格要能定位到 cell range |
+| Markdown/TXT | `char_range + byte_offset` | 文本查看器直接滚动高亮 |
+
+### Anchor 覆盖率
+
+质量校验必须统计：
+
+```text
+anchor_coverage = 有 anchor 的 block 数 / 总 block 数
+bbox_coverage = 有 bbox 的 anchor 数 / 总 anchor 数
+```
+
+- `anchor_coverage < 0.95`：标记 `parse_low_confidence`。
+- `bbox_coverage < 0.80`（PDF/PPT）：提示 FileView 精确高亮能力受限。
 
 ## 统一 Block Schema
 
@@ -129,6 +242,7 @@ PDF 解析必须保留 page coordinate：
   "slide_index": null,
   "table_id": null,
   "bbox": null,
+  "anchor_ids": ["anchor_023"],
   "source_ref": {
     "format": "docx",
     "xpath": "/w:document/w:body/w:p[23]"

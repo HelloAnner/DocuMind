@@ -1143,6 +1143,53 @@ async fn insert_parse_outputs(
     .execute(&mut **tx)
     .await?;
 
+    for anchor in &artifacts.bundle.parsed.anchors {
+        sqlx::query(
+            "INSERT INTO document_source_anchors (
+                id, doc_id, parse_job_id, tenant_id, format, kind,
+                page, slide, block_id, table_id, cell_range, char_range,
+                bbox, source_ref, text, text_hash, anchor_quality
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+             ON CONFLICT (id) DO UPDATE
+             SET doc_id = EXCLUDED.doc_id,
+                 parse_job_id = EXCLUDED.parse_job_id,
+                 tenant_id = EXCLUDED.tenant_id,
+                 format = EXCLUDED.format,
+                 kind = EXCLUDED.kind,
+                 page = EXCLUDED.page,
+                 slide = EXCLUDED.slide,
+                 block_id = EXCLUDED.block_id,
+                 table_id = EXCLUDED.table_id,
+                 cell_range = EXCLUDED.cell_range,
+                 char_range = EXCLUDED.char_range,
+                 bbox = EXCLUDED.bbox,
+                 source_ref = EXCLUDED.source_ref,
+                 text = EXCLUDED.text,
+                 text_hash = EXCLUDED.text_hash,
+                 anchor_quality = EXCLUDED.anchor_quality",
+        )
+        .bind(anchor.anchor_id)
+        .bind(scope.doc_id)
+        .bind(scope.parse_job_id)
+        .bind(scope.tenant_id)
+        .bind(&anchor.format)
+        .bind(&anchor.kind)
+        .bind(anchor.page)
+        .bind(anchor.slide)
+        .bind(anchor.block_id)
+        .bind(anchor.table_id)
+        .bind(sqlx::types::Json(anchor.cell_range.as_ref()))
+        .bind(sqlx::types::Json(anchor.char_range.as_ref()))
+        .bind(sqlx::types::Json(anchor.bbox.as_ref()))
+        .bind(&anchor.source_ref)
+        .bind(&anchor.text)
+        .bind(&anchor.text_hash)
+        .bind(&anchor.anchor_quality)
+        .execute(&mut **tx)
+        .await?;
+    }
+
     sqlx::query(
         "UPDATE documents
          SET latest_parse_job_id = $1,
@@ -1171,9 +1218,9 @@ async fn insert_parse_outputs(
         sqlx::query(
             "INSERT INTO document_blocks (
                 id, tenant_id, kb_id, doc_id, parse_job_id, block_index, block_type,
-                heading_path, page_range, content, metadata
+                heading_path, page_range, content, anchor_ids, metadata
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)",
         )
         .bind(block.block_id)
         .bind(scope.tenant_id)
@@ -1185,6 +1232,7 @@ async fn insert_parse_outputs(
         .bind(&block.heading_path)
         .bind(page_range(block.page_start, block.page_end))
         .bind(&block.text)
+        .bind(&block.anchor_ids)
         .bind(json!({
             "heading_level": block.heading_level,
             "slide": block.slide_index,
@@ -1300,9 +1348,10 @@ async fn insert_parse_outputs(
             "INSERT INTO chunks (
                 id, tenant_id, kb_id, doc_id, parse_job_id, chunk_index,
                 source_type, content, heading_path, page_range, token_count,
-                block_ids, table_ids, overlap_prev_block_ids, overlap_next_block_ids, metadata
+                block_ids, table_ids, anchor_ids, primary_anchor_id, anchor_quality,
+                overlap_prev_block_ids, overlap_next_block_ids, metadata
              )
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)",
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)",
         )
         .bind(chunk.chunk_id)
         .bind(scope.tenant_id)
@@ -1317,6 +1366,9 @@ async fn insert_parse_outputs(
         .bind(chunk.token_count)
         .bind(&chunk.block_ids)
         .bind(&chunk.table_ids)
+        .bind(&chunk.anchor_ids)
+        .bind(chunk.primary_anchor_id)
+        .bind(&chunk.anchor_quality)
         .bind(uuid_list_from_metadata(
             &chunk.metadata,
             "overlap_prev_block_ids",
@@ -1330,6 +1382,9 @@ async fn insert_parse_outputs(
             "slide_end": chunk.slide_end,
             "block_ids": chunk.block_ids,
             "table_ids": chunk.table_ids,
+            "anchor_ids": chunk.anchor_ids,
+            "primary_anchor_id": chunk.primary_anchor_id,
+            "anchor_quality": chunk.anchor_quality,
             "source_type": chunk.source_type,
             "chunk_metadata": chunk.metadata,
         }))
@@ -1344,6 +1399,23 @@ async fn insert_parse_outputs(
             )
             .bind(chunk.chunk_id)
             .bind(table_id)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        for anchor_id in &chunk.anchor_ids {
+            sqlx::query(
+                "INSERT INTO chunk_anchor_map (chunk_id, anchor_id, relation)
+                 VALUES ($1, $2, $3)
+                 ON CONFLICT (chunk_id, anchor_id) DO NOTHING",
+            )
+            .bind(chunk.chunk_id)
+            .bind(anchor_id)
+            .bind(if Some(*anchor_id) == chunk.primary_anchor_id {
+                "primary"
+            } else {
+                "covered"
+            })
             .execute(&mut **tx)
             .await?;
         }
@@ -1440,6 +1512,26 @@ async fn run_embedding_job(
                 token_count: chunk.token_count,
                 block_ids: chunk.block_ids.clone(),
                 table_ids: chunk.table_ids.clone(),
+                anchor_ids: chunk.anchor_ids.clone(),
+                primary_anchor_id: chunk.primary_anchor_id,
+                anchor_quality: chunk.anchor_quality.clone(),
+                anchor_page: chunk
+                    .primary_anchor_id
+                    .and_then(|id| artifacts.bundle.parsed.anchors.iter().find(|a| a.anchor_id == id))
+                    .and_then(|a| a.page),
+                anchor_slide: chunk
+                    .primary_anchor_id
+                    .and_then(|id| artifacts.bundle.parsed.anchors.iter().find(|a| a.anchor_id == id))
+                    .and_then(|a| a.slide),
+                anchor_bbox: chunk
+                    .primary_anchor_id
+                    .and_then(|id| artifacts.bundle.parsed.anchors.iter().find(|a| a.anchor_id == id))
+                    .and_then(|a| a.bbox.clone()),
+                anchor_text: chunk
+                    .primary_anchor_id
+                    .and_then(|id| artifacts.bundle.parsed.anchors.iter().find(|a| a.anchor_id == id))
+                    .map(|a| a.text.clone())
+                    .unwrap_or_default(),
                 embedding_model: embedding_client.model().to_string(),
                 embedding: vector,
                 metadata: chunk.metadata.clone(),

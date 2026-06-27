@@ -58,6 +58,10 @@ impl MockRetriever {
                     page_range: vec![7],
                     block_ids: vec![Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1").unwrap()],
                     table_ids: vec![],
+                    anchor_ids: vec![],
+                    primary_anchor_id: None,
+                    anchor_quality: "structural".to_string(),
+                    primary_anchor: None,
                     metadata: serde_json::json!({"source_type": "paragraph"}),
                     score: 0.88,
                     source: RetrievalSource::Dense,
@@ -74,6 +78,10 @@ impl MockRetriever {
                     page_range: vec![5],
                     block_ids: vec![Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2").unwrap()],
                     table_ids: vec![],
+                    anchor_ids: vec![],
+                    primary_anchor_id: None,
+                    anchor_quality: "structural".to_string(),
+                    primary_anchor: None,
                     metadata: serde_json::json!({"source_type": "paragraph"}),
                     score: 0.92,
                     source: RetrievalSource::Dense,
@@ -90,6 +98,10 @@ impl MockRetriever {
                     page_range: vec![2],
                     block_ids: vec![Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa3").unwrap()],
                     table_ids: vec![],
+                    anchor_ids: vec![],
+                    primary_anchor_id: None,
+                    anchor_quality: "structural".to_string(),
+                    primary_anchor: None,
                     metadata: serde_json::json!({"source_type": "paragraph"}),
                     score: 0.85,
                     source: RetrievalSource::Bm25,
@@ -106,6 +118,10 @@ impl MockRetriever {
                     page_range: vec![3, 4],
                     block_ids: vec![Uuid::parse_str("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa4").unwrap()],
                     table_ids: vec![],
+                    anchor_ids: vec![],
+                    primary_anchor_id: None,
+                    anchor_quality: "structural".to_string(),
+                    primary_anchor: None,
                     metadata: serde_json::json!({"source_type": "paragraph", "slide_start": 3}),
                     score: 0.90,
                     source: RetrievalSource::Rrf,
@@ -134,6 +150,24 @@ impl Retriever for PgRetriever {
                     c.page_range,
                     c.block_ids,
                     c.table_ids,
+                    c.anchor_ids,
+                    c.primary_anchor_id,
+                    c.anchor_quality,
+                    a.id AS anchor_id,
+                    a.parse_job_id AS anchor_parse_job_id,
+                    a.format AS anchor_format,
+                    a.kind AS anchor_kind,
+                    a.page AS anchor_page,
+                    a.slide AS anchor_slide,
+                    a.block_id AS anchor_block_id,
+                    a.table_id AS anchor_table_id,
+                    a.cell_range AS anchor_cell_range,
+                    a.char_range AS anchor_char_range,
+                    a.bbox AS anchor_bbox,
+                    a.source_ref AS anchor_source_ref,
+                    a.text AS anchor_text,
+                    a.text_hash AS anchor_text_hash,
+                    a.anchor_quality AS anchor_anchor_quality,
                     c.metadata,
                     d.updated_at,
                     e.embedding_vector
@@ -143,6 +177,10 @@ impl Retriever for PgRetriever {
                     ON e.chunk_id = c.id
                    AND e.embedding_model = $4
                    AND e.status = 'completed'
+             LEFT JOIN chunk_anchor_map cam
+                    ON cam.chunk_id = c.id AND cam.relation = 'primary'
+             LEFT JOIN document_source_anchors a
+                    ON a.id = cam.anchor_id
              WHERE c.tenant_id = $1
                AND c.kb_id = ANY($2)
                AND d.parse_status = 'indexed'
@@ -168,6 +206,41 @@ impl Retriever for PgRetriever {
                 .filter(|v| v.len() == LOCAL_HASH_EMBEDDING_DIM)
                 .unwrap_or_else(|| local_hash_embedding(&content));
             let updated_at: chrono::DateTime<chrono::Utc> = row.try_get("updated_at")?;
+            let primary_anchor: Option<crate::models::SourceAnchor> =
+                row.try_get::<Option<Uuid>, _>("anchor_id")
+                    .unwrap_or(None)
+                    .map(|anchor_id| crate::models::SourceAnchor {
+                        anchor_id,
+                        doc_id: row.try_get("doc_id").unwrap_or_default(),
+                        parse_job_id: row.try_get("anchor_parse_job_id").unwrap_or_default(),
+                        tenant_id: input.tenant_id,
+                        format: row.try_get("anchor_format").unwrap_or_default(),
+                        kind: row.try_get("anchor_kind").unwrap_or_default(),
+                        page: row.try_get("anchor_page").unwrap_or(None),
+                        slide: row.try_get("anchor_slide").unwrap_or(None),
+                        block_id: row.try_get("anchor_block_id").unwrap_or(None),
+                        table_id: row.try_get("anchor_table_id").unwrap_or(None),
+                        cell_range: row
+                            .try_get::<Option<sqlx::types::Json<_>>, _>("anchor_cell_range")
+                            .ok()
+                            .flatten()
+                            .map(|j| j.0),
+                        char_range: row
+                            .try_get::<Option<sqlx::types::Json<_>>, _>("anchor_char_range")
+                            .ok()
+                            .flatten()
+                            .map(|j| j.0),
+                        bbox: row
+                            .try_get::<Option<sqlx::types::Json<_>>, _>("anchor_bbox")
+                            .ok()
+                            .flatten()
+                            .map(|j| j.0),
+                        source_ref: row.try_get("anchor_source_ref").unwrap_or_else(|_| serde_json::json!({})),
+                        text: row.try_get("anchor_text").unwrap_or_default(),
+                        text_hash: row.try_get("anchor_text_hash").unwrap_or(None),
+                        anchor_quality: row.try_get("anchor_anchor_quality").unwrap_or_else(|_| "unknown".to_string()),
+                    });
+
             candidates.push(CandidateChunk {
                 updated_at,
                 chunk: RetrievedChunk {
@@ -180,6 +253,10 @@ impl Retriever for PgRetriever {
                     page_range: row.try_get("page_range")?,
                     block_ids: row.try_get("block_ids").unwrap_or_default(),
                     table_ids: row.try_get("table_ids").unwrap_or_default(),
+                    anchor_ids: row.try_get("anchor_ids").unwrap_or_default(),
+                    primary_anchor_id: row.try_get("primary_anchor_id").unwrap_or(None),
+                    anchor_quality: row.try_get("anchor_quality").unwrap_or_else(|_| "unknown".to_string()),
+                    primary_anchor,
                     metadata: row.try_get("metadata").unwrap_or_else(|_| serde_json::json!({})),
                     score: 0.0,
                     source: RetrievalSource::Rrf,
@@ -404,6 +481,10 @@ mod tests {
                 page_range: vec![],
                 block_ids: vec![],
                 table_ids: vec![],
+                anchor_ids: vec![],
+                primary_anchor_id: None,
+                anchor_quality: "structural".to_string(),
+                primary_anchor: None,
                 metadata: serde_json::json!({"source_type": "paragraph"}),
                 score: 0.0,
                 source: RetrievalSource::Rrf,

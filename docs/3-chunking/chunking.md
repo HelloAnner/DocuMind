@@ -6,9 +6,9 @@ Chunking 是 Ingest Pipeline 的第三阶段：输入来自 Text Cleaning 的 `c
 
 ```text
 Upload
-  -> Document Parsing        (产出 document_blocks)
-  -> Text Cleaning           (产出 cleaned_blocks)
-  -> Chunking                (产出 chunks)
+  -> Document Parsing        (产出 document_blocks + document_source_anchors)
+  -> Text Cleaning           (产出 cleaned_blocks + offset mapping)
+  -> Chunking                (产出 chunks + chunk_anchor_map)
   -> Embedding
   -> Elasticsearch / PostgreSQL
 ```
@@ -17,8 +17,39 @@ Upload
 
 - **语义完整**：同一主题、同一段落、同一表格不被人为割裂。
 - **检索粒度适中**：单个 chunk 既能被问题精准命中，又不会把无关内容带进来。
-- **可追溯**：任意 chunk 都能回到原始文件、页码/slide、block、table。
+- **可追溯**：任意 chunk 都能回到原始文件、页码/slide、block、table、anchor。
 - **可配置**：chunk 大小、overlap、边界策略可通过 `parser_config` / `chunker_config` 调整。
+- **引用精准**：最终 citation 必须回到 atomic anchor（段落、表格 cell、slide shape），而不是模糊的 page range。
+
+## 多粒度 Chunking 策略
+
+不要只有固定 token chunk。建议按检索与引用场景分层生成：
+
+```text
+atomic chunk：段落、表格行、slide shape，适合精准引用
+parent chunk：章节、表格、整页，适合提供上下文
+summary chunk：长文档章节摘要，适合宽泛问题召回
+table chunk：表头 + 行/列 + 单元格坐标
+```
+
+检索时：
+
+```text
+先召回 atomic/summary
+再扩展 parent context
+最终 citation 回到 atomic anchor
+```
+
+这样可以同时解决“召回需要上下文”和“引用需要精确位置”的矛盾。
+
+### 各粒度职责
+
+| 粒度 | 用途 | 主要 anchor 关系 |
+|---|---|---|
+| `atomic` | 精准引用、事实核查 | `primary_anchor_id` 指向唯一 anchor |
+| `parent` | 上下文补全、总结型问题 | `anchor_ids` 覆盖多个子 anchor |
+| `summary` | 宽泛召回、章节速览 | `anchor_ids` 覆盖章节下所有子 anchor |
+| `table` | 表格问答、行级精确引用 | `primary_anchor_id` 指向表头或单元格范围 |
 
 ## 统一切分算法
 
@@ -40,6 +71,7 @@ Upload
   "slide_index": null,
   "table_id": null,
   "bbox": null,
+  "anchor_ids": ["anchor_012"],
   "source_ref": {
     "format": "docx",
     "xpath": "/w:document/w:body/w:p[12]"
@@ -70,6 +102,9 @@ Upload
   "token_count": 612,
   "block_ids": ["uuid-1", "uuid-2"],
   "table_ids": [],
+  "anchor_ids": ["anchor_012", "anchor_013"],
+  "primary_anchor_id": "anchor_012",
+  "anchor_quality": "bbox",
   "overlap_prev_block_ids": ["uuid-0"],
   "overlap_next_block_ids": ["uuid-3"],
   "metadata": {
@@ -125,9 +160,21 @@ fn chunk(cleaned_blocks: Vec<CleanedBlock>, cfg: ChunkConfig) -> Vec<Chunk> {
     for (i, c) in chunks.iter_mut().enumerate() {
         c.chunk_index = i;
     }
+
+    // Anchor 关联：每个 chunk 绑定覆盖的 anchor_ids 与 primary_anchor_id
+    bind_anchors(&mut chunks, &cleaned_blocks);
+
     chunks
 }
 ```
+
+`bind_anchors` 根据每个 chunk 包含的 `block_ids` 和清洗阶段的 offset mapping，确定：
+
+- `anchor_ids`：chunk 文本覆盖的所有 anchor。
+- `primary_anchor_id`：chunk 核心内容对应的 anchor，用于默认引用。
+- `anchor_quality`：取覆盖 anchor 中最高质量（`bbox` > `structural` > `page_only`）。
+
+去重和合并时，overlap 区域产生的重复 anchor 应标记为 `relation = overlap` 并降低优先级。
 
 ### 硬边界（Hard Boundary）
 
@@ -228,6 +275,36 @@ Overlap 用于让相邻 chunk 共享部分上下文，提高检索召回率。
 
 详见 [表格全量解析与保存](../1-document-parsing/table-extraction-and-storage.md)。
 
+## ChunkAnchorMap
+
+chunk 与 anchor 是多对多关系，通过 `chunk_anchor_map` 表保存：
+
+```sql
+CREATE TABLE chunk_anchor_map (
+  chunk_id UUID NOT NULL,
+  anchor_id UUID NOT NULL,
+  relation TEXT NOT NULL,
+  PRIMARY KEY (chunk_id, anchor_id)
+);
+```
+
+`relation` 取值：
+
+| 值 | 含义 |
+|---|---|
+| `primary` | chunk 核心内容对应的 anchor |
+| `covered` | chunk 完整覆盖该 anchor |
+| `overlap` | overlap 区域引入的相邻 anchor |
+| `parent_context` | parent chunk 汇总了子 anchor |
+| `table_header` | 表格 chunk 附加的表头 anchor |
+
+### 写入规则
+
+1. 每个 chunk 至少有一个 `primary` anchor。
+2. atomic chunk 的 `primary` anchor 指向段落/单元格/shape 本身。
+3. parent/summary chunk 的 `anchor_ids` 覆盖子 anchor，但不设唯一 `primary`。
+4. overlap 区域只写 `overlap` 关系，不参与默认引用。
+
 ## Chunk 元数据字段
 
 | 字段 | 类型 | 说明 |
@@ -245,9 +322,12 @@ Overlap 用于让相邻 chunk 共享部分上下文，提高检索召回率。
 | `token_count` | INT | content 的 token 数 |
 | `block_ids` | UUID[] | 包含的 block |
 | `table_ids` | UUID[] | 关联的 table |
+| `anchor_ids` | UUID[] | chunk 覆盖的所有原文锚点 |
+| `primary_anchor_id` | UUID | 默认引用锚点 |
+| `anchor_quality` | TEXT | `bbox` / `structural` / `page_only` / `unknown` |
 | `overlap_prev_block_ids` | UUID[] | 上文 overlap block |
 | `overlap_next_block_ids` | UUID[] | 下文 overlap block |
-| `metadata` | JSONB | 扩展字段：切分原因、语言、quality 等 |
+| `metadata` | JSONB | 扩展字段：切分原因、语言、quality、granularity 等 |
 
 ## 格式专题文档
 
@@ -256,6 +336,8 @@ Overlap 用于让相邻 chunk 共享部分上下文，提高检索召回率。
 - [PDF Chunking 详细设计](pdf-chunking.md)
 - [PPT Chunking 详细设计](ppt-chunking.md)
 - [Chunk 输出数据形态](chunk-output.md)
+- [原文锚点设计](../9-answer-generation/citation-location-preview.md)
+- [Citation Resolver 详细设计](../9-answer-generation/citation-resolver.md)
 
 ## 质量与可观测性
 

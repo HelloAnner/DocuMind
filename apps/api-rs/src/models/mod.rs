@@ -5,7 +5,10 @@ pub mod feedback;
 pub mod identity;
 pub mod message;
 pub mod rag;
+pub mod source_anchor;
 pub mod trace;
+
+pub use source_anchor::{CellRange, CharRange, NormalizedBBox, SourceAnchor};
 
 pub use identity::{CurrentActor, *};
 pub type ActorScope = CurrentActor;
