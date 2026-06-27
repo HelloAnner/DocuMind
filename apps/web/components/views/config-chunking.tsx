@@ -1,51 +1,65 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Topbar } from "@/components/ui/topbar";
+import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
-const strategies = [
-  { id: "struct", name: "结构感知", desc: "按标题、小节、表格边界切分" },
-  { id: "recursive", name: "递归切分", desc: "按段落/句子递归切分" },
+const strategyCards = [
+  { id: "structure_aware", name: "结构感知", desc: "按标题、小节、表格边界切分" },
+  { id: "recursive", name: "递归切分", desc: "按段落和句子递归切分" },
   { id: "fixed", name: "固定大小", desc: "按固定 token 数切分" },
 ];
 
-const parameters = [
-  { label: "最大切片大小", value: "1500", suffix: "tokens" },
-  { label: "重叠长度", value: "300", suffix: "tokens" },
-  { label: "段落分隔符", value: "\\n\\n", suffix: "正则" },
-];
-
-const checkboxes = [
-  { id: "table", label: "保留表格结构", checked: true },
-  { id: "list", label: "保留列表层级", checked: true },
-  { id: "merge", label: "合并短段落（< 50 tokens）", checked: true },
-];
-
 export function ConfigChunking() {
-  const [selected, setSelected] = useState("struct");
-  const [checks, setChecks] = useState<Record<string, boolean>>({
-    table: true,
-    list: true,
-    merge: true,
-  });
+  const [config, setConfig] = useState<AdminRuntimeConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAdminRuntimeConfig()
+      .then(setConfig)
+      .catch((err) => setError(err instanceof Error ? err.message : "配置加载失败"));
+  }, []);
+
+  const chunking = config?.chunking;
+  const parameters = chunking
+    ? [
+        { label: "目标切片大小", value: chunking.target_chunk_tokens, suffix: "tokens" },
+        { label: "最大切片大小", value: chunking.max_chunk_tokens, suffix: "tokens" },
+        { label: "硬切分阈值", value: chunking.hard_split_tokens, suffix: "tokens" },
+        { label: "最小切片大小", value: chunking.min_chunk_tokens, suffix: "tokens" },
+        { label: "重叠长度", value: chunking.overlap_tokens, suffix: "tokens" },
+        { label: "单片最大表格行数", value: chunking.max_table_rows_per_chunk, suffix: "行" },
+        { label: "单片最大表格 token", value: chunking.max_table_token_per_chunk, suffix: "tokens" },
+      ]
+    : [];
+
+  const checks = chunking
+    ? [
+        { label: "保留表格结构", checked: chunking.preserve_table_structure },
+        { label: "保留列表层级", checked: chunking.preserve_list_hierarchy },
+        { label: "合并短文本块", checked: chunking.merge_short_blocks },
+      ]
+    : [];
 
   return (
     <>
       <Topbar title="切割策略">
-        <Button>保存</Button>
+        <Badge tone="neutral">只读配置</Badge>
       </Topbar>
 
       <div className="dm-admin-content">
         <div className="dm-config-content">
-          <p>控制文档如何被切分为语义片段。合理的切分策略能显著提升检索准确率。</p>
+          <p>当前运行参数来自服务器环境变量，配置变更需走部署流程。</p>
+          {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
+          {!config && !error ? <div className="dm-empty-state">加载切割配置中...</div> : null}
 
           <div className="dm-config-cards">
-            {strategies.map((strategy) => (
+            {strategyCards.map((strategy) => (
               <button
                 key={strategy.id}
-                className={`dm-config-card ${selected === strategy.id ? "selected" : ""}`}
-                onClick={() => setSelected(strategy.id)}
+                className={`dm-config-card ${chunking?.strategy === strategy.id ? "selected" : ""}`}
+                disabled
                 type="button"
               >
                 <strong>{strategy.name}</strong>
@@ -59,7 +73,7 @@ export function ConfigChunking() {
               <div className="dm-field-row" key={param.label}>
                 <span>{param.label}</span>
                 <div className="dm-field-suffix">
-                  <input defaultValue={param.value} />
+                  <input readOnly value={param.value} />
                   <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{param.suffix}</span>
                 </div>
               </div>
@@ -67,13 +81,9 @@ export function ConfigChunking() {
           </div>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {checkboxes.map((item) => (
-              <label className="dm-check-row" key={item.id}>
-                <input
-                  checked={checks[item.id]}
-                  onChange={(e) => setChecks((prev) => ({ ...prev, [item.id]: e.target.checked }))}
-                  type="checkbox"
-                />
+            {checks.map((item) => (
+              <label className="dm-check-row" key={item.label}>
+                <input checked={item.checked} disabled readOnly type="checkbox" />
                 {item.label}
               </label>
             ))}

@@ -1,38 +1,48 @@
 "use client";
 
-import { useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Topbar } from "@/components/ui/topbar";
+import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
-const providers = [
-  { name: "DashScope", model: "qwen-turbo，性价比高", active: true },
-  { name: "OpenAI", model: "gpt-4o / gpt-4o-mini", active: false },
-  { name: "DeepSeek", model: "deepseek-chat，推理能力强", active: false },
-];
+const providers = ["DashScope", "OpenAI", "DeepSeek", "OpenAI-compatible"];
 
 export function ConfigLlm() {
-  const [activeProvider, setActiveProvider] = useState("DashScope");
+  const [config, setConfig] = useState<AdminRuntimeConfig | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    getAdminRuntimeConfig()
+      .then(setConfig)
+      .catch((err) => setError(err instanceof Error ? err.message : "配置加载失败"));
+  }, []);
+
+  const llm = config?.llm;
 
   return (
     <>
       <Topbar title="LLM 服务商">
-        <Button>保存</Button>
+        <Badge tone={llm?.use_real_llm ? "success" : "warning"}>
+          {llm?.use_real_llm ? "真实模型" : "模拟模式"}
+        </Badge>
       </Topbar>
 
       <div className="dm-admin-content">
         <div className="dm-config-content">
-          <p>配置大语言模型提供商，用于查询改写与答案生成。</p>
+          <p>当前大模型配置来自服务器环境变量，密钥只显示配置状态。</p>
+          {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
+          {!config && !error ? <div className="dm-empty-state">加载 LLM 配置中...</div> : null}
 
           <div className="dm-provider-grid">
             {providers.map((provider) => (
               <button
-                key={provider.name}
-                className={`dm-provider-card ${activeProvider === provider.name ? "active" : ""}`}
-                onClick={() => setActiveProvider(provider.name)}
+                key={provider}
+                className={`dm-provider-card ${llm?.provider === provider ? "active" : ""}`}
+                disabled
                 type="button"
               >
-                <strong>{provider.name}</strong>
-                <small>{provider.model}</small>
+                <strong>{provider}</strong>
+                <small>{llm?.provider === provider ? llm.model : "未启用"}</small>
               </button>
             ))}
           </div>
@@ -41,19 +51,25 @@ export function ConfigLlm() {
             <div className="dm-field-row">
               <span>API 地址</span>
               <div className="dm-field-suffix">
-                <input defaultValue="https://dashscope.aliyuncs.com/compatible-mode/v1" style={{ minWidth: 320 }} />
+                <input readOnly style={{ minWidth: 320 }} value={llm?.base_url ?? ""} />
               </div>
             </div>
             <div className="dm-field-row">
               <span>API Key</span>
               <div className="dm-field-suffix">
-                <input defaultValue="sk-••••••••••••••••" type="password" />
+                <input readOnly value={llm?.api_key_configured ? "已配置" : "未配置"} />
               </div>
             </div>
             <div className="dm-field-row">
               <span>模型名称</span>
               <div className="dm-field-suffix">
-                <input defaultValue="qwen-turbo" />
+                <input readOnly value={llm?.model ?? ""} />
+              </div>
+            </div>
+            <div className="dm-field-row">
+              <span>查询改写模型</span>
+              <div className="dm-field-suffix">
+                <input readOnly value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"} />
               </div>
             </div>
           </div>
@@ -63,9 +79,15 @@ export function ConfigLlm() {
             <div className="dm-range-field">
               <div>
                 <span>Temperature</span>
-                <strong>0.7</strong>
+                <strong>{llm?.temperature ?? "-"}</strong>
               </div>
-              <input defaultValue={70} max={100} min={0} type="range" />
+              <input disabled max={100} min={0} type="range" value={Math.round((llm?.temperature ?? 0) * 100)} />
+            </div>
+            <div className="dm-field-row">
+              <span>最大输出 tokens</span>
+              <div className="dm-field-suffix">
+                <input readOnly value={llm?.max_output_tokens ?? ""} />
+              </div>
             </div>
           </div>
         </div>

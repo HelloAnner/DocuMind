@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useEffect, useMemo, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Topbar } from "@/components/ui/topbar";
@@ -22,21 +21,37 @@ interface Tenant {
 
 export function SystemTenants() {
   const [tenants, setTenants] = useState<Tenant[]>([]);
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
     fetchJson<Tenant[]>("/api/system/tenants").then(setTenants).catch(console.error);
   }, []);
 
+  const filtered = useMemo(() => {
+    const keyword = query.trim().toLowerCase();
+    if (!keyword) return tenants;
+    return tenants.filter((tenant) =>
+      [tenant.name, tenant.slug, tenant.status, tenant.plan]
+        .join(" ")
+        .toLowerCase()
+        .includes(keyword)
+    );
+  }, [query, tenants]);
+
   return (
     <>
-      <Topbar title="租户管理">
-        <Button icon={<Plus size={14} />}>新建租户</Button>
-      </Topbar>
+      <Topbar title="租户管理" />
       <div className="dm-admin-content">
         <div style={{ alignItems: "center", display: "flex", gap: 12, marginBottom: 16 }}>
-          <SearchInput placeholder="搜索租户..." />
+          <SearchInput
+            placeholder="搜索租户、Slug 或套餐..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div style={{ flex: 1 }} />
+          <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 个租户</span>
         </div>
-        <Panel title="Tenants">
+        <Panel title="Tenants" action={<Badge tone="neutral">只读</Badge>}>
           <div className="dm-table-head dm-tenant-row">
             <span>名称</span>
             <span>状态</span>
@@ -44,9 +59,9 @@ export function SystemTenants() {
             <span>知识库</span>
             <span>文档数</span>
             <span>本月问答</span>
-            <span>操作</span>
+            <span>套餐</span>
           </div>
-          {tenants.map((t) => (
+          {filtered.map((t) => (
             <div className="dm-tenant-row" key={t.id}>
               <div>
                 <strong>{t.name}</strong>
@@ -57,12 +72,10 @@ export function SystemTenants() {
               <span>{t.kb_count}</span>
               <span>{t.doc_count.toLocaleString()}</span>
               <span>{t.monthly_queries.toLocaleString()}</span>
-              <div className="dm-row-actions">
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 8px", fontSize: 12 }}>详情</button>
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 8px", fontSize: 12, color: "var(--color-error)" }}>停用</button>
-              </div>
+              <span>{t.plan}</span>
             </div>
           ))}
+          {filtered.length === 0 ? <div className="dm-empty-state">没有匹配的租户</div> : null}
         </Panel>
       </div>
     </>

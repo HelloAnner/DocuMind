@@ -16,6 +16,8 @@ DocuMind 的生产部署遵循三层边界：
 
 生产环境不应依赖内存仓库、内存缓存或 Mock LLM。当前代码在缺少 `DATABASE_URL` 或 `REDIS_URL` 时会退回内存实现，适合本地原型和前端联调；生产启动应通过启动校验禁止这种降级，或者把系统锁定在“未完成配置”的引导模式。
 
+当前 `ssh documind` 部署状态：应用以 `/opt/documind/releases/<timestamp>` + `current` + `shared` 结构运行，端口为 `8089`，`/api/health` 返回 `mode=release`、`environment=production`，PostgreSQL、Redis、RabbitMQ、Elasticsearch、MinIO/object storage、真实 LLM 和 embedding 均为健康。RabbitMQ 仍未承载完整文档任务 worker；文档处理主要由应用进程内任务执行，并通过启动恢复避免中断任务永久停留在处理中。
+
 ## 推荐部署路径
 
 推荐目录结构：
@@ -74,7 +76,7 @@ DocuMind 默认连接外部组件：
 | Elasticsearch | 必需 | 文档 Chunk 的 BM25、向量检索、Hybrid Search 与索引管理 | 上传后无法完成检索索引，问答召回不可用 |
 | MinIO / S3 | 必需 | 原始文档、解析快照、大型表格导出、预览文件和重处理输入 | 文档上传、预览、重新解析和审计不可用 |
 | Redis | 建议必需 | 会话状态、热点问答缓存、LLM 请求去重、短期锁 | 可降级但会影响性能和并发安全 |
-| RabbitMQ | 必需 | 文档解析、向量化、索引重建等异步任务队列 | 文档上传后不能可靠进入处理流水线 |
+| RabbitMQ | 目标态必需；当前为健康检查依赖 | 文档解析、向量化、索引重建等异步任务队列 | 当前未接入 worker 时不会阻断进程内处理；目标态下失效会影响可靠任务流水线 |
 | LLM Provider | 必需 | Query Rewrite、答案生成、可选 HyDE | 问答链路不可用 |
 | Embedding Runtime | 必需 | 文档向量化和查询向量化 | 语义检索不可用 |
 
@@ -180,7 +182,7 @@ RUST_LOG=documind=info,tower_http=info
 LOG_FORMAT=json
 ```
 
-当前 `.env.example` 已包含 PostgreSQL、Redis、RabbitMQ、LLM、Embedding、Server、Auth、RAG 和 Agent 的基础项。Elasticsearch 与 MinIO / S3 相关变量在 PRD 和文档解析存储模型中属于目标架构依赖，建议在索引和上传模块落地时同步补充到配置结构体。
+当前 `.env.example` 和 `apps/api-rs/src/config.rs` 已包含 PostgreSQL、Redis、RabbitMQ、Elasticsearch、MinIO / S3、LLM、Embedding、Server、Auth、RAG 和 Agent 的基础项。生产模式下会校验关键依赖配置，避免静默落回原型默认值。
 
 ### PostgreSQL
 
@@ -256,7 +258,7 @@ REDIS_KEY_PREFIX=documind
 
 ### RabbitMQ
 
-RabbitMQ 承载文档处理异步链路：
+RabbitMQ 的目标态是承载文档处理异步链路。当前服务器已部署并健康检查 RabbitMQ，但文档解析/OCR/embedding 仍主要由应用进程内任务执行；下列 exchange、queue、binding 和 worker 行为是后续补齐目标。
 
 ```env
 RABBITMQ_URL=amqp://USER:PASSWORD@HOST:5672/%2f
@@ -414,7 +416,7 @@ Redis 可短期降级：
 
 ### RabbitMQ 失效
 
-RabbitMQ 影响异步文档处理：
+目标态下 RabbitMQ 影响异步文档处理。当前未接入完整 worker 前，RabbitMQ 不会阻断进程内解析/OCR/embedding，但 health 会暴露依赖异常：
 
 - 启动时不可达：业务 API 可以启动，但文档上传、重处理、索引重建 API 返回 `503`。
 - Worker 不启动，避免任务状态被误标记。
@@ -465,11 +467,10 @@ Embedding 是语义检索关键依赖：
 
 ## 实现备注
 
-当前代码已经通过 `dotenvy` 读取 `.env`，并在 `apps/api-rs/src/config.rs` 中解析 `DATABASE_URL`、`REDIS_URL`、LLM、RAG、Agent 等配置。后续落地首次引导时，建议补齐以下能力：
+当前代码已经通过 `dotenvy` 读取 `.env`，并在 `apps/api-rs/src/config.rs` 中解析 `DATABASE_URL`、`REDIS_URL`、`RABBITMQ_URL`、`ELASTICSEARCH_URL`、对象存储、LLM、Embedding、RAG、Agent 等配置。后续落地首次引导时，建议补齐以下能力：
 
-- 增加 `DeploymentConfig`，显式区分开发默认值和生产必填项。
-- 增加 Elasticsearch、MinIO / S3、RabbitMQ、Embedding Provider 的配置结构体。
-- 增加启动前 `validate_required_config` 和 `probe_dependencies`。
+- 继续细化 `DeploymentConfig`，显式区分开发默认值和生产必填项。
+- 扩展启动前 `validate_required_config` 和 `probe_dependencies` 的失败处置策略。
 - 增加运行模式 `normal / setup_required / degraded / fatal`。
 - 增加 `/api/setup/status`、`/api/setup/validate`、`/api/setup/apply`。
 - 将当前“缺失 DB/Redis 时退回内存实现”的行为限制在开发环境。

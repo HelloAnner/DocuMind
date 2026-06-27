@@ -132,6 +132,7 @@ cat > "$TMP_ENV" <<ENV
 # Existing server config at $REMOTE_ENV is preserved by scripts/deploy.sh.
 SERVER_HOST=0.0.0.0
 SERVER_PORT=$DEPLOY_PORT
+DOCUMIND_ENV=production
 
 DATABASE_URL=$REMOTE_DATABASE_URL
 REDIS_URL=$REMOTE_REDIS_URL
@@ -266,6 +267,17 @@ else
   chmod 600 "\$remote_env"
   echo "Preserving existing runtime config: \$remote_env"
 fi
+
+ensure_env_var() {
+  local key="\$1"
+  local value="\$2"
+  if ! grep -qE "^\${key}=" "\$remote_env"; then
+    printf '\n%s=%s\n' "\$key" "\$value" >> "\$remote_env"
+  fi
+}
+
+ensure_env_var DOCUMIND_ENV production
+
 chmod +x "\$remote_release/bin/documind"
 remote_sha256="\$(sha256sum "\$remote_release/bin/documind" | awk '{print \$1}')"
 if [[ "\$remote_sha256" != "\$local_sha256" ]]; then
@@ -286,6 +298,65 @@ mkdir -p \
   "\$remote_shared/objects"
 chown -R 1000:0 "\$remote_shared/elasticsearch"
 chmod -R g+rwX "\$remote_shared/elasticsearch"
+
+ensure_office_preview_dependencies() {
+  if command -v soffice >/dev/null 2>&1 || command -v libreoffice >/dev/null 2>&1; then
+    return
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y \
+      libreoffice-core \
+      libreoffice-writer \
+      libreoffice-impress \
+      libreoffice-graphicfilter \
+      libreoffice-langpack-zh-Hans \
+      google-noto-sans-cjk-ttc-fonts >/dev/null
+    return
+  fi
+
+  if command -v yum >/dev/null 2>&1; then
+    yum install -y \
+      libreoffice-core \
+      libreoffice-writer \
+      libreoffice-impress \
+      libreoffice-graphicfilter \
+      libreoffice-langpack-zh-Hans \
+      google-noto-sans-cjk-ttc-fonts >/dev/null
+    return
+  fi
+
+  echo "LibreOffice is required for DOCX/PPTX preview conversion, but no supported package manager was found." >&2
+  exit 1
+}
+
+ensure_ocr_dependencies() {
+  if command -v pdftoppm >/dev/null 2>&1 && command -v tesseract >/dev/null 2>&1; then
+    return
+  fi
+
+  if command -v dnf >/dev/null 2>&1; then
+    dnf install -y \
+      poppler-utils \
+      tesseract \
+      tesseract-langpack-chi_sim >/dev/null
+    return
+  fi
+
+  if command -v yum >/dev/null 2>&1; then
+    yum install -y \
+      poppler-utils \
+      tesseract \
+      tesseract-langpack-chi_sim >/dev/null
+    return
+  fi
+
+  echo "pdftoppm and tesseract are required for OCR enhancement, but no supported package manager was found." >&2
+  exit 1
+}
+
+ensure_office_preview_dependencies
+ensure_ocr_dependencies
 
 container_exists() {
   docker container inspect "\$1" >/dev/null 2>&1

@@ -10,8 +10,8 @@ export interface DocumentViewerProps {
   mimeType: string;
   fileName?: string;
   initialPage?: number | null;
-  highlightText?: string;
   anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
+  charRange?: { start: number; end: number };
   docId?: string;
   cacheKey?: string;
   onReady?: () => void;
@@ -22,8 +22,8 @@ export function DocumentViewer({
   mimeType,
   fileName,
   initialPage,
-  highlightText,
   anchorBox,
+  charRange,
   docId,
   cacheKey,
   onReady,
@@ -34,7 +34,6 @@ export function DocumentViewer({
         docId={docId}
         cacheKey={cacheKey}
         initialPage={initialPage}
-        highlightText={highlightText}
         anchorBox={anchorBox}
         fileName={fileName}
         onReady={onReady}
@@ -47,7 +46,7 @@ export function DocumentViewer({
   }
 
   if (mimeType.startsWith("text/") || mimeType === "application/markdown") {
-    return <TextViewer blobUrl={blobUrl} highlightText={highlightText} />;
+    return <TextViewer blobUrl={blobUrl} charRange={charRange} />;
   }
 
   return <UnsupportedViewer blobUrl={blobUrl} fileName={fileName} />;

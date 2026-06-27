@@ -13,6 +13,26 @@ export function isCitationDeleted(citation: Citation) {
   return citation.source_status === "deleted";
 }
 
+export function citationLocationStatus(citation: Citation) {
+  if (isCitationDeleted(citation)) return "unavailable";
+  return citation.anchor?.location_status ?? "unavailable";
+}
+
+export function citationLocationStatusLabel(citation: Citation) {
+  switch (citationLocationStatus(citation)) {
+    case "exact":
+      return "精确定位";
+    case "structural_only":
+      return "结构定位";
+    case "page_only":
+      return "仅页码";
+    case "slide_only":
+      return "仅幻灯片";
+    default:
+      return "不可定位";
+  }
+}
+
 function docIcon(title: string) {
   const lower = title.toLowerCase();
   if (lower.endsWith(".pptx") || lower.endsWith(".ppt")) return Presentation;
@@ -23,6 +43,7 @@ function docIcon(title: string) {
 export function CitationCard({ citation, onClick, active }: CitationCardProps) {
   const deleted = isCitationDeleted(citation);
   const Icon = docIcon(citation.doc_title);
+  const locationStatus = citationLocationStatus(citation);
   return (
     <button
       type="button"
@@ -42,7 +63,12 @@ export function CitationCard({ citation, onClick, active }: CitationCardProps) {
         <span className="dm-citation-card-index">[{citation.index}]</span>
       </div>
       <p>{citation.quote}</p>
-      {deleted ? <span className="dm-deleted-source-badge">原文已删除</span> : null}
+      <div className="dm-citation-card-badges">
+        <span className={`dm-location-badge dm-location-badge-${locationStatus}`}>
+          {citationLocationStatusLabel(citation)}
+        </span>
+        {deleted ? <span className="dm-deleted-source-badge">原文已删除</span> : null}
+      </div>
     </button>
   );
 }

@@ -86,7 +86,20 @@ async fn portal_callback(
 ) -> Response {
     match portal_callback_inner(&state, query).await {
         Ok(response) => response,
-        Err(err) => portal_callback_error(err),
+        Err(err) => {
+            let _ = auth::record_audit_event(
+                &state,
+                None,
+                "portal.login.failure",
+                Some("auth_session"),
+                None,
+                json!({
+                    "failure_reason": portal_error_code(&err),
+                }),
+            )
+            .await;
+            portal_callback_error(err)
+        }
     }
 }
 
@@ -101,12 +114,56 @@ async fn portal_callback_inner(
     if portal.system_code != "documind" || portal.expires_at < chrono::Utc::now().timestamp() {
         return Err(AppError::unauthorized());
     }
-    let _portal_permission_count = portal.permissions.len();
     let roles = map_documind_roles(&portal);
-    let actor = provision_portal_actor(state, &portal, &roles).await?;
-    let session_id = auth::create_auth_session(state, &actor).await?;
-    let token = auth::issue_token(&state.config, &actor, Some(&session_id))?;
-    Ok(portal_success_html(&token, &actor).into_response())
+    let provisioned = provision_portal_actor(state, &portal, &roles).await?;
+    let session_id = auth::create_auth_session(state, &provisioned.actor).await?;
+    let token = auth::issue_token(&state.config, &provisioned.actor, Some(&session_id))?;
+    let identity_action = if provisioned.identity_created {
+        "portal.identity.link.created"
+    } else {
+        "portal.identity.link.updated"
+    };
+    let detail = json!({
+        "portal_user_id": portal.user_id,
+        "portal_tenant_id": portal.tenant_id,
+        "local_user_id": provisioned.actor.user_id,
+        "local_tenant_id": provisioned.actor.tenant_id,
+        "system_roles": portal.system_roles,
+        "portal_roles": portal.portal_roles,
+        "portal_permissions": portal.permissions,
+        "effective_permissions": provisioned.effective_permissions,
+        "allowed_kb_ids": provisioned.actor.allowed_kb_ids,
+    });
+    auth::record_audit_event(
+        state,
+        Some(&provisioned.actor),
+        identity_action,
+        Some("app_user"),
+        Some(&provisioned.actor.user_id.to_string()),
+        detail.clone(),
+    )
+    .await?;
+    if provisioned.was_clamped {
+        auth::record_audit_event(
+            state,
+            Some(&provisioned.actor),
+            "portal.permission.clamped",
+            Some("tenant_member"),
+            Some(&provisioned.actor.tenant_id.to_string()),
+            detail.clone(),
+        )
+        .await?;
+    }
+    auth::record_audit_event(
+        state,
+        Some(&provisioned.actor),
+        "portal.login.success",
+        Some("auth_session"),
+        Some(&session_id),
+        detail,
+    )
+    .await?;
+    Ok(portal_success_html(&token, &provisioned.actor).into_response())
 }
 
 async fn exchange_portal_ticket(state: &AppState, code: String) -> Result<PortalContext, AppError> {
@@ -130,11 +187,18 @@ async fn exchange_portal_ticket(state: &AppState, code: String) -> Result<Portal
     Ok(response.json::<PortalContext>().await?)
 }
 
+struct PortalProvisionResult {
+    actor: crate::models::CurrentActor,
+    identity_created: bool,
+    was_clamped: bool,
+    effective_permissions: Vec<String>,
+}
+
 async fn provision_portal_actor(
     state: &AppState,
     portal: &PortalContext,
     roles: &[String],
-) -> Result<crate::models::CurrentActor, AppError> {
+) -> Result<PortalProvisionResult, AppError> {
     let Some(pool) = &state.db_pool else {
         return Err(AppError::bad_request(
             "PORTAL_REQUIRES_DB",
@@ -196,6 +260,7 @@ async fn provision_portal_actor(
     .bind(&portal.user_id)
     .fetch_optional(pool)
     .await?;
+    let identity_created = existing_user_id.is_none();
     let existing_user_id = match existing_user_id {
         Some(id) => Some(id),
         None => {
@@ -206,6 +271,21 @@ async fn provision_portal_actor(
         }
     };
     let user_id = existing_user_id.unwrap_or_else(Uuid::new_v4);
+    let local_permissions = auth::derive_permissions(roles);
+    let mapped_portal_permissions = map_portal_permissions(&portal.permissions);
+    let effective_permissions =
+        intersect_permissions(&local_permissions, &mapped_portal_permissions);
+    let was_clamped = effective_permissions.len() < local_permissions.len();
+    let attributes = json!({
+        "auth_provider": "portal",
+        "portal_user_id": portal.user_id,
+        "portal_tenant_id": portal.tenant_id,
+        "portal_permissions": portal.permissions,
+        "mapped_portal_permissions": mapped_portal_permissions,
+        "effective_permissions": effective_permissions,
+        "system_roles": portal.system_roles,
+        "portal_roles": portal.portal_roles,
+    });
     sqlx::query(
         r#"
         INSERT INTO app_user
@@ -231,10 +311,11 @@ async fn provision_portal_actor(
 
     sqlx::query(
         r#"
-        INSERT INTO tenant_member (tenant_id, user_id, roles, status, joined_at, last_seen_at)
-        VALUES ($1, $2, $3, 'active', NOW(), NOW())
+        INSERT INTO tenant_member (tenant_id, user_id, roles, attributes, status, joined_at, last_seen_at)
+        VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())
         ON CONFLICT (tenant_id, user_id) DO UPDATE
         SET roles = EXCLUDED.roles,
+            attributes = EXCLUDED.attributes,
             status = 'active',
             last_seen_at = NOW()
         "#,
@@ -242,6 +323,7 @@ async fn provision_portal_actor(
     .bind(portal.tenant_id)
     .bind(user_id)
     .bind(roles)
+    .bind(&attributes)
     .execute(pool)
     .await?;
 
@@ -253,7 +335,13 @@ async fn provision_portal_actor(
         sid: None,
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
     };
-    auth::actor_from_claims(state, &claims).await
+    let actor = auth::actor_from_claims(state, &claims).await?;
+    Ok(PortalProvisionResult {
+        actor,
+        identity_created,
+        was_clamped,
+        effective_permissions,
+    })
 }
 
 fn map_documind_roles(portal: &PortalContext) -> Vec<String> {
@@ -278,6 +366,59 @@ fn map_documind_roles(portal: &PortalContext) -> Vec<String> {
         mapped.push("user".to_string());
     }
     sort_documind_roles_by_priority(mapped)
+}
+
+fn map_portal_permissions(values: &[String]) -> Vec<String> {
+    let mut permissions = values
+        .iter()
+        .filter_map(|value| map_portal_permission(value))
+        .collect::<Vec<_>>();
+    permissions.sort();
+    permissions.dedup();
+    permissions
+}
+
+fn map_portal_permission(value: &str) -> Option<String> {
+    match value.trim() {
+        "documind:chat:ask" | "chat.ask" => Some("chat.ask".to_string()),
+        "documind:knowledge:read" | "kb.read" => Some("kb.read".to_string()),
+        "documind:knowledge:create" | "kb.create" => Some("kb.create".to_string()),
+        "documind:knowledge:write" | "kb.write" => Some("kb.write".to_string()),
+        "documind:knowledge:manage" | "kb.manage" => Some("kb.manage".to_string()),
+        "documind:document:upload" | "document.upload" => Some("document.upload".to_string()),
+        "documind:document:delete" | "document.delete" => Some("document.delete".to_string()),
+        "documind:document:reprocess" | "document.reprocess" => {
+            Some("document.reprocess".to_string())
+        }
+        "documind:member:read" | "member.read" => Some("member.read".to_string()),
+        "documind:member:write" | "member.write" => Some("member.write".to_string()),
+        "documind:member:delete" | "member.delete" => Some("member.delete".to_string()),
+        "documind:config:read" | "config.read" => Some("config.read".to_string()),
+        "documind:config:write" | "config.write" => Some("config.write".to_string()),
+        "documind:audit:read" | "audit.read" => Some("audit.read".to_string()),
+        "documind:model:manage" | "model.write" => Some("model.write".to_string()),
+        "documind:answer:feedback" | "answer.feedback" => Some("answer.feedback".to_string()),
+        "documind:tenant:read" | "tenant.read" => Some("tenant.read".to_string()),
+        "documind:tenant:write" | "tenant.write" => Some("tenant.write".to_string()),
+        "documind:user:read" | "user.read" => Some("user.read".to_string()),
+        "documind:user:write" | "user.write" => Some("user.write".to_string()),
+        _ => None,
+    }
+}
+
+fn intersect_permissions(local: &[String], portal: &[String]) -> Vec<String> {
+    let mut permissions = local
+        .iter()
+        .filter(|permission| {
+            portal
+                .iter()
+                .any(|portal_permission| portal_permission == *permission)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    permissions.sort();
+    permissions.dedup();
+    permissions
 }
 
 fn map_documind_role(role: &str) -> Option<String> {
@@ -394,6 +535,19 @@ fn portal_callback_error(err: AppError) -> Response {
         .into_response()
 }
 
+fn portal_error_code(err: &AppError) -> &'static str {
+    match err {
+        AppError::NotFound { .. } => "not_found",
+        AppError::Forbidden { .. } => "forbidden",
+        AppError::Conflict { .. } => "conflict",
+        AppError::InvalidState { .. } => "invalid_state",
+        AppError::Timeout { .. } => "timeout",
+        AppError::BadRequest { .. } => "bad_request",
+        AppError::Unauthorized { .. } => "unauthorized",
+        AppError::Internal(_) => "internal_error",
+    }
+}
+
 fn default_route_for_roles(roles: &[String]) -> &'static str {
     if roles.iter().any(|r| r == "super_admin") {
         "/system"
@@ -429,6 +583,43 @@ fn html_escape(value: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn maps_portal_permissions_to_local_names() {
+        let permissions = map_portal_permissions(&[
+            "documind:chat:ask".to_string(),
+            "documind:knowledge:manage".to_string(),
+            "documind:document:upload".to_string(),
+            "unknown".to_string(),
+        ]);
+        assert_eq!(
+            permissions,
+            vec![
+                "chat.ask".to_string(),
+                "document.upload".to_string(),
+                "kb.manage".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn clamps_local_permissions_to_portal_upper_bound() {
+        let local = vec![
+            "chat.ask".to_string(),
+            "document.upload".to_string(),
+            "kb.manage".to_string(),
+        ];
+        let portal = vec!["chat.ask".to_string(), "kb.manage".to_string()];
+        assert_eq!(
+            intersect_permissions(&local, &portal),
+            vec!["chat.ask".to_string(), "kb.manage".to_string()]
+        );
+    }
 }
 
 async fn get_me(
@@ -467,7 +658,36 @@ async fn login(
         .unwrap_or_default();
     let tenant_key = req.tenant_id.as_deref().or(req.tenant_slug.as_deref());
     let (actor, access_token) =
-        auth::authenticate(&state, username, &req.password, tenant_key).await?;
+        match auth::authenticate(&state, username, &req.password, tenant_key).await {
+            Ok(value) => value,
+            Err(err) => {
+                let _ = auth::record_audit_event(
+                    &state,
+                    None,
+                    "auth.login_failed",
+                    Some("auth_session"),
+                    None,
+                    json!({
+                        "username": username,
+                        "tenant": tenant_key,
+                    }),
+                )
+                .await;
+                return Err(err);
+            }
+        };
+    auth::record_audit_event(
+        &state,
+        Some(&actor),
+        "auth.login_succeeded",
+        Some("auth_session"),
+        None,
+        json!({
+            "email": actor.email.clone(),
+            "roles": actor.roles.clone(),
+        }),
+    )
+    .await?;
     let me = me_response(&state, actor).await?;
     Ok(Json(LoginResponse {
         access_token,
@@ -505,6 +725,17 @@ async fn logout(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, crate::error::AppError> {
     if let Ok(claims) = auth::claims_from_headers(&state.config, &headers) {
+        if let Ok(actor) = auth::actor_from_claims(&state, &claims).await {
+            let _ = auth::record_audit_event(
+                &state,
+                Some(&actor),
+                "auth.logout",
+                Some("auth_session"),
+                claims.sid.as_deref(),
+                json!({}),
+            )
+            .await;
+        }
         if let Some(session_id) = claims.sid.as_deref() {
             let _ = auth::delete_auth_session(&state, session_id).await;
         }

@@ -1,16 +1,31 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, FileText, FolderInput, RefreshCw, Trash2, Upload } from "lucide-react";
+import {
+  CheckCircle2,
+  Download,
+  EyeOff,
+  FileText,
+  FolderInput,
+  RefreshCw,
+  Replace,
+  ScanLine,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import {
   deleteAdminDocument,
   downloadAdminDocumentOriginal,
+  excludeAdminDocumentFromSearch,
+  forceIndexAdminDocument,
   getAdminDocument,
   listAdminDocuments,
   listAdminKnowledgeBases,
   moveAdminDocument,
+  replaceAdminDocumentFile,
   retryAdminDocument,
   retryAdminDocuments,
+  sendAdminDocumentToOcr,
   uploadAdminDocument,
   type AdminDocument,
   type AdminDocumentDetail,
@@ -42,12 +57,21 @@ type UploadState =
 
 const statusParam = (filter: FilterValue): string | undefined => {
   if (filter === "done") return "done";
-  if (filter === "failed") return "parse_failed";
+  if (filter === "failed") return "failed";
   return undefined;
 };
 
+const RETRYABLE_STATUSES = new Set([
+  "parse_failed",
+  "parse_low_confidence",
+  "embedding_failed",
+  "parsed",
+  "parsing",
+]);
+
 export function AdminDocuments() {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const replaceFileInputRef = useRef<HTMLInputElement>(null);
   const [documents, setDocuments] = useState<AdminDocument[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [filterKb, setFilterKb] = useState("");
@@ -60,6 +84,7 @@ export function AdminDocuments() {
   const [targetKbId, setTargetKbId] = useState("");
   const [loading, setLoading] = useState(true);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
+  const [replaceTargetDocId, setReplaceTargetDocId] = useState<string | null>(null);
   const [uploadState, setUploadState] = useState<UploadState>({
     state: "idle",
     message: "选择 Word、PPT 或 PDF 后开始上传解析",
@@ -168,9 +193,117 @@ export function AdminDocuments() {
     }
   }
 
+  async function refreshDocumentDetail(docId: string) {
+    const nextDetail = await getAdminDocument(docId);
+    setDetail(nextDetail);
+    return nextDetail;
+  }
+
+  async function handleForceIndex() {
+    const doc = detail?.document;
+    if (!doc) return;
+    setBusyDocId(doc.doc_id);
+    try {
+      await forceIndexAdminDocument(doc.doc_id);
+      await refresh();
+      await refreshDocumentDetail(doc.doc_id);
+      setUploadState({ state: "done", message: `已确认索引 ${doc.file_name}` });
+      window.setTimeout(() => refreshDocumentDetail(doc.doc_id).catch(console.error), 1200);
+    } catch (error) {
+      console.error(error);
+      setUploadState({
+        state: "error",
+        message: error instanceof Error ? error.message : "强制索引失败",
+      });
+    } finally {
+      setBusyDocId(null);
+    }
+  }
+
+  async function handleSendToOcr() {
+    const doc = detail?.document;
+    if (!doc) return;
+    setBusyDocId(doc.doc_id);
+    try {
+      const queued = await sendAdminDocumentToOcr(doc.doc_id);
+      await refresh();
+      await refreshDocumentDetail(doc.doc_id);
+      setUploadState({
+        state: "done",
+        message: `已送入 OCR 队列 ${queued.ocr_job_id.slice(0, 8)}`,
+      });
+    } catch (error) {
+      console.error(error);
+      setUploadState({
+        state: "error",
+        message: error instanceof Error ? error.message : "送入 OCR 失败",
+      });
+    } finally {
+      setBusyDocId(null);
+    }
+  }
+
+  async function handleExcludeFromSearch() {
+    const doc = detail?.document;
+    if (!doc) return;
+    const confirmed = window.confirm(`保留《${doc.file_name}》但从检索索引中排除？`);
+    if (!confirmed) return;
+    setBusyDocId(doc.doc_id);
+    try {
+      const excluded = await excludeAdminDocumentFromSearch(doc.doc_id);
+      await refresh();
+      await refreshDocumentDetail(doc.doc_id);
+      setUploadState({
+        state: "done",
+        message: `已排除检索，删除 ${excluded.es_deleted_chunks} 个索引切片`,
+      });
+    } catch (error) {
+      console.error(error);
+      setUploadState({
+        state: "error",
+        message: error instanceof Error ? error.message : "排除检索失败",
+      });
+    } finally {
+      setBusyDocId(null);
+    }
+  }
+
+  function handleReplaceFile() {
+    const doc = detail?.document;
+    if (!doc) return;
+    setReplaceTargetDocId(doc.doc_id);
+    replaceFileInputRef.current?.click();
+  }
+
+  async function handleReplaceFileSelected(file: File | undefined) {
+    const docId = replaceTargetDocId;
+    if (!docId || !file) return;
+    setBusyDocId(docId);
+    try {
+      const replaced = await replaceAdminDocumentFile(docId, file);
+      await refresh();
+      await refreshDocumentDetail(docId);
+      setUploadState({
+        state: "done",
+        message: `已替换文件并创建解析任务 ${replaced.parse_job_id.slice(0, 8)}`,
+      });
+      window.setTimeout(() => refreshDocumentDetail(docId).catch(console.error), 1200);
+    } catch (error) {
+      console.error(error);
+      setUploadState({
+        state: "error",
+        message: error instanceof Error ? error.message : "替换文件失败",
+      });
+    } finally {
+      setBusyDocId(null);
+      setReplaceTargetDocId(null);
+      if (replaceFileInputRef.current) replaceFileInputRef.current.value = "";
+    }
+  }
+
   async function handleRetryFailed() {
     const failedIds = documents
-      .filter((doc) => doc.parse_status === "parse_failed" || doc.parse_status === "parse_low_confidence")
+      .filter((doc) => RETRYABLE_STATUSES.has(doc.parse_status))
       .map((doc) => doc.doc_id);
     if (failedIds.length === 0) return;
     try {
@@ -247,6 +380,27 @@ export function AdminDocuments() {
     return documents;
   }, [documents, filter]);
 
+  const drawerDoc = detail?.document;
+  const drawerBusy = drawerDoc ? busyDocId === drawerDoc.doc_id : false;
+  const canForceIndex =
+    drawerDoc?.parse_status === "parse_low_confidence" && drawerDoc.chunk_count > 0;
+  const canSendToOcr =
+    drawerDoc?.parse_status === "parse_low_confidence" && drawerDoc.file_type === "pdf";
+  const canExclude =
+    drawerDoc != null &&
+    ["indexed", "parse_low_confidence", "parse_failed", "embedding_failed"].includes(
+      drawerDoc.parse_status
+    );
+  const canReplace =
+    drawerDoc != null &&
+    [
+      "indexed",
+      "parse_low_confidence",
+      "parse_failed",
+      "embedding_failed",
+      "excluded_from_search",
+    ].includes(drawerDoc.parse_status);
+
   return (
     <>
       <Topbar title="文档管理" subtitle="上传、解析、重跑并管理可检索文档">
@@ -269,7 +423,7 @@ export function AdminDocuments() {
               >
                 <Upload size={28} />
                 <strong>{selectedFile ? selectedFile.name : "选择文件上传并解析"}</strong>
-                <span>支持 Word / PPT / PDF / TXT / Markdown，单个文件不超过 50MB</span>
+                <span>支持 Word / PPT / PDF / TXT / Markdown，单个文件不超过 100MB</span>
               </button>
 
               <div className="dm-file-preview">
@@ -340,6 +494,13 @@ export function AdminDocuments() {
                   ref={fileInputRef}
                   type="file"
                 />
+                <input
+                  accept=".docx,.pptx,.pdf,.txt,.md"
+                  hidden
+                  onChange={(event) => handleReplaceFileSelected(event.target.files?.[0])}
+                  ref={replaceFileInputRef}
+                  type="file"
+                />
               </div>
             </div>
           </Panel>
@@ -349,7 +510,7 @@ export function AdminDocuments() {
             action={
               <div className="dm-document-panel-actions">
                 <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={() => handleRetryFailed().catch(console.error)}>
-                  重试失败
+                  重试异常
                 </Button>
                 <Segmented options={filters} value={filter} onChange={setFilter} />
               </div>
@@ -460,6 +621,48 @@ export function AdminDocuments() {
                 <Button variant="secondary" icon={<Download size={14} />} onClick={() => handleDownload().catch(console.error)}>
                   下载原件
                 </Button>
+              </div>
+              <div className="dm-manual-actions">
+                <div className="dm-manual-actions-head">
+                  <strong>人工处理</strong>
+                  <span>低置信、失败或下线文档的明确处置</span>
+                </div>
+                <div className="dm-drawer-action-row">
+                  <Button
+                    disabled={!canForceIndex || drawerBusy}
+                    icon={<CheckCircle2 size={14} />}
+                    onClick={() => handleForceIndex().catch(console.error)}
+                    variant="secondary"
+                  >
+                    确认索引
+                  </Button>
+                  <Button
+                    disabled={!canSendToOcr || drawerBusy}
+                    icon={<ScanLine size={14} />}
+                    onClick={() => handleSendToOcr().catch(console.error)}
+                    variant="secondary"
+                  >
+                    送 OCR
+                  </Button>
+                </div>
+                <div className="dm-drawer-action-row">
+                  <Button
+                    disabled={!canExclude || drawerBusy}
+                    icon={<EyeOff size={14} />}
+                    onClick={() => handleExcludeFromSearch().catch(console.error)}
+                    variant="secondary"
+                  >
+                    排除检索
+                  </Button>
+                  <Button
+                    disabled={!canReplace || drawerBusy}
+                    icon={<Replace size={14} />}
+                    onClick={handleReplaceFile}
+                    variant="secondary"
+                  >
+                    替换文件
+                  </Button>
+                </div>
               </div>
               <Button variant="ghost" icon={<Trash2 size={14} />} onClick={() => handleDelete().catch(console.error)}>
                 删除文档

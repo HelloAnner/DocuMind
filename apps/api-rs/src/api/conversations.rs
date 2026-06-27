@@ -13,8 +13,8 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::error;
 use uuid::Uuid;
 
-use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
 use crate::agent::{AgentKernel, AgentProgress};
+use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
 use crate::auth::ActorExtractor;
 use crate::error::AppError;
 use crate::models::agent::{
@@ -396,6 +396,7 @@ async fn send_message(
     let cache = state.cache.clone();
     let kernel = state.agent_kernel;
     let config = state.config.clone();
+    let db_pool = state.db_pool.clone();
     let protocol = SseProtocol::from_headers(&headers);
     let mut runtime_events = RuntimeEventFactory::new(
         actor.tenant_id,
@@ -419,6 +420,7 @@ async fn send_message(
             cache,
             kernel,
             config,
+            db_pool,
             actor,
             session.id,
             user_message.id,
@@ -444,6 +446,7 @@ async fn run_agent_pipeline(
     cache: Arc<dyn AnswerCache>,
     kernel: AgentKernel,
     config: crate::config::AppConfig,
+    db_pool: Option<sqlx::PgPool>,
     actor: ActorScope,
     conversation_id: Uuid,
     user_message_id: Uuid,
@@ -456,7 +459,14 @@ async fn run_agent_pipeline(
 ) -> Result<(), AppError> {
     let runtime_events = Arc::new(Mutex::new(runtime_events));
     // Build history from previous completed QA pairs.
-    let history = build_history(&repo, actor.tenant_id, conversation_id, user_message_id).await?;
+    let history = build_history(
+        db_pool.as_ref(),
+        &repo,
+        actor.tenant_id,
+        conversation_id,
+        user_message_id,
+    )
+    .await?;
     let doc_version_hash = repo
         .doc_version_hash(actor.tenant_id, &effective_kb_ids)
         .await?;
@@ -468,9 +478,22 @@ async fn run_agent_pipeline(
         &original_query,
         &doc_version_hash,
     );
-    let answer_cache_enabled = !config.rag.generation.use_real_llm && should_cache(&original_query);
+    let answer_cache_enabled = should_cache(&original_query);
     let cached_answer = if answer_cache_enabled {
-        cache.get(&cache_key).await?
+        let cached = cache.get(&cache_key).await?;
+        match cached {
+            Some(cached)
+                if cached_answer_valid(&repo, actor.tenant_id, &effective_kb_ids, &cached)
+                    .await? =>
+            {
+                Some(cached)
+            }
+            Some(_) => {
+                cache.delete(&cache_key).await?;
+                None
+            }
+            None => None,
+        }
     } else {
         None
     };
@@ -486,6 +509,7 @@ async fn run_agent_pipeline(
         mode = crate::models::agent::AgentMode::Answerer;
         rewritten_query = Some(original_query.clone());
         trace = crate::models::agent::AgentTrace {
+            mode,
             mode_reason: "cache hit".to_string(),
             rewritten_query: rewritten_query.clone(),
             keywords: vec![original_query.clone()],
@@ -586,13 +610,7 @@ async fn run_agent_pipeline(
         match item {
             AnswerStreamItem::Delta { text } => {
                 answer_text.push_str(&text);
-                send_answer_delta(
-                    &tx,
-                    protocol,
-                    &runtime_events,
-                    assistant_message_id,
-                    text,
-                );
+                send_answer_delta(&tx, protocol, &runtime_events, assistant_message_id, text);
             }
             AnswerStreamItem::Citation { citation } => {
                 citations.push(citation.clone());
@@ -1009,7 +1027,13 @@ fn send_citation_delta(
 ) {
     match protocol {
         SseProtocol::Legacy => {
-            send_legacy_event(tx, SseEvent::CitationDelta { message_id, citation });
+            send_legacy_event(
+                tx,
+                SseEvent::CitationDelta {
+                    message_id,
+                    citation,
+                },
+            );
         }
         SseProtocol::Atom => send_runtime_event(
             tx,
@@ -1134,17 +1158,28 @@ fn atom_step_for_status(status: &str) -> (String, String, &'static str) {
             "answer_generation".to_string(),
             "生成答案",
         ),
-        _ => (
-            status.to_string(),
-            status.to_string(),
-            "执行步骤",
-        ),
+        _ => (status.to_string(), status.to_string(), "执行步骤"),
     }
 }
 
 fn should_cache(query: &str) -> bool {
     let forbidden = ["最新", "今天", "刚刚", "现在"];
     !forbidden.iter().any(|w| query.contains(w))
+}
+
+async fn cached_answer_valid(
+    repo: &Arc<dyn ConversationRepository>,
+    tenant_id: Uuid,
+    effective_kb_ids: &[Uuid],
+    cached: &CachedAnswer,
+) -> Result<bool, AppError> {
+    if cached.confidence == Confidence::Low || cached.citations.is_empty() {
+        return Ok(false);
+    }
+
+    Ok(repo
+        .citations_valid_for_scope(tenant_id, effective_kb_ids, &cached.citations)
+        .await?)
 }
 
 fn agent_options_from_config(config: &crate::config::AppConfig) -> AgentOptions {
@@ -1194,6 +1229,7 @@ fn citation_retrieval_traces(
 }
 
 async fn build_history(
+    db_pool: Option<&sqlx::PgPool>,
     repo: &Arc<dyn ConversationRepository>,
     tenant_id: Uuid,
     conversation_id: Uuid,
@@ -1233,16 +1269,45 @@ async fn build_history(
             .find(|a| a.parent_message_id == Some(u.id))
         {
             if a.status == MessageStatus::Completed && !a.content.is_empty() {
+                let raw_citations = repo.get_citations(a.id).await?;
+                let mut resolved_citations = Vec::with_capacity(raw_citations.len());
+                for citation in raw_citations {
+                    if citation.doc_title.trim().is_empty() || citation.doc_title == "未命名文档"
+                    {
+                        resolved_citations.push(
+                            document_title_for_citation(db_pool, tenant_id, citation.doc_id)
+                                .await
+                                .unwrap_or(citation.doc_title),
+                        );
+                    } else {
+                        resolved_citations.push(citation.doc_title);
+                    }
+                }
                 turns.push(ConversationTurn {
                     user_message: u.content.clone(),
                     assistant_answer: a.content.clone(),
-                    citations: vec![],
+                    citations: resolved_citations,
                 });
             }
         }
     }
 
     Ok(turns)
+}
+
+async fn document_title_for_citation(
+    db_pool: Option<&sqlx::PgPool>,
+    tenant_id: Uuid,
+    doc_id: Uuid,
+) -> Option<String> {
+    let pool = db_pool?;
+    sqlx::query_scalar::<_, String>("SELECT title FROM documents WHERE tenant_id = $1 AND id = $2")
+        .bind(tenant_id)
+        .bind(doc_id)
+        .fetch_optional(pool)
+        .await
+        .ok()
+        .flatten()
 }
 
 async fn resolve_conversation_scope(
@@ -1390,6 +1455,7 @@ async fn retry_message(
     let cache = state.cache.clone();
     let kernel = state.agent_kernel;
     let config = state.config.clone();
+    let db_pool = state.db_pool.clone();
 
     tokio::spawn(async move {
         if let Err(e) = run_agent_pipeline(
@@ -1397,6 +1463,7 @@ async fn retry_message(
             cache,
             kernel,
             config,
+            db_pool,
             actor,
             session.id,
             parent_id,

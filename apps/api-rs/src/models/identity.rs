@@ -20,7 +20,7 @@ impl CurrentActor {
     }
 
     pub fn has_permission(&self, permission: &str) -> bool {
-        self.is_super_admin || self.permissions.iter().any(|p| p == permission)
+        self.permissions.iter().any(|p| p == permission)
     }
 
     pub fn can_manage_kb(&self, kb_id: Uuid) -> bool {

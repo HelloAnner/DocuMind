@@ -72,15 +72,12 @@ impl Reranker for HttpReranker {
             return Ok(vec![]);
         }
 
-        let documents: Vec<&str> = input
-            .chunks
-            .iter()
-            .map(|chunk| chunk.content.as_str())
-            .collect();
+        let documents: Vec<String> = input.chunks.iter().map(rerank_document_text).collect();
+        let document_refs: Vec<&str> = documents.iter().map(String::as_str).collect();
         let req = RerankRequest {
             model: &self.model,
             query: &input.query,
-            documents,
+            documents: document_refs,
             top_n: input.top_k.max(1),
         };
         let mut request = self
@@ -131,7 +128,8 @@ impl Reranker for MockReranker {
             .into_iter()
             .enumerate()
             .map(|(i, chunk)| {
-                let score = rerank_score(&query, &chunk.content);
+                let document_text = rerank_document_text(&chunk);
+                let score = rerank_score(&query, &document_text);
                 RerankedChunk {
                     chunk,
                     score,
@@ -145,6 +143,18 @@ impl Reranker for MockReranker {
         }
         Ok(ranked.into_iter().take(input.top_k).collect())
     }
+}
+
+fn rerank_document_text(chunk: &crate::models::rag::RetrievedChunk) -> String {
+    let heading = if chunk.heading_path.is_empty() {
+        String::new()
+    } else {
+        format!("标题路径：{}\n", chunk.heading_path.join(" / "))
+    };
+    format!(
+        "文档标题：{}\n{}{}",
+        chunk.doc_title, heading, chunk.content
+    )
 }
 
 fn rerank_score(query: &str, text: &str) -> f64 {
@@ -175,4 +185,56 @@ fn rerank_score(query: &str, text: &str) -> f64 {
     // Keep unrelated chunks below the default 0.3 threshold, while allowing
     // partial matches through when there is actual lexical evidence.
     0.25 + 0.75 * density
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::rag::{RerankInput, RetrievedChunk};
+    use crate::models::trace::RetrievalSource;
+    use uuid::Uuid;
+
+    fn chunk(doc_title: &str, content: &str) -> RetrievedChunk {
+        RetrievedChunk {
+            chunk_id: Uuid::new_v4(),
+            doc_id: Uuid::new_v4(),
+            doc_title: doc_title.to_string(),
+            file_type: "docx".to_string(),
+            content: content.to_string(),
+            heading_path: vec![],
+            page_range: vec![1],
+            block_ids: vec![],
+            table_ids: vec![],
+            anchor_ids: vec![],
+            primary_anchor_id: None,
+            anchor_quality: "structural".to_string(),
+            primary_anchor: None,
+            metadata: serde_json::json!({"source_type": "paragraph"}),
+            score: 0.5,
+            source: RetrievalSource::Rrf,
+        }
+    }
+
+    #[tokio::test]
+    async fn mock_reranker_uses_document_title_as_signal() {
+        let reranked = MockReranker::new()
+            .rerank(RerankInput {
+                query: "DocuMind API测试采购合同讲了什么".to_string(),
+                chunks: vec![
+                    chunk(
+                        "员工报销制度-API测试",
+                        "DocuMind API测试制度。费用发生后30个工作日内提交。",
+                    ),
+                    chunk(
+                        "2026-Q3采购合同-API测试",
+                        "DocuMind API测试合同。付款节点包括首付款、验收款和质保金。",
+                    ),
+                ],
+                top_k: 2,
+            })
+            .await
+            .expect("rerank should succeed");
+
+        assert_eq!(reranked[0].chunk.doc_title, "2026-Q3采购合同-API测试");
+    }
 }

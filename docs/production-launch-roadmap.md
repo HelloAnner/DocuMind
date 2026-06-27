@@ -1,6 +1,8 @@
 # DocuMind 全功能上线路线图
 
-本文档面向 2026-06-25 的 DocuMind 上线工作，目标是把系统从“当前已具备核心能力”推进到“服务器上可验收、可灰度、可对外试用”的状态。
+本文档面向 DocuMind 上线工作，目标是把系统从“当前已具备核心能力”推进到“服务器上可验收、可灰度、可对外试用”的状态。
+
+最新实现差距总账见：[文档与代码实现差距总账](implementation-gap-analysis.md)。路线图中的每个阶段以后者记录的当前代码证据和服务器证据为准。
 
 路线图按阶段拆分。每一步都回答三个问题：
 
@@ -37,25 +39,28 @@
 
 ### 0.2 当前摸底结论
 
-已确认的当前状态：
+已确认的当前状态（2026-06-28）：
 
-- 远端 `ssh documind` 上 DocuMind 进程已运行，监听 `8089`。
-- `make health` 通过，`/api/health` 返回正常，`/documind/` 返回 HTTP 200。
+- 远端 `ssh documind` 上 DocuMind 进程已运行，监听 `8089`，当前 release 为 `/opt/documind/releases/20260628-015027`。
+- `make health` 通过，`/api/health` 返回 `ok=true`、`mode=release`、`environment=production`，`/documind/` 返回 HTTP 200。
 - 远端 `.env` 已打开真实 LLM：`USE_REAL_LLM=true`。
 - 远端 LLM 为 DashScope OpenAI-compatible 接口，模型为 `qwen-max`。
 - 远端 embedding 为 `text-embedding-v3`，`EMBED_ENABLED=true`。
-- 远端 PostgreSQL、Redis、RabbitMQ、MinIO、Elasticsearch 容器均存在。
-- 本地前端生产构建通过：`npm --prefix apps/web run build`。
-- 本地 Rust workspace 测试通过：`cargo test --workspace --no-fail-fast`，当前 25 个测试全绿。
-- 服务器上已经存在可检索数据：Elasticsearch `chunks` 索引有 `557` 条文档。
+- 远端 PostgreSQL、Redis、RabbitMQ、MinIO、Elasticsearch 依赖健康检查均为 `ok=true`。
+- 服务器上已有可检索数据，PostgreSQL 当前文档状态为 `indexed=346`、`excluded_from_search=1`、`parse_failed=1`、`parse_low_confidence=9`、`parsed=2`。
 - 服务器冒烟验证已通过：登录、知识库列表、创建会话、SSE 问答均可完成。
+- 引用定位主链路已从前端 quote 搜索切换为 `SourceAnchor -> CitationResolver -> FileView`：TXT/MD `char_range`、PDF/Office PDF bbox/页码预览链路已可用。
+- DOCX/PPTX 已支持通过 LibreOffice 转 PDF 预览；扫描 PDF 可通过 OCR 任务生成可检索文本和 PDF bbox anchor。
+- Golden eval 已有 50 条基础样本，最近完整基线通过率为 0.86，citation coverage 为 1.0。
 
 需要重点处理的差距：
 
-- `/api/health` 当前仍返回 `"mode": "prototype"`，上线前需要改成真实发布语义。
-- 远端数据中存在 `embedding_failed`、`parsing`、`parse_low_confidence`、`parsed` 等非最终状态文档，需要清理或明确处置。
-- 后台部分页面和接口仍使用 mock 或静态数据，必须标记为灰度、只读展示，或在上线前隐藏。
-- reranker 未配置真实 API 时会走 mock reranker，检索可用，但不能承诺完整精排效果。
+- 远端数据中仍存在 `parse_failed`、`parse_low_confidence`、`parsed` 等非最终状态文档，需要清理、重试或明确处置；上次遗留 `ocr_pending` 已由启动恢复转为可解释低置信状态。
+- RabbitMQ 依赖已部署并健康，但解析/OCR/embedding 任务仍主要是进程内异步执行；启动恢复已能把上次进程中断的任务标记为可解释失败态，仍未形成生产级队列、自动重试、死信和补偿重投递链路。
+- 后台部分页面仍是只读或 fallback 数据，不能承诺完整运维大屏、在线配置持久化、索引重建和告警能力。
+- reranker 未配置真实 API 时会走 lexical mock reranker，检索可用，但不能承诺完整精排效果。
+- Office 已能转 PDF 预览，但 DOCX paragraph/table cell、PPTX shape/table cell 到预览 bbox 的精确映射仍未完成。
+- PDF 文本层 bbox 仍是段落级近似定位，不是 text-run/word 级精确 bbox。
 - 当前工作区有未提交改动，上线前必须确认这些改动是否纳入本次发布。
 
 ## 1. 阶段一：冻结上线范围与工作区
@@ -122,7 +127,7 @@ ssh documind 'bash -lc "curl -fsS http://127.0.0.1:8089/api/config | python3 -m 
 
 必须补齐：
 
-- 把 `/api/health` 的 `"mode": "prototype"` 改为更准确的发布状态，例如 `"release"` 或 `"production"`，并可附带版本信息。
+- 已完成并需持续回归：`/api/health` 返回 `"mode": "release"`、`environment=production`、版本信息和依赖检查详情。
 - 对仍是 mock 的系统页做处理：
   - 能在 1 小时内接真实 API 的，接真实 API。
   - 不能快速补齐的，在导航或页面内转为灰度/只读说明，避免被当作可操作能力。
@@ -153,14 +158,15 @@ ssh documind 'bash -lc "curl -fsS http://127.0.0.1:8089/api/config | python3 -m 
 ```bash
 npm --prefix apps/web run build
 cargo test --workspace --no-fail-fast
-rg -n "prototype|const mock|mock[A-Z]" apps/api-rs/src apps/web/app apps/web/components -S
+rg -n "const mock|mock[A-Z]" apps/api-rs/src apps/web/app apps/web/components -S
+rg -n '"mode": "release"|mode.*release' apps/api-rs/src/lib.rs -S
 ```
 
 验收标准：
 
 - 前端构建成功。
 - Rust 测试全部通过。
-- `prototype` 不再出现在健康检查响应中。
+- `/api/health` 保持发布语义，不回退到 prototype。
 - 所有保留的 mock 命中都有灰度理由，且不在正式验收范围内。
 
 ### 2.3 服务器测试什么
@@ -771,6 +777,11 @@ ssh documind 'bash -lc "tail -n 200 /opt/documind/shared/logs/documind-8089.log"
 | A14 | 管理页越权 | 普通用户 | 返回 403 或无入口 |
 | A15 | 系统页访问 | 超级管理员 | 可访问系统管理 |
 | A16 | 服务器健康 | 运维 | health、日志、端口正常 |
+| A17 | Office Preview | 企业管理员 | DOCX/PPTX manifest 为 `office_pdf`，content/page endpoint 返回 PDF |
+| A18 | OCR 增强 | 企业管理员 | 扫描 PDF 可送 OCR，完成后 indexed，问答引用带 anchor |
+| A19 | FileView 引用定位 | 企业管理员 | 点击 OCR/PDF citation 后右侧 FileView 渲染 PDF canvas、bbox overlay 和精确定位状态 |
+| A20 | Preview Token | 企业管理员 | `/api/files/:doc_id/preview-url` 返回短期 token URL，不带 Authorization header 也能在过期前访问 manifest/content/page PDF |
+| A21 | Metrics | 运维 | `/api/metrics` 返回 Prometheus 文本，依赖 up/down 和核心业务汇总指标存在 |
 
 ### 10.2 验证什么
 
@@ -807,12 +818,39 @@ ssh documind 'bash -lc "tail -f /opt/documind/shared/logs/documind-8089.log"'
 ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select count(*) conversations from documind.conversation_sessions; select count(*) messages from documind.conversation_messages; select count(*) feedback from documind.conversation_feedback;\""'
 ```
 
+Office Preview 与 OCR 的可重复服务器 smoke：
+
+```bash
+BASE_URL=http://123.57.255.204:8089 scripts/api-test-preview-ocr.py
+```
+
+浏览器 FileView 的可重复服务器 smoke：
+
+```bash
+BASE_URL=http://123.57.255.204:8089 scripts/browser-test-fileview.sh
+```
+
+Metrics 的可重复服务器 smoke：
+
+```bash
+BASE_URL=http://123.57.255.204:8089 scripts/api-test-metrics.sh
+```
+
+统一发布门禁：
+
+```bash
+BASE_URL=http://123.57.255.204:8089 make release-gate
+```
+
+默认门禁顺序：`make health` -> metrics smoke -> 核心 API smoke -> golden smoke（默认 3 条）-> Office/OCR/preview-token smoke -> 浏览器 FileView smoke。完整 golden 回归使用 `GOLDEN_LIMIT=50 make release-gate`；临时排查时可用 `RUN_BROWSER=0`、`RUN_PREVIEW_OCR=0` 等变量跳过较重步骤。
+
 需要确认：
 
 - 验收会话有落库。
 - assistant 消息有落库。
 - citation 有落库。
 - feedback 有落库。
+- `make release-gate` 成功退出。
 
 ## 11. 阶段十一：灰度发布与上线后观察
 

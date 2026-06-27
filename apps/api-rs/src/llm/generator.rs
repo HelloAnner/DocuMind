@@ -75,18 +75,16 @@ impl AnswerGenerator for OpenAiAnswerGenerator {
                 return;
             }
 
-            let citations =
-                crate::agent::citation_resolver::resolve_citations(&full_answer, &evidence_for_verify);
+            let citations = crate::agent::citation_resolver::resolve_citations(
+                &full_answer,
+                &evidence_for_verify,
+            );
             for citation in citations {
                 let _ = tx.send(AnswerStreamItem::Citation { citation });
             }
 
             let report = verifier.verify(&full_answer, &evidence_for_verify).await;
             let confidence = report.confidence;
-            if !report.issues.is_empty() {
-                let note = format!("\n[校验提示] {}", report.issues.join("；"));
-                let _ = tx.send(AnswerStreamItem::Delta { text: note });
-            }
 
             let _ = tx.send(AnswerStreamItem::Completed {
                 confidence,

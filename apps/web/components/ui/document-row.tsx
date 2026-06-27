@@ -4,7 +4,15 @@ import { FileText } from "lucide-react";
 import type { ReactNode } from "react";
 import { Badge } from "./badge";
 
-export type DocumentStatus = "已完成" | "解析中" | "待重建" | "失败" | "低置信" | "未知";
+export type DocumentStatus =
+  | "已完成"
+  | "解析中"
+  | "待重建"
+  | "失败"
+  | "低置信"
+  | "OCR中"
+  | "已排除"
+  | "未知";
 
 export function DocumentRow({
   name,
@@ -38,9 +46,9 @@ export function DocumentRow({
   const tone =
     status === "已完成"
       ? "success"
-      : status === "解析中" || status === "低置信"
+      : status === "解析中" || status === "低置信" || status === "OCR中"
       ? "warning"
-      : status === "待重建"
+      : status === "待重建" || status === "已排除"
       ? "neutral"
       : "danger";
 

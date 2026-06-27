@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Bookmark,
@@ -54,10 +54,11 @@ export function ChatWorkspace() {
   const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
   const sourceDocs = latestAssistant?.citations ?? [];
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
-  const activeCitation =
-    selectedCitation && sourceDocs.some((c) => c.index === selectedCitation.index)
-      ? selectedCitation
-      : sourceDocs[0] ?? null;
+  const activeCitation = selectedCitation ?? sourceDocs[0] ?? null;
+
+  useEffect(() => {
+    setSelectedCitation(null);
+  }, [currentId]);
 
   const handleSend = async () => {
     const text = input.trim();

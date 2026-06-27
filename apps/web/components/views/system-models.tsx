@@ -1,9 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
 import { Topbar } from "@/components/ui/topbar";
 import { fetchJson } from "@/lib/api";
@@ -29,7 +27,7 @@ export function SystemModels() {
   return (
     <>
       <Topbar title="模型服务">
-        <Button icon={<Plus size={14} />}>新增 Provider</Button>
+        <Badge tone="neutral">只读配置</Badge>
       </Topbar>
       <div className="dm-admin-content">
         <Panel title="Providers">
@@ -47,11 +45,11 @@ export function SystemModels() {
               <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{m.throughput}</span>
               <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{m.latency}</span>
               <div className="dm-row-actions">
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 8px", fontSize: 12 }}>编辑</button>
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 8px", fontSize: 12, color: "var(--color-error)" }}>删除</button>
+                <Badge tone="neutral">env</Badge>
               </div>
             </div>
           ))}
+          {models.length === 0 ? <div className="dm-empty-state">暂无模型配置</div> : null}
         </Panel>
       </div>
     </>

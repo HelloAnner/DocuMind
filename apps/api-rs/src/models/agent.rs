@@ -241,6 +241,7 @@ pub struct AgentRun {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentTrace {
+    pub mode: AgentMode,
     pub mode_reason: String,
     pub rewritten_query: Option<String>,
     pub keywords: Vec<String>,

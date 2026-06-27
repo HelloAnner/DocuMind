@@ -1,18 +1,20 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use axum::routing::{get, put};
+use axum::routing::{delete, get, put};
 use axum::{Json, Router};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sqlx::Row;
 use uuid::Uuid;
 
-use crate::auth::{require_tenant_admin, ActorExtractor};
+use crate::auth::{record_audit_event, require_permission, require_tenant_admin, ActorExtractor};
 use crate::models::identity::{KnowledgeBaseSummary, MemberSummary, QaLogSummary};
 use crate::state::AppState;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/admin/overview", get(overview))
+        .route("/api/admin/runtime-config", get(runtime_config))
         .route(
             "/api/admin/knowledge-bases",
             get(list_knowledge_bases).post(create_knowledge_base),
@@ -22,6 +24,11 @@ pub fn router() -> Router<AppState> {
             put(update_knowledge_base).delete(delete_knowledge_base),
         )
         .route("/api/admin/members", get(list_members))
+        .route(
+            "/api/admin/permissions",
+            get(list_permissions).post(grant_permission),
+        )
+        .route("/api/admin/permissions/:acl_id", delete(revoke_permission))
         .route("/api/admin/logs", get(list_logs))
 }
 
@@ -33,25 +40,165 @@ struct KnowledgeBaseUpsert {
     tags: Option<Vec<String>>,
 }
 
+#[derive(Debug, Deserialize)]
+struct PermissionGrantRequest {
+    kb_id: Uuid,
+    subject_type: String,
+    subject_id: String,
+    permission: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminLogQuery {
+    range: Option<String>,
+    q: Option<String>,
+    limit: Option<i64>,
+}
+
+#[derive(Debug, Serialize)]
+struct KnowledgeBaseAuthorization {
+    id: Uuid,
+    tenant_id: Uuid,
+    kb_id: Uuid,
+    kb_name: String,
+    subject_type: String,
+    subject_id: String,
+    subject_label: String,
+    permission: String,
+    created_by: Option<Uuid>,
+    created_by_label: Option<String>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
 async fn overview(
+    State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
 ) -> Result<impl IntoResponse, crate::error::AppError> {
     require_tenant_admin(&actor)?;
+    if let Some(pool) = &state.db_pool {
+        let row = sqlx::query(
+            "SELECT
+                (SELECT COUNT(*) FROM documents WHERE tenant_id = $1) AS doc_count,
+                (SELECT COUNT(*) FROM documents WHERE tenant_id = $1 AND parse_status = 'indexed') AS indexed_doc_count,
+                (SELECT COALESCE(SUM(chunk_count), 0) FROM documents WHERE tenant_id = $1) AS chunk_count,
+                (SELECT COUNT(*) FROM tenant_member WHERE tenant_id = $1 AND status = 'active') AS active_users,
+                (SELECT COUNT(*) FROM documents WHERE tenant_id = $1 AND parse_status IN ('parse_failed', 'parse_low_confidence', 'ocr_pending', 'embedding_failed', 'parsing', 'parsed')) AS failed_docs,
+                (SELECT COUNT(*)
+                   FROM document_parse_jobs j
+                   JOIN documents d ON d.id = j.doc_id
+                  WHERE j.tenant_id = $1
+                    AND j.status IN ('pending', 'running')
+                    AND d.parse_status NOT IN ('indexed', 'parse_low_confidence', 'ocr_pending')) AS running_jobs",
+        )
+        .bind(actor.tenant_id)
+        .fetch_one(pool)
+        .await?;
+
+        let kbs = sqlx::query(
+            "SELECT kb.name,
+                    kb.status,
+                    COUNT(DISTINCT d.id)::bigint AS doc_count,
+                    COALESCE(SUM(d.chunk_count), 0)::bigint AS chunk_count
+             FROM knowledge_base kb
+             LEFT JOIN documents d ON d.kb_id = kb.id AND d.tenant_id = kb.tenant_id
+             WHERE kb.tenant_id = $1
+             GROUP BY kb.id
+             ORDER BY kb.updated_at DESC
+             LIMIT 8",
+        )
+        .bind(actor.tenant_id)
+        .fetch_all(pool)
+        .await?;
+
+        return Ok(Json(json!({
+            "doc_count": row.get::<i64, _>("doc_count"),
+            "indexed_doc_count": row.get::<i64, _>("indexed_doc_count"),
+            "chunk_count": row.get::<i64, _>("chunk_count"),
+            "active_users": row.get::<i64, _>("active_users"),
+            "failed_docs": row.get::<i64, _>("failed_docs"),
+            "running_jobs": row.get::<i64, _>("running_jobs"),
+            "knowledge_bases": kbs.into_iter().map(|kb| json!({
+                "name": kb.get::<String, _>("name"),
+                "doc_count": kb.get::<i64, _>("doc_count"),
+                "chunk_count": kb.get::<i64, _>("chunk_count"),
+                "status": kb.get::<String, _>("status")
+            })).collect::<Vec<_>>(),
+            "alerts": []
+        })));
+    }
+
     Ok(Json(json!({
-        "doc_count": 12483,
-        "active_users": 47,
-        "hit_rate": "87%",
-        "p95_answer_ms": 1800,
-        "knowledge_bases": [
-            { "name": "产品文档库", "doc_count": 3201, "status": "healthy", "today_queries": 1204 },
-            { "name": "销售资料库", "doc_count": 1044, "status": "indexing", "pending_chunks": 231 },
-            { "name": "人力资源库", "doc_count": 328, "status": "warning", "failed_docs": 2 },
-        ],
-        "alerts": [
-            { "message": "6 个文档解析失败", "action": "查看文档" },
-            { "message": "“产品定价政策” 负反馈 3 次", "action": "查看日志" },
-            { "message": "向量化模型版本变更后 2 个知识库待重建索引", "action": "开始重建" },
-        ]
+        "doc_count": 0,
+        "indexed_doc_count": 0,
+        "chunk_count": 0,
+        "active_users": 0,
+        "failed_docs": 0,
+        "running_jobs": 0,
+        "knowledge_bases": [],
+        "alerts": []
+    })))
+}
+
+async fn runtime_config(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "config.read")?;
+
+    let cfg = &state.config;
+    let chunk_cfg = crate::document::ChunkConfig::default();
+    let llm_provider = provider_name(&cfg.rag.generation.base_url);
+    Ok(Json(json!({
+        "read_only": true,
+        "source": "server_env",
+        "environment": cfg.environment.as_str(),
+        "chunking": {
+            "strategy": "structure_aware",
+            "chunker_version": crate::document::CHUNKER_VERSION,
+            "target_chunk_tokens": chunk_cfg.target_chunk_tokens,
+            "max_chunk_tokens": chunk_cfg.max_chunk_tokens,
+            "hard_split_tokens": chunk_cfg.hard_split_tokens,
+            "min_chunk_tokens": chunk_cfg.min_chunk_tokens,
+            "overlap_tokens": chunk_cfg.overlap_tokens,
+            "max_table_rows_per_chunk": chunk_cfg.max_table_rows_per_chunk,
+            "max_table_token_per_chunk": chunk_cfg.max_table_token_per_chunk,
+            "preserve_table_structure": true,
+            "preserve_list_hierarchy": true,
+            "merge_short_blocks": true
+        },
+        "embedding": {
+            "enabled": cfg.rag.embedding.enabled,
+            "model": cfg.rag.embedding.model,
+            "base_url": cfg.rag.embedding.base_url,
+            "api_key_configured": cfg.rag.embedding.api_key.as_ref().is_some_and(|key| !key.trim().is_empty()),
+            "batch_size": cfg.rag.embedding.batch_size,
+            "index_name": cfg.rag.embedding.index_name,
+            "index_alias": cfg.rag.embedding.index_alias
+        },
+        "search": {
+            "strategy": "Dense + BM25 + RRF",
+            "dense_top_k": cfg.rag.retrieval.dense_top_k,
+            "bm25_top_k": cfg.rag.retrieval.bm25_top_k,
+            "rrf_top_k": cfg.rag.retrieval.rrf_top_k,
+            "effective_top_k": cfg.rag.retrieval.effective_top_k,
+            "rerank_enabled": cfg.rag.rerank.enabled,
+            "rerank_model": cfg.rag.rerank.model,
+            "rerank_api_configured": cfg.rag.rerank.api_url.as_ref().is_some_and(|url| !url.trim().is_empty()),
+            "rerank_min_score": cfg.rag.rerank.min_score
+        },
+        "llm": {
+            "provider": llm_provider,
+            "use_real_llm": cfg.rag.generation.use_real_llm,
+            "model": cfg.rag.generation.model,
+            "base_url": cfg.rag.generation.base_url,
+            "api_key_configured": !cfg.rag.generation.api_key.trim().is_empty() && cfg.rag.generation.api_key != "ollama",
+            "temperature": cfg.rag.generation.temperature,
+            "max_output_tokens": cfg.rag.generation.max_output_tokens,
+            "streaming_enabled": cfg.rag.generation.use_real_llm,
+            "rewrite_enabled": cfg.rag.rewrite.enabled,
+            "rewrite_model": cfg.rag.rewrite.model
+        }
     })))
 }
 
@@ -137,6 +284,7 @@ async fn create_knowledge_base(
     Json(req): Json<KnowledgeBaseUpsert>,
 ) -> Result<Json<KnowledgeBaseSummary>, crate::error::AppError> {
     require_tenant_admin(&actor)?;
+    require_permission(&actor, "kb.create")?;
     let pool = state.db_pool.as_ref().ok_or_else(|| {
         crate::error::AppError::bad_request("KB_REQUIRES_POSTGRES", "知识库管理需要启用 PostgreSQL")
     })?;
@@ -180,6 +328,19 @@ async fn create_knowledge_base(
     }
 
     tx.commit().await?;
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "knowledge_base.create",
+        Some("knowledge_base"),
+        Some(&row.id.to_string()),
+        json!({
+            "name": row.name.clone(),
+            "status": row.status.clone(),
+            "tags": row.tags.clone(),
+        }),
+    )
+    .await?;
     Ok(Json(row.into()))
 }
 
@@ -232,6 +393,19 @@ async fn update_knowledge_base(
         message: "知识库不存在或无权限".to_string(),
     })?;
 
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "knowledge_base.update",
+        Some("knowledge_base"),
+        Some(&row.id.to_string()),
+        json!({
+            "name": row.name.clone(),
+            "status": row.status.clone(),
+            "tags": row.tags.clone(),
+        }),
+    )
+    .await?;
     Ok(Json(row.into()))
 }
 
@@ -255,6 +429,15 @@ async fn delete_knowledge_base(
             message: "知识库不存在或无权限".to_string(),
         });
     }
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "knowledge_base.delete",
+        Some("knowledge_base"),
+        Some(&kb_id.to_string()),
+        json!({}),
+    )
+    .await?;
     Ok(Json(json!({ "kb_id": kb_id, "status": "deleted" })))
 }
 
@@ -358,39 +541,251 @@ async fn list_members(
     ]))
 }
 
-async fn list_logs(
+async fn list_permissions(
+    State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<Vec<KnowledgeBaseAuthorization>>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "kb.manage")?;
+
+    let Some(pool) = &state.db_pool else {
+        return Ok(Json(vec![]));
+    };
+
+    let rows = sqlx::query(
+        r#"
+        SELECT acl.id,
+               acl.tenant_id,
+               acl.kb_id,
+               kb.name AS kb_name,
+               acl.subject_type,
+               acl.subject_id,
+               acl.permission,
+               acl.created_by,
+               COALESCE(NULLIF(u.name, ''), u.email) AS user_label,
+               COALESCE(NULLIF(c.name, ''), c.email) AS created_by_label,
+               acl.created_at
+        FROM knowledge_base_acl acl
+        JOIN knowledge_base kb
+          ON kb.tenant_id = acl.tenant_id
+         AND kb.id = acl.kb_id
+        LEFT JOIN app_user u
+          ON acl.subject_type = 'user'
+         AND u.id::text = acl.subject_id
+        LEFT JOIN app_user c
+          ON c.id = acl.created_by
+        WHERE acl.tenant_id = $1
+        ORDER BY kb.name ASC,
+                 acl.subject_type ASC,
+                 acl.subject_id ASC,
+                 CASE acl.permission
+                   WHEN 'manage' THEN 0
+                   WHEN 'write' THEN 1
+                   ELSE 2
+                 END
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(permission_from_row).collect()))
+}
+
+async fn grant_permission(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Json(req): Json<PermissionGrantRequest>,
+) -> Result<Json<KnowledgeBaseAuthorization>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "kb.manage")?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        crate::error::AppError::bad_request(
+            "ACL_REQUIRES_POSTGRES",
+            "知识库授权需要启用 PostgreSQL",
+        )
+    })?;
+
+    let subject_type = normalize_acl_subject_type(&req.subject_type)?;
+    let permission = normalize_acl_permission(&req.permission)?;
+    ensure_kb_exists(pool, actor.tenant_id, req.kb_id).await?;
+    let subject_id =
+        normalize_acl_subject_id(pool, actor.tenant_id, subject_type, &req.subject_id).await?;
+
+    let acl_id: Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO knowledge_base_acl (tenant_id, kb_id, subject_type, subject_id, permission, created_by)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        ON CONFLICT (tenant_id, kb_id, subject_type, subject_id, permission)
+        DO UPDATE SET created_by = knowledge_base_acl.created_by
+        RETURNING id
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(req.kb_id)
+    .bind(subject_type)
+    .bind(&subject_id)
+    .bind(permission)
+    .bind(actor.user_id)
+    .fetch_one(pool)
+    .await?;
+
+    let row = fetch_permission(pool, actor.tenant_id, acl_id).await?;
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "knowledge_base_acl.grant",
+        Some("knowledge_base_acl"),
+        Some(&acl_id.to_string()),
+        json!({
+            "kb_id": row.kb_id,
+            "kb_name": row.kb_name,
+            "subject_type": row.subject_type,
+            "subject_id": row.subject_id,
+            "permission": row.permission,
+        }),
+    )
+    .await?;
+    Ok(Json(row))
+}
+
+async fn revoke_permission(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(acl_id): Path<Uuid>,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "kb.manage")?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        crate::error::AppError::bad_request(
+            "ACL_REQUIRES_POSTGRES",
+            "知识库授权需要启用 PostgreSQL",
+        )
+    })?;
+
+    let existing = fetch_permission(pool, actor.tenant_id, acl_id).await?;
+    let result = sqlx::query("DELETE FROM knowledge_base_acl WHERE tenant_id = $1 AND id = $2")
+        .bind(actor.tenant_id)
+        .bind(acl_id)
+        .execute(pool)
+        .await?;
+    if result.rows_affected() == 0 {
+        return Err(crate::error::AppError::NotFound {
+            code: "ACL_NOT_FOUND".to_string(),
+            message: "授权记录不存在或无权限".to_string(),
+        });
+    }
+
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "knowledge_base_acl.revoke",
+        Some("knowledge_base_acl"),
+        Some(&acl_id.to_string()),
+        json!({
+            "kb_id": existing.kb_id,
+            "kb_name": existing.kb_name,
+            "subject_type": existing.subject_type,
+            "subject_id": existing.subject_id,
+            "permission": existing.permission,
+        }),
+    )
+    .await?;
+    Ok(Json(json!({ "id": acl_id, "status": "revoked" })))
+}
+
+async fn list_logs(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Query(query): Query<AdminLogQuery>,
 ) -> Result<Json<Vec<QaLogSummary>>, crate::error::AppError> {
     require_tenant_admin(&actor)?;
-    Ok(Json(vec![
-        QaLogSummary {
-            id: Uuid::new_v4(),
-            question: "Q3 华东区的销售目标是多少？".to_string(),
-            kb_name: "产品文档库".to_string(),
-            user_name: "张三".to_string(),
-            score: 0.92,
-            feedback: Some("up".to_string()),
-            created_at: chrono::Utc::now(),
-        },
-        QaLogSummary {
-            id: Uuid::new_v4(),
-            question: "采购合同中的违约责任怎么定义？".to_string(),
-            kb_name: "销售资料库".to_string(),
-            user_name: "李四".to_string(),
-            score: 0.88,
-            feedback: Some("up".to_string()),
-            created_at: chrono::Utc::now(),
-        },
-        QaLogSummary {
-            id: Uuid::new_v4(),
-            question: "员工报销需要哪些材料？".to_string(),
-            kb_name: "人力资源库".to_string(),
-            user_name: "王五".to_string(),
-            score: 0.76,
-            feedback: Some("down".to_string()),
-            created_at: chrono::Utc::now(),
-        },
-    ]))
+    let Some(pool) = &state.db_pool else {
+        return Ok(Json(vec![]));
+    };
+    let range = normalize_log_range(query.range.as_deref());
+    let q = query
+        .q
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| format!("%{value}%"));
+    let limit = query.limit.unwrap_or(100).clamp(1, 200);
+
+    let rows = sqlx::query(
+        "SELECT a.id,
+                COALESCE(u.content, '') AS question,
+                COALESCE(
+                    NULLIF(string_agg(DISTINCT kb.name, ', '), ''),
+                    '未关联知识库'
+                ) AS kb_name,
+                COALESCE(au.name, au.email, '未知用户') AS user_name,
+                CASE a.confidence
+                    WHEN 'high' THEN 0.95
+                    WHEN 'medium' THEN 0.75
+                    WHEN 'low' THEN 0.55
+                    ELSE 0.50
+                END::double precision AS score,
+                f.rating AS feedback,
+                a.created_at
+         FROM conversation_messages a
+         LEFT JOIN conversation_messages u ON u.id = a.parent_message_id
+         LEFT JOIN app_user au ON au.id = a.user_id
+         LEFT JOIN conversation_feedback f ON f.assistant_message_id = a.id
+         LEFT JOIN conversation_sessions s ON s.id = a.conversation_id
+         LEFT JOIN knowledge_base kb
+                ON kb.tenant_id = a.tenant_id
+               AND kb.id = ANY(s.kb_ids)
+         WHERE a.tenant_id = $1
+           AND a.role = 'assistant'
+           AND a.status = 'completed'
+           AND (
+                $2 = 'all'
+                OR ($2 = 'today' AND a.created_at >= date_trunc('day', now()))
+                OR ($2 = 'week' AND a.created_at >= now() - interval '7 days')
+                OR ($2 = 'month' AND a.created_at >= now() - interval '30 days')
+           )
+           AND (
+                $3::text IS NULL
+                OR COALESCE(u.content, '') ILIKE $3
+                OR COALESCE(au.name, '') ILIKE $3
+                OR COALESCE(au.email, '') ILIKE $3
+                OR COALESCE(kb.name, '') ILIKE $3
+           )
+         GROUP BY a.id, u.content, au.name, au.email, f.rating, a.confidence, a.created_at
+         ORDER BY a.created_at DESC
+         LIMIT $4",
+    )
+    .bind(actor.tenant_id)
+    .bind(range)
+    .bind(q)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(Json(
+        rows.into_iter()
+            .map(|row| QaLogSummary {
+                id: row.get("id"),
+                question: row.get("question"),
+                kb_name: row.get("kb_name"),
+                user_name: row.get("user_name"),
+                score: row.get("score"),
+                feedback: row.get("feedback"),
+                created_at: row.get("created_at"),
+            })
+            .collect(),
+    ))
+}
+
+fn normalize_log_range(value: Option<&str>) -> &'static str {
+    match value.unwrap_or("today") {
+        "today" => "today",
+        "week" => "week",
+        "month" => "month",
+        "all" => "all",
+        _ => "today",
+    }
 }
 
 #[derive(sqlx::FromRow)]
@@ -472,4 +867,207 @@ struct MemberSummaryRow {
     roles: Vec<String>,
     status: String,
     query_count: i64,
+}
+
+async fn ensure_kb_exists(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    kb_id: Uuid,
+) -> Result<(), crate::error::AppError> {
+    let exists: Option<Uuid> =
+        sqlx::query_scalar("SELECT id FROM knowledge_base WHERE tenant_id = $1 AND id = $2")
+            .bind(tenant_id)
+            .bind(kb_id)
+            .fetch_optional(pool)
+            .await?;
+    if exists.is_none() {
+        return Err(crate::error::AppError::NotFound {
+            code: "KB_NOT_FOUND".to_string(),
+            message: "知识库不存在或无权限".to_string(),
+        });
+    }
+    Ok(())
+}
+
+async fn normalize_acl_subject_id(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    subject_type: &str,
+    raw: &str,
+) -> Result<String, crate::error::AppError> {
+    let subject = raw.trim();
+    if subject.is_empty() {
+        return Err(crate::error::AppError::bad_request(
+            "ACL_SUBJECT_EMPTY",
+            "授权对象不能为空",
+        ));
+    }
+
+    if subject_type == "role" {
+        let roles = [
+            "tenant_admin",
+            "tenant_owner",
+            "team_admin",
+            "data_admin",
+            "user",
+            "analyst",
+            "end_user",
+            "viewer",
+        ];
+        if roles.contains(&subject) {
+            return Ok(subject.to_string());
+        }
+        return Err(crate::error::AppError::bad_request(
+            "ACL_ROLE_INVALID",
+            "角色必须是 tenant_admin / team_admin / data_admin / user / analyst / end_user / viewer",
+        ));
+    }
+
+    let row = if let Ok(user_id) = Uuid::parse_str(subject) {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT u.id
+            FROM app_user u
+            JOIN tenant_member tm
+              ON tm.user_id = u.id
+             AND tm.tenant_id = $1
+             AND tm.status = 'active'
+            WHERE u.id = $2
+              AND u.status = 'active'
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .fetch_optional(pool)
+        .await?
+    } else {
+        sqlx::query_scalar::<_, Uuid>(
+            r#"
+            SELECT u.id
+            FROM app_user u
+            JOIN tenant_member tm
+              ON tm.user_id = u.id
+             AND tm.tenant_id = $1
+             AND tm.status = 'active'
+            WHERE lower(u.email) = lower($2)
+              AND u.status = 'active'
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(subject)
+        .fetch_optional(pool)
+        .await?
+    };
+
+    row.map(|id| id.to_string())
+        .ok_or_else(|| crate::error::AppError::NotFound {
+            code: "ACL_USER_NOT_FOUND".to_string(),
+            message: "授权用户不存在、未加入当前租户或未启用".to_string(),
+        })
+}
+
+fn normalize_acl_subject_type(value: &str) -> Result<&str, crate::error::AppError> {
+    match value.trim() {
+        "role" => Ok("role"),
+        "user" => Ok("user"),
+        _ => Err(crate::error::AppError::bad_request(
+            "ACL_SUBJECT_TYPE_INVALID",
+            "授权对象类型只能是 role 或 user",
+        )),
+    }
+}
+
+fn normalize_acl_permission(value: &str) -> Result<&str, crate::error::AppError> {
+    match value.trim() {
+        "read" => Ok("read"),
+        "write" => Ok("write"),
+        "manage" => Ok("manage"),
+        _ => Err(crate::error::AppError::bad_request(
+            "ACL_PERMISSION_INVALID",
+            "授权权限只能是 read / write / manage",
+        )),
+    }
+}
+
+async fn fetch_permission(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    acl_id: Uuid,
+) -> Result<KnowledgeBaseAuthorization, crate::error::AppError> {
+    let row = sqlx::query(
+        r#"
+        SELECT acl.id,
+               acl.tenant_id,
+               acl.kb_id,
+               kb.name AS kb_name,
+               acl.subject_type,
+               acl.subject_id,
+               acl.permission,
+               acl.created_by,
+               COALESCE(NULLIF(u.name, ''), u.email) AS user_label,
+               COALESCE(NULLIF(c.name, ''), c.email) AS created_by_label,
+               acl.created_at
+        FROM knowledge_base_acl acl
+        JOIN knowledge_base kb
+          ON kb.tenant_id = acl.tenant_id
+         AND kb.id = acl.kb_id
+        LEFT JOIN app_user u
+          ON acl.subject_type = 'user'
+         AND u.id::text = acl.subject_id
+        LEFT JOIN app_user c
+          ON c.id = acl.created_by
+        WHERE acl.tenant_id = $1
+          AND acl.id = $2
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(acl_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::NotFound {
+        code: "ACL_NOT_FOUND".to_string(),
+        message: "授权记录不存在或无权限".to_string(),
+    })?;
+
+    Ok(permission_from_row(row))
+}
+
+fn permission_from_row(row: sqlx::postgres::PgRow) -> KnowledgeBaseAuthorization {
+    let subject_type: String = row.get("subject_type");
+    let subject_id: String = row.get("subject_id");
+    let user_label: Option<String> = row.try_get("user_label").ok();
+    let subject_label = if subject_type == "user" {
+        user_label.unwrap_or_else(|| subject_id.clone())
+    } else {
+        subject_id.clone()
+    };
+
+    KnowledgeBaseAuthorization {
+        id: row.get("id"),
+        tenant_id: row.get("tenant_id"),
+        kb_id: row.get("kb_id"),
+        kb_name: row.get("kb_name"),
+        subject_type,
+        subject_id,
+        subject_label,
+        permission: row.get("permission"),
+        created_by: row.try_get("created_by").ok(),
+        created_by_label: row.try_get("created_by_label").ok(),
+        created_at: row.get("created_at"),
+    }
+}
+
+fn provider_name(base_url: &str) -> &'static str {
+    let normalized = base_url.to_ascii_lowercase();
+    if normalized.contains("dashscope") || normalized.contains("aliyuncs") {
+        "DashScope"
+    } else if normalized.contains("openai") {
+        "OpenAI"
+    } else if normalized.contains("deepseek") {
+        "DeepSeek"
+    } else {
+        "OpenAI-compatible"
+    }
 }

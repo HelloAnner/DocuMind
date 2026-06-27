@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
@@ -62,9 +61,7 @@ export function TenantMembers() {
 
   return (
     <>
-      <Topbar title="用户管理">
-        <Button icon={<Plus size={14} />}>+ 邀请用户</Button>
-      </Topbar>
+      <Topbar title="用户管理" />
 
       <div className="dm-admin-content">
         <div className="dm-filter-bar">
@@ -94,14 +91,13 @@ export function TenantMembers() {
           </select>
         </div>
 
-        <Panel title="Users">
+        <Panel title="Users" action={<Badge tone="neutral">只读</Badge>}>
           <div className="dm-table-head dm-user-row">
             <span>用户</span>
             <span>角色</span>
             <span>可访问知识库</span>
             <span>问答数</span>
             <span>状态</span>
-            <span>操作</span>
           </div>
           {filtered.map((user) => (
             <div className="dm-user-row" key={user.id}>
@@ -122,19 +118,9 @@ export function TenantMembers() {
                   {user.status === "active" ? "启用中" : user.status}
                 </Badge>
               </span>
-              <div className="dm-row-actions">
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 8px", fontSize: 12 }}>
-                  编辑
-                </button>
-                <button
-                  className="dm-button ghost"
-                  style={{ height: 28, padding: "0 8px", fontSize: 12, color: "var(--color-error)" }}
-                >
-                  禁用
-                </button>
-              </div>
             </div>
           ))}
+          {filtered.length === 0 ? <div className="dm-empty-state">没有匹配的用户</div> : null}
         </Panel>
       </div>
     </>

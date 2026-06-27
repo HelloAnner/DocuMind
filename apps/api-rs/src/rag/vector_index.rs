@@ -6,7 +6,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
 
-use crate::models::source_anchor::NormalizedBBox;
+use crate::models::source_anchor::{CharRange, NormalizedBBox};
 
 #[derive(Debug, Clone)]
 pub struct ElasticsearchConfig {
@@ -26,6 +26,7 @@ pub struct ElasticsearchChunkIndexer {
 pub struct IndexedChunk {
     pub chunk_id: Uuid,
     pub doc_id: Uuid,
+    pub doc_title: String,
     pub kb_id: Uuid,
     pub tenant_id: Uuid,
     pub parse_job_id: Uuid,
@@ -42,8 +43,11 @@ pub struct IndexedChunk {
     pub anchor_ids: Vec<Uuid>,
     pub primary_anchor_id: Option<Uuid>,
     pub anchor_quality: String,
+    pub anchor_format: String,
+    pub anchor_kind: String,
     pub anchor_page: Option<i32>,
     pub anchor_slide: Option<i32>,
+    pub anchor_char_range: Option<CharRange>,
     pub anchor_bbox: Option<NormalizedBBox>,
     pub anchor_text: String,
     pub embedding_model: String,
@@ -160,6 +164,29 @@ impl ElasticsearchChunkIndexer {
         Ok(())
     }
 
+    pub async fn delete_document_chunks(&self, doc_id: Uuid) -> Result<u64> {
+        let resp = self
+            .http
+            .post(format!(
+                "{}/_delete_by_query?conflicts=proceed&refresh=true",
+                self.index_url()
+            ))
+            .json(&json!({
+                "query": {
+                    "term": {
+                        "doc_id": doc_id
+                    }
+                }
+            }))
+            .send()
+            .await?;
+        if resp.status().as_u16() == 404 {
+            return Ok(0);
+        }
+        let payload: Value = resp.error_for_status()?.json().await?;
+        Ok(payload.get("deleted").and_then(Value::as_u64).unwrap_or(0))
+    }
+
     fn base_url(&self) -> String {
         self.config.base_url.trim_end_matches('/').to_string()
     }
@@ -179,6 +206,12 @@ fn index_definition(dims: usize) -> Value {
             "properties": {
                 "chunk_id": { "type": "keyword" },
                 "doc_id": { "type": "keyword" },
+                "doc_title": {
+                    "type": "text",
+                    "fields": {
+                        "keyword": { "type": "keyword", "ignore_above": 32766 }
+                    }
+                },
                 "kb_id": { "type": "keyword" },
                 "tenant_id": { "type": "keyword" },
                 "parse_job_id": { "type": "keyword" },
@@ -200,8 +233,11 @@ fn index_definition(dims: usize) -> Value {
                 "anchor_ids": { "type": "keyword" },
                 "primary_anchor_id": { "type": "keyword" },
                 "anchor_quality": { "type": "keyword" },
+                "anchor_format": { "type": "keyword" },
+                "anchor_kind": { "type": "keyword" },
                 "anchor_page": { "type": "integer" },
                 "anchor_slide": { "type": "integer" },
+                "anchor_char_range": { "type": "object" },
                 "anchor_bbox": { "type": "object" },
                 "anchor_text": { "type": "text", "index": false },
                 "embedding_model": { "type": "keyword" },

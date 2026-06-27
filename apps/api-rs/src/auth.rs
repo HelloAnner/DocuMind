@@ -6,6 +6,7 @@ use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::{PgPool, Row};
 use uuid::Uuid;
 
@@ -98,7 +99,7 @@ impl FromRequestParts<AppState> for ActorExtractor {
     }
 }
 
-async fn actor_from_bearer_token(
+pub async fn actor_from_bearer_token(
     state: &AppState,
     headers: &axum::http::HeaderMap,
 ) -> Result<Option<CurrentActor>, AppError> {
@@ -184,7 +185,7 @@ async fn authenticate_from_db(
     let membership = if let Some(tenant_key) = tenant_key.filter(|v| !v.trim().is_empty()) {
         sqlx::query(
             r#"
-            SELECT tm.tenant_id, tm.roles, t.name, t.slug, t.plan, t.status
+            SELECT tm.tenant_id, tm.roles, tm.attributes, t.name, t.slug, t.plan, t.status
             FROM tenant_member tm
             JOIN tenant t ON t.id = tm.tenant_id
             WHERE tm.user_id = $1
@@ -201,7 +202,7 @@ async fn authenticate_from_db(
     } else {
         sqlx::query(
             r#"
-            SELECT tm.tenant_id, tm.roles, t.name, t.slug, t.plan, t.status
+            SELECT tm.tenant_id, tm.roles, tm.attributes, t.name, t.slug, t.plan, t.status
             FROM tenant_member tm
             JOIN tenant t ON t.id = tm.tenant_id
             WHERE tm.user_id = $1
@@ -226,7 +227,11 @@ async fn authenticate_from_db(
 
     let tenant_id: Uuid = membership.get("tenant_id");
     let roles: Vec<String> = membership.get("roles");
+    let attributes: serde_json::Value = membership
+        .try_get("attributes")
+        .unwrap_or_else(|_| serde_json::json!({}));
     let allowed_kb_ids = allowed_kb_ids(pool, tenant_id, user_id, &roles).await?;
+    let permissions = effective_permissions_for_membership(&roles, &attributes);
     let email: String = user.get("email");
     let name: Option<String> = user.try_get("name").ok();
     Ok(CurrentActor {
@@ -235,7 +240,7 @@ async fn authenticate_from_db(
         email: email.clone(),
         name: name.unwrap_or(email),
         roles: roles.clone(),
-        permissions: derive_permissions(&roles),
+        permissions,
         allowed_kb_ids,
         is_super_admin: roles.iter().any(|r| r == "super_admin"),
     })
@@ -321,19 +326,25 @@ async fn resolve_actor_from_db(
         return Err(AppError::unauthorized());
     }
 
-    let roles: Vec<String> = sqlx::query_scalar(
-        "SELECT UNNEST(roles) FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 AND status = 'active'",
+    let membership = sqlx::query(
+        "SELECT roles, attributes FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' LIMIT 1",
     )
     .bind(tenant_id)
     .bind(user_id)
-    .fetch_all(pool)
-    .await?;
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(AppError::unauthorized)?;
+    let roles: Vec<String> = membership.get("roles");
+    let attributes: serde_json::Value = membership
+        .try_get("attributes")
+        .unwrap_or_else(|_| serde_json::json!({}));
 
     if roles.is_empty() {
         return Err(AppError::unauthorized());
     }
 
     let allowed_kb_ids = allowed_kb_ids(pool, tenant_id, user_id, &roles).await?;
+    let permissions = effective_permissions_for_membership(&roles, &attributes);
     let email = user.1;
     let name = user.2;
     Ok(CurrentActor {
@@ -342,10 +353,37 @@ async fn resolve_actor_from_db(
         name: name.unwrap_or_else(|| email.clone()),
         email,
         roles: roles.clone(),
-        permissions: derive_permissions(&roles),
+        permissions,
         allowed_kb_ids,
         is_super_admin: roles.iter().any(|r| r == "super_admin"),
     })
+}
+
+fn effective_permissions_for_membership(
+    roles: &[String],
+    attributes: &serde_json::Value,
+) -> Vec<String> {
+    let local = derive_permissions(roles);
+    let Some(effective) = attributes
+        .get("effective_permissions")
+        .and_then(|value| value.as_array())
+    else {
+        return local;
+    };
+
+    let mut clamped = effective
+        .iter()
+        .filter_map(|value| value.as_str())
+        .filter(|permission| {
+            local
+                .iter()
+                .any(|local_permission| local_permission == permission)
+        })
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    clamped.sort();
+    clamped.dedup();
+    clamped
 }
 
 async fn allowed_kb_ids(
@@ -368,7 +406,7 @@ async fn allowed_kb_ids(
         SELECT DISTINCT kb_id
         FROM knowledge_base_acl
         WHERE tenant_id = $1
-          AND permission IN ('read', 'manage')
+          AND permission IN ('read', 'write', 'manage')
           AND (
             (subject_type = 'role' AND subject_id = ANY($2))
             OR (subject_type = 'user' AND subject_id = $3)
@@ -543,6 +581,7 @@ pub fn derive_permissions(roles: &[String]) -> Vec<String> {
                         "job.write",
                         "audit.read",
                         "kb.read",
+                        "kb.create",
                         "kb.write",
                         "kb.manage",
                         "document.upload",
@@ -567,6 +606,7 @@ pub fn derive_permissions(roles: &[String]) -> Vec<String> {
                         "user.read",
                         "user.write",
                         "kb.read",
+                        "kb.create",
                         "kb.write",
                         "kb.manage",
                         "document.upload",
@@ -678,13 +718,58 @@ pub fn require_permission(actor: &CurrentActor, permission: &str) -> Result<(), 
 pub fn require_kb_permission(
     actor: &CurrentActor,
     kb_id: Uuid,
-    _permission: &str,
+    permission: &str,
 ) -> Result<(), AppError> {
-    if actor.is_super_admin || actor.allowed_kb_ids.contains(&kb_id) {
+    let required_permission = match permission {
+        "read" => "kb.read",
+        "write" => "kb.write",
+        "manage" => "kb.manage",
+        other => other,
+    };
+    if !actor.has_permission(required_permission) {
+        return Err(AppError::forbidden());
+    }
+    if actor.allowed_kb_ids.contains(&kb_id) {
         Ok(())
     } else {
         Err(AppError::kb_scope_denied())
     }
+}
+
+pub async fn record_audit_event(
+    state: &AppState,
+    actor: Option<&CurrentActor>,
+    action: &str,
+    resource_type: Option<&str>,
+    resource_id: Option<&str>,
+    detail: Value,
+) -> Result<(), AppError> {
+    let Some(pool) = &state.db_pool else {
+        return Ok(());
+    };
+    let tenant_id = actor.map(|a| a.tenant_id);
+    let actor_user_id = actor.map(|a| a.user_id);
+    let actor_role = actor
+        .and_then(|a| a.roles.first().cloned())
+        .unwrap_or_else(|| "anonymous".to_string());
+
+    sqlx::query(
+        "INSERT INTO audit_log (
+            tenant_id, actor_user_id, actor_role, action, resource_type,
+            resource_id, detail
+         )
+         VALUES ($1, $2, $3, $4, $5, $6, $7)",
+    )
+    .bind(tenant_id)
+    .bind(actor_user_id)
+    .bind(actor_role)
+    .bind(action)
+    .bind(resource_type)
+    .bind(resource_id)
+    .bind(detail)
+    .execute(pool)
+    .await?;
+    Ok(())
 }
 
 pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<()> {

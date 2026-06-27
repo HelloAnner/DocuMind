@@ -29,6 +29,14 @@ impl RuleBasedQueryRewriter {
         }
         None
     }
+
+    fn resolve_doc_title(turn: &ConversationTurn) -> Option<String> {
+        turn.citations
+            .iter()
+            .find(|title| !title.trim().is_empty())
+            .cloned()
+            .or_else(|| Self::extract_doc_title(&turn.assistant_answer))
+    }
 }
 
 impl Default for RuleBasedQueryRewriter {
@@ -55,7 +63,7 @@ impl QueryRewriter for RuleBasedQueryRewriter {
 
         if has_pronoun {
             if let Some(last) = history.last() {
-                if let Some(title) = Self::extract_doc_title(&last.assistant_answer) {
+                if let Some(title) = Self::resolve_doc_title(last) {
                     for p in &pronouns {
                         if rewritten.contains(*p) {
                             rewritten = rewritten.replace(*p, &title);

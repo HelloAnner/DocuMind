@@ -144,6 +144,188 @@ export async function deleteKnowledgeBase(kbId: string): Promise<{ kb_id: string
   return fetchJson(`/api/admin/knowledge-bases/${kbId}`, { method: "DELETE" });
 }
 
+export interface AdminMember {
+  id: string;
+  email: string;
+  name?: string;
+  roles: string[];
+  allowed_kb_names: string[];
+  query_count: number;
+  status: string;
+}
+
+export async function listAdminMembers(): Promise<AdminMember[]> {
+  return fetchJson("/api/admin/members");
+}
+
+export type PermissionSubjectType = "role" | "user";
+export type KnowledgeBasePermission = "read" | "write" | "manage";
+
+export interface KnowledgeBaseAuthorization {
+  id: string;
+  tenant_id: string;
+  kb_id: string;
+  kb_name: string;
+  subject_type: PermissionSubjectType;
+  subject_id: string;
+  subject_label: string;
+  permission: KnowledgeBasePermission;
+  created_by?: string;
+  created_by_label?: string;
+  created_at: string;
+}
+
+export interface GrantKnowledgeBasePermissionRequest {
+  kb_id: string;
+  subject_type: PermissionSubjectType;
+  subject_id: string;
+  permission: KnowledgeBasePermission;
+}
+
+export async function listAdminPermissions(): Promise<KnowledgeBaseAuthorization[]> {
+  return fetchJson("/api/admin/permissions");
+}
+
+export async function grantKnowledgeBasePermission(
+  req: GrantKnowledgeBasePermissionRequest
+): Promise<KnowledgeBaseAuthorization> {
+  return fetchJson("/api/admin/permissions", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function revokeKnowledgeBasePermission(id: string): Promise<{ id: string; status: string }> {
+  return fetchJson(`/api/admin/permissions/${id}`, { method: "DELETE" });
+}
+
+export interface AdminRuntimeConfig {
+  read_only: boolean;
+  source: string;
+  environment: string;
+  chunking: {
+    strategy: string;
+    chunker_version: string;
+    target_chunk_tokens: number;
+    max_chunk_tokens: number;
+    hard_split_tokens: number;
+    min_chunk_tokens: number;
+    overlap_tokens: number;
+    max_table_rows_per_chunk: number;
+    max_table_token_per_chunk: number;
+    preserve_table_structure: boolean;
+    preserve_list_hierarchy: boolean;
+    merge_short_blocks: boolean;
+  };
+  embedding: {
+    enabled: boolean;
+    model: string;
+    base_url: string;
+    api_key_configured: boolean;
+    batch_size: number;
+    index_name: string;
+    index_alias: string;
+  };
+  search: {
+    strategy: string;
+    dense_top_k: number;
+    bm25_top_k: number;
+    rrf_top_k: number;
+    effective_top_k: number;
+    rerank_enabled: boolean;
+    rerank_model: string;
+    rerank_api_configured: boolean;
+    rerank_min_score: number;
+  };
+  llm: {
+    provider: string;
+    use_real_llm: boolean;
+    model: string;
+    base_url: string;
+    api_key_configured: boolean;
+    temperature: number;
+    max_output_tokens: number;
+    streaming_enabled: boolean;
+    rewrite_enabled: boolean;
+    rewrite_model: string;
+  };
+}
+
+export async function getAdminRuntimeConfig(): Promise<AdminRuntimeConfig> {
+  return fetchJson("/api/admin/runtime-config");
+}
+
+export interface SystemVectorIndex {
+  id: string;
+  name: string;
+  alias: string;
+  tenant_id: string;
+  tenant: string;
+  kb_id: string;
+  kb_name: string;
+  embedding_model: string;
+  index_version: string;
+  dimension: number;
+  documents: number;
+  building_documents: number;
+  degraded_documents: number;
+  chunks: number;
+  embedded_chunks: number;
+  es_documents: number;
+  status: "healthy" | "building" | "degraded";
+  lastIndexed?: string;
+}
+
+export async function listSystemVectorIndexes(): Promise<SystemVectorIndex[]> {
+  return fetchJson("/api/system/vector-indexes");
+}
+
+export interface SystemSettingsSnapshot {
+  read_only: boolean;
+  environment: string;
+  service: {
+    host: string;
+    port: number;
+    base_path: string;
+    health_path: string;
+  };
+  auth: {
+    login_mode: string;
+    token_expire_hours: number;
+    portal_base_url: string;
+    portal_exchange_endpoint: string;
+    local_login_enabled: boolean;
+    portal_login_enabled: boolean;
+  };
+  storage: {
+    database_configured: boolean;
+    redis_configured: boolean;
+    rabbitmq_configured: boolean;
+    elasticsearch_configured: boolean;
+    object_storage_provider: string;
+    object_storage_endpoint_configured: boolean;
+    object_storage_region: string;
+    object_storage_bucket: string;
+    object_storage_force_path_style: boolean;
+    object_storage_tls_verify: boolean;
+    object_storage_presign_expire_seconds: number;
+  };
+  deployment: {
+    host_alias: string;
+    root: string;
+    current: string;
+    releases: string;
+    shared: string;
+    env_file: string;
+    log_file: string;
+    containers: string[];
+  };
+}
+
+export async function getSystemSettings(): Promise<SystemSettingsSnapshot> {
+  return fetchJson("/api/system/settings");
+}
+
 export interface AdminDocument {
   doc_id: string;
   kb_id: string;
@@ -239,6 +421,50 @@ export interface DocumentPreview {
   char_count: number;
 }
 
+export interface FilePreviewManifestPage {
+  page: number;
+  width: number;
+  height: number;
+  rotation: number;
+  text_layer_available: boolean;
+}
+
+export interface FilePreviewManifest {
+  doc_id: string;
+  parse_job_id?: string;
+  file_name: string;
+  format: string;
+  preview_type: string;
+  page_count?: number;
+  pages: FilePreviewManifestPage[];
+  text_layer_available: boolean;
+  conversion_status: string;
+}
+
+export interface FilePreviewResponse {
+  doc_id: string;
+  parse_job_id?: string;
+  file_name: string;
+  format: string;
+  preview_type: string;
+  preview_url: string;
+  manifest_url: string;
+  source_status: string;
+}
+
+export interface FilePreviewUrlResponse {
+  doc_id: string;
+  parse_job_id?: string;
+  file_name: string;
+  format: string;
+  preview_type: string;
+  expires_at: string;
+  expires_in_seconds: number;
+  preview_url: string;
+  manifest_url: string;
+  page_pdf_url_template: string;
+}
+
 export interface AdminDocumentDetail {
   document: AdminDocument;
   latest_job?: ParseJobSummary;
@@ -272,6 +498,53 @@ export async function retryAdminDocument(docId: string): Promise<AdminDocument> 
   return fetchJson(`/api/admin/documents/${docId}/retry`, { method: "POST" });
 }
 
+export interface ReprocessDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  reused_existing_parse: boolean;
+}
+
+export interface ExcludeFromSearchResponse {
+  document_id: string;
+  status: string;
+  es_deleted_chunks: number;
+}
+
+export interface SendToOcrResponse {
+  document_id: string;
+  ocr_job_id: string;
+  parse_status: string;
+  ocr_status: string;
+}
+
+export interface ReplaceDocumentFileResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  title: string;
+  file_type: string;
+  file_sha256: string;
+  storage_key: string;
+}
+
+export async function forceIndexAdminDocument(docId: string): Promise<ReprocessDocumentResponse> {
+  return fetchJson(`/api/admin/documents/${docId}/force-index`, { method: "POST" });
+}
+
+export async function excludeAdminDocumentFromSearch(docId: string): Promise<ExcludeFromSearchResponse> {
+  return fetchJson(`/api/admin/documents/${docId}/exclude-from-search`, { method: "POST" });
+}
+
+export async function sendAdminDocumentToOcr(docId: string): Promise<SendToOcrResponse> {
+  return fetchJson(`/api/admin/documents/${docId}/send-to-ocr`, { method: "POST" });
+}
+
 export async function retryAdminDocuments(docIds: string[]): Promise<{ retried: number }> {
   return fetchJson("/api/admin/documents/retry", {
     method: "POST",
@@ -298,7 +571,28 @@ export function adminDocumentPagePdfUrl(docId: string, page: number): string {
   return `${BASE}/api/admin/documents/${docId}/pages/${page}/pdf`;
 }
 
+export function filePreviewPagePdfUrl(docId: string, page: number): string {
+  return `${BASE}/api/files/${docId}/preview/pages/${page}/pdf`;
+}
+
+export function filePreviewContentUrl(docId: string): string {
+  return `${BASE}/api/files/${docId}/preview/content`;
+}
+
+export async function getFilePreview(docId: string): Promise<FilePreviewResponse> {
+  return fetchJson(`/api/files/${docId}/preview`);
+}
+
+export async function getFilePreviewUrl(docId: string): Promise<FilePreviewUrlResponse> {
+  return fetchJson(`/api/files/${docId}/preview-url`);
+}
+
+export async function getFilePreviewManifest(docId: string): Promise<FilePreviewManifest> {
+  return fetchJson(`/api/files/${docId}/preview/manifest`);
+}
+
 const originalBlobCache = new Map<string, Promise<Blob>>();
+const filePreviewBlobCache = new Map<string, Promise<Blob>>();
 
 export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blob> {
   const cached = originalBlobCache.get(docId);
@@ -318,6 +612,29 @@ export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blo
   originalBlobCache.set(docId, promise);
   promise.catch(() => {
     originalBlobCache.delete(docId);
+  });
+
+  return promise;
+}
+
+export async function fetchFilePreviewBlob(docId: string): Promise<Blob> {
+  const cached = filePreviewBlobCache.get(docId);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const response = await fetch(filePreviewContentUrl(docId), {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "Unknown error");
+      throw new Error(`API error ${response.status}: ${text}`);
+    }
+    return response.blob();
+  })();
+
+  filePreviewBlobCache.set(docId, promise);
+  promise.catch(() => {
+    filePreviewBlobCache.delete(docId);
   });
 
   return promise;
@@ -350,6 +667,24 @@ export async function uploadAdminDocument(kbId: string, file: File): Promise<Adm
   const uploaded = (await response.json()) as UploadDocumentResponse;
   const detail = await getAdminDocument(uploaded.document_id);
   return detail.document;
+}
+
+export async function replaceAdminDocumentFile(
+  docId: string,
+  file: File
+): Promise<ReplaceDocumentFileResponse> {
+  const form = new FormData();
+  form.set("file", file);
+  const response = await fetch(`${BASE}/api/admin/documents/${docId}/replace-file`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: form,
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => "Unknown error");
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+  return response.json() as Promise<ReplaceDocumentFileResponse>;
 }
 
 // Cloud-side aliases for backward compatibility

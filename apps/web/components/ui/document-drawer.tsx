@@ -22,7 +22,7 @@ export function DocumentDrawer({
   onRetry?: () => void;
   actions?: ReactNode;
 }) {
-  const [activeTab, setActiveTab] = useState(1);
+  const [activeTab, setActiveTab] = useState(0);
   const doc = detail?.document;
   const job = detail?.latest_job;
 
@@ -186,11 +186,15 @@ export function DocumentDrawer({
   );
 }
 
-export function statusLabel(status: string): "已完成" | "解析中" | "待重建" | "失败" {
+export function statusLabel(
+  status: string
+): "已完成" | "解析中" | "待重建" | "失败" | "OCR中" | "已排除" {
   if (status === "parsed" || status === "indexed" || status === "cleaned" || status === "chunked") {
     return "已完成";
   }
   if (status === "parse_failed") return "失败";
+  if (status === "ocr_pending") return "OCR中";
+  if (status === "excluded_from_search") return "已排除";
   if (status === "parse_low_confidence") return "待重建";
   return "解析中";
 }

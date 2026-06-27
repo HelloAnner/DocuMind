@@ -130,10 +130,10 @@ impl AgentKernel {
         let mode_reason: String;
         let mut no_answer_reason = None;
         let mut prompt_versions = PromptVersions {
-            persona: "persona-v2".to_string(),
-            guardrail: "grounded-guardrail-v2".to_string(),
-            mode: format!("mode-{mode}-v2"),
-            task: "grounded-task-v2".to_string(),
+            persona: "persona-v1".to_string(),
+            guardrail: "grounded-guardrail-v1".to_string(),
+            mode: format!("mode-{mode}-v1"),
+            task: "grounded-task-v1".to_string(),
         };
 
         if rewrite.needs_clarification {
@@ -219,16 +219,13 @@ impl AgentKernel {
                 .collect();
 
             if filtered_reranked.is_empty() {
-                mode_reason = "no evidence: fallback to conversational response".to_string();
-                no_answer_reason = None;
-                answer_stream = self
-                    .answer_generator
-                    .chat(
-                        req.original_query.clone(),
-                        req.history.clone(),
-                        req.options.generation.clone(),
-                    )
-                    .await?;
+                mode_reason = "no evidence: no relevant chunks above threshold".to_string();
+                no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
+                answer_stream = single_text_stream(
+                    "文档中未找到与该问题直接相关的信息。".to_string(),
+                    Confidence::Low,
+                    Some(NoAnswerReason::NoRelevantChunks),
+                );
             } else {
                 mode_reason = format!("selected mode {mode} based on query intent");
                 evidence = self
@@ -278,6 +275,7 @@ impl AgentKernel {
         }
 
         let trace = AgentTrace {
+            mode,
             mode_reason,
             rewritten_query: Some(rewrite.rewritten_query.clone()),
             keywords: rewrite.keywords.clone(),

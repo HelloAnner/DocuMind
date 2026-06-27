@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::agent::AgentTrace;
+use crate::models::agent::{AgentTrace, CitationOutput};
 use crate::models::citation::Citation;
 use crate::models::conversation::{ConversationListResponse, ConversationSession};
 use crate::models::feedback::Feedback;
@@ -64,6 +64,12 @@ pub trait ConversationRepository: Send + Sync {
     ) -> anyhow::Result<Option<AgentTrace>>;
 
     async fn doc_version_hash(&self, tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String>;
+    async fn citations_valid_for_scope(
+        &self,
+        tenant_id: Uuid,
+        kb_ids: &[Uuid],
+        citations: &[CitationOutput],
+    ) -> anyhow::Result<bool>;
 
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()>;
 }

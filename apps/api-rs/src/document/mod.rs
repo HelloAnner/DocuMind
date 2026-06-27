@@ -6,7 +6,7 @@ use std::io::{Cursor, Read};
 use uuid::Uuid;
 use zip::ZipArchive;
 
-use crate::models::{NormalizedBBox, SourceAnchor};
+use crate::models::{CellRange, CharRange, NormalizedBBox, SourceAnchor};
 
 pub mod chunking;
 pub mod cleaning;
@@ -16,6 +16,13 @@ pub use cleaning::{CleanStats, CleanedBlock, CLEANER_VERSION};
 
 pub const PARSER_VERSION: &str = "documind-parser@0.3.0";
 pub const SCHEMA_VERSION: &str = "parsed-document-v1";
+pub const MAX_OFFICE_ZIP_ENTRIES: usize = 10_000;
+pub const MAX_OFFICE_UNCOMPRESSED_BYTES: u64 = 500 * 1024 * 1024;
+pub const MAX_OFFICE_ENTRY_BYTES: u64 = 100 * 1024 * 1024;
+pub const MAX_OFFICE_XML_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_OFFICE_COMPRESSION_RATIO: u64 = 200;
+pub const MAX_PDF_PAGES: usize = 1_000;
+pub const MAX_PDF_PAGE_TEXT_CHARS: usize = 50_000;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -251,6 +258,7 @@ fn parse_docx(
 
     let mut blocks = Vec::new();
     let mut tables = Vec::new();
+    let mut anchors = Vec::new();
     let mut heading_path: Vec<(i32, String)> = Vec::new();
 
     for child in body.children().filter(|n| n.is_element()) {
@@ -335,6 +343,14 @@ fn parse_docx(
             _ => {}
         }
     }
+    attach_table_cell_anchors(
+        doc_id,
+        parse_job_id,
+        "docx",
+        &mut blocks,
+        &tables,
+        &mut anchors,
+    );
 
     Ok(finalize_parsed(
         doc_id,
@@ -344,7 +360,7 @@ fn parse_docx(
         None,
         blocks,
         tables,
-        vec![],
+        anchors,
     ))
 }
 
@@ -375,6 +391,7 @@ fn parse_pptx(
 
     let mut blocks = Vec::new();
     let mut tables = Vec::new();
+    let mut anchors = Vec::new();
     let mut warnings = Vec::new();
 
     for (slide_idx, name) in slide_names.iter().enumerate() {
@@ -468,6 +485,14 @@ fn parse_pptx(
             warnings.push(format!("slide_{}_empty", slide_idx + 1));
         }
     }
+    attach_table_cell_anchors(
+        doc_id,
+        parse_job_id,
+        "pptx",
+        &mut blocks,
+        &tables,
+        &mut anchors,
+    );
 
     let mut parsed = finalize_parsed(
         doc_id,
@@ -477,7 +502,7 @@ fn parse_pptx(
         Some(slide_names.len() as i32),
         blocks,
         tables,
-        vec![],
+        anchors,
     );
     parsed.warnings.extend(warnings);
     Ok(parsed)
@@ -489,6 +514,15 @@ fn parse_pdf(
     title: &str,
     bytes: &[u8],
 ) -> Result<ParsedDocument> {
+    let page_sizes = pdf_page_sizes(bytes).unwrap_or_default();
+    if page_sizes.len() > MAX_PDF_PAGES {
+        bail!(
+            "pdf_page_count_exceeded:{}>{}",
+            page_sizes.len(),
+            MAX_PDF_PAGES
+        );
+    }
+
     let pages = pdf_extract::extract_text_from_mem_by_pages(bytes)
         .or_else(|_| {
             pdf_extract::extract_text_from_mem(bytes).map(|text| {
@@ -501,18 +535,22 @@ fn parse_pdf(
         })
         .context("pdf_text_extract_failed")?;
 
-    let page_sizes = pdf_page_sizes(bytes).unwrap_or_default();
+    if pages.len() > MAX_PDF_PAGES {
+        bail!("pdf_page_count_exceeded:{}>{}", pages.len(), MAX_PDF_PAGES);
+    }
+
     let mut blocks = Vec::new();
     let mut anchors = Vec::new();
     let mut warnings = Vec::new();
 
     for (page_idx, page_text) in pages.iter().enumerate() {
         let page = (page_idx + 1) as i32;
+        let page_chars = page_text.chars().count();
+        if page_chars > MAX_PDF_PAGE_TEXT_CHARS {
+            bail!("pdf_page_text_chars_exceeded:{page}:{page_chars}>{MAX_PDF_PAGE_TEXT_CHARS}");
+        }
         let paragraphs = split_paragraphs(page_text);
-        let _page_height = page_sizes
-            .get(page_idx)
-            .map(|(_, h)| *h)
-            .unwrap_or(842.0);
+        let _page_height = page_sizes.get(page_idx).map(|(_, h)| *h).unwrap_or(842.0);
         let band_height = if paragraphs.is_empty() {
             0.0
         } else {
@@ -639,9 +677,9 @@ fn parse_plain_text(
     let text = String::from_utf8(bytes.to_vec()).context("invalid_utf8_text")?;
     let mut blocks = Vec::new();
     let mut anchors = Vec::new();
-    for paragraph in split_paragraphs(&text) {
+    for (paragraph, start, end) in split_paragraphs_with_ranges(&text) {
         let block_id = Uuid::new_v4();
-        let anchor = SourceAnchor::structural(
+        let mut anchor = SourceAnchor::structural(
             doc_id,
             parse_job_id,
             Uuid::nil(),
@@ -653,6 +691,7 @@ fn parse_plain_text(
             json!({"format": "txt", "index": blocks.len()}),
             &paragraph,
         );
+        anchor.char_range = Some(CharRange { start, end });
         let anchor_id = anchor.anchor_id;
         anchors.push(anchor);
         blocks.push(ParsedBlock {
@@ -859,9 +898,18 @@ fn parse_markdown(
     );
 
     let mut anchors = Vec::new();
+    attach_table_cell_anchors(
+        doc_id,
+        parse_job_id,
+        "md",
+        &mut blocks,
+        &tables,
+        &mut anchors,
+    );
+    let mut char_cursor = 0usize;
     for block in &mut blocks {
         if block.anchor_ids.is_empty() {
-            let anchor = SourceAnchor::structural(
+            let mut anchor = SourceAnchor::structural(
                 doc_id,
                 parse_job_id,
                 Uuid::nil(),
@@ -873,6 +921,9 @@ fn parse_markdown(
                 block.source_ref.clone(),
                 &block.text,
             );
+            if let Some((start, end)) = find_text_char_range(&text, &block.text, &mut char_cursor) {
+                anchor.char_range = Some(CharRange { start, end });
+            }
             block.anchor_ids.push(anchor.anchor_id);
             anchors.push(anchor);
         }
@@ -888,6 +939,80 @@ fn parse_markdown(
         tables,
         anchors,
     ))
+}
+
+fn attach_table_cell_anchors(
+    doc_id: Uuid,
+    parse_job_id: Uuid,
+    format: &str,
+    blocks: &mut [ParsedBlock],
+    tables: &[ParsedTable],
+    anchors: &mut Vec<SourceAnchor>,
+) {
+    for block in blocks.iter_mut().filter(|block| block.table_id.is_some()) {
+        if block
+            .anchor_ids
+            .iter()
+            .any(|anchor_id| anchors.iter().any(|anchor| anchor.anchor_id == *anchor_id))
+        {
+            continue;
+        }
+        let Some(table_id) = block.table_id else {
+            continue;
+        };
+        let Some(table) = tables.iter().find(|table| table.table_id == table_id) else {
+            continue;
+        };
+        let cell_range = table_cell_range(table);
+        let source_ref = json!({
+            "format": format,
+            "table_index": table.table_index,
+            "table_id": table.table_id,
+            "kind": "table_cell_range",
+            "cell_range": {
+                "row_start": cell_range.row_start,
+                "row_end": cell_range.row_end,
+                "col_start": cell_range.col_start,
+                "col_end": cell_range.col_end,
+            }
+        });
+        let anchor = SourceAnchor::table_cell_range(
+            doc_id,
+            parse_job_id,
+            Uuid::nil(),
+            format,
+            block.block_id,
+            table.table_id,
+            table.page_start.or(block.page_start),
+            table.slide_index.or(block.slide_index),
+            cell_range,
+            source_ref,
+            &table.markdown,
+        );
+        block.anchor_ids.push(anchor.anchor_id);
+        anchors.push(anchor);
+    }
+}
+
+fn table_cell_range(table: &ParsedTable) -> CellRange {
+    let row_end = table
+        .cells
+        .iter()
+        .map(|cell| cell.row_index + cell.rowspan.max(1) - 1)
+        .max()
+        .unwrap_or(0);
+    let col_end = table
+        .cells
+        .iter()
+        .map(|cell| cell.col_index + cell.colspan.max(1) - 1)
+        .max()
+        .unwrap_or(0);
+    CellRange {
+        row_start: 0,
+        row_end,
+        col_start: 0,
+        col_end,
+    }
 }
 
 fn finalize_parsed(
@@ -1023,16 +1148,87 @@ fn zip_entry_names(bytes: &[u8]) -> Result<Vec<String>> {
 }
 
 fn open_zip(bytes: &[u8]) -> Result<ZipArchive<Cursor<&[u8]>>> {
-    ZipArchive::new(Cursor::new(bytes)).context("invalid_zip_container")
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).context("invalid_zip_container")?;
+    validate_office_zip(&mut archive)?;
+    Ok(archive)
 }
 
 fn read_zip_text(archive: &mut ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<String> {
     let mut file = archive
         .by_name(name)
         .with_context(|| format!("missing_zip_entry:{name}"))?;
+    if file.size() > MAX_OFFICE_XML_BYTES {
+        bail!(
+            "zip_xml_entry_too_large:{name}:{}>{}",
+            file.size(),
+            MAX_OFFICE_XML_BYTES
+        );
+    }
     let mut text = String::new();
     file.read_to_string(&mut text)?;
     Ok(text)
+}
+
+fn validate_office_zip(archive: &mut ZipArchive<Cursor<&[u8]>>) -> Result<()> {
+    if archive.len() > MAX_OFFICE_ZIP_ENTRIES {
+        bail!(
+            "zip_entry_count_exceeded:{}>{}",
+            archive.len(),
+            MAX_OFFICE_ZIP_ENTRIES
+        );
+    }
+
+    let mut total_uncompressed = 0_u64;
+    for index in 0..archive.len() {
+        let file = archive
+            .by_index(index)
+            .with_context(|| format!("invalid_zip_entry:{index}"))?;
+        let name = file.name().to_string();
+        if !is_safe_zip_entry_name(&name) {
+            bail!("zip_entry_name_unsafe:{name}");
+        }
+
+        let uncompressed = file.size();
+        let compressed = file.compressed_size();
+        if uncompressed > MAX_OFFICE_ENTRY_BYTES {
+            bail!("zip_entry_too_large:{name}:{uncompressed}>{MAX_OFFICE_ENTRY_BYTES}");
+        }
+        total_uncompressed = total_uncompressed
+            .checked_add(uncompressed)
+            .ok_or_else(|| anyhow!("zip_uncompressed_size_overflow"))?;
+        if total_uncompressed > MAX_OFFICE_UNCOMPRESSED_BYTES {
+            bail!(
+                "zip_uncompressed_size_exceeded:{total_uncompressed}>{MAX_OFFICE_UNCOMPRESSED_BYTES}"
+            );
+        }
+        if uncompressed > 0 && compressed == 0 {
+            bail!("zip_entry_invalid_compressed_size:{name}");
+        }
+        if compressed > 0 && uncompressed > compressed.saturating_mul(MAX_OFFICE_COMPRESSION_RATIO)
+        {
+            bail!(
+                "zip_compression_ratio_exceeded:{name}:{uncompressed}/{compressed}>{MAX_OFFICE_COMPRESSION_RATIO}"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn is_safe_zip_entry_name(name: &str) -> bool {
+    if name.trim().is_empty()
+        || name.starts_with('/')
+        || name.starts_with('\\')
+        || name.contains('\0')
+        || name.contains(':')
+    {
+        return false;
+    }
+    let normalized = name.replace('\\', "/");
+    normalized
+        .trim_end_matches('/')
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != "..")
 }
 
 fn collect_text(node: roxmltree::Node) -> String {
@@ -1096,6 +1292,78 @@ fn split_paragraphs(text: &str) -> Vec<String> {
             }
         })
         .collect()
+}
+
+fn split_paragraphs_with_ranges(text: &str) -> Vec<(String, i32, i32)> {
+    let mut out = Vec::new();
+    let mut byte_start = 0usize;
+    for part in text.split_inclusive("\n\n") {
+        let part_without_separator = part.strip_suffix("\n\n").unwrap_or(part);
+        push_paragraph_with_range(text, part_without_separator, byte_start, &mut out);
+        byte_start += part.len();
+    }
+    if !text.ends_with("\n\n") && byte_start < text.len() {
+        push_paragraph_with_range(text, &text[byte_start..], byte_start, &mut out);
+    }
+    out
+}
+
+fn push_paragraph_with_range(
+    full_text: &str,
+    part: &str,
+    part_byte_start: usize,
+    out: &mut Vec<(String, i32, i32)>,
+) {
+    let mut clean_lines = Vec::new();
+    let mut first_line_start: Option<usize> = None;
+    let mut last_line_end: Option<usize> = None;
+    let mut line_byte_start = part_byte_start;
+    for line in part.split_inclusive('\n') {
+        let raw_line = line.strip_suffix('\n').unwrap_or(line);
+        let leading = raw_line.len() - raw_line.trim_start().len();
+        let trimmed = raw_line.trim();
+        if !trimmed.is_empty() {
+            let start = line_byte_start + leading;
+            let end = start + trimmed.len();
+            first_line_start.get_or_insert(start);
+            last_line_end = Some(end);
+            clean_lines.push(trimmed);
+        }
+        line_byte_start += line.len();
+    }
+
+    if clean_lines.is_empty() {
+        return;
+    }
+    let start = first_line_start.unwrap_or(part_byte_start);
+    let end = last_line_end.unwrap_or(start);
+    out.push((
+        clean_lines.join(" "),
+        char_index_at_byte(full_text, start),
+        char_index_at_byte(full_text, end),
+    ));
+}
+
+fn find_text_char_range(full_text: &str, needle: &str, cursor: &mut usize) -> Option<(i32, i32)> {
+    let needle = needle.trim();
+    if needle.is_empty() {
+        return None;
+    }
+    let haystack = &full_text[*cursor..];
+    let found = haystack
+        .find(needle)
+        .or_else(|| haystack.find(&needle.replace('\n', " ")))?;
+    let start = *cursor + found;
+    let end = start + needle.len();
+    *cursor = end;
+    Some((
+        char_index_at_byte(full_text, start),
+        char_index_at_byte(full_text, end),
+    ))
+}
+
+fn char_index_at_byte(text: &str, byte_index: usize) -> i32 {
+    text[..byte_index.min(text.len())].chars().count() as i32
 }
 
 fn table_markdown(headers: &[String], rows: &[Vec<String>]) -> String {

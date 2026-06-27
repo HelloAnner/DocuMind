@@ -19,7 +19,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { isCitationDeleted } from "./citation-card";
+import {
+  citationLocationStatus,
+  citationLocationStatusLabel,
+  isCitationDeleted,
+} from "./citation-card";
 import { AnswerContent } from "./answer-content";
 import type { Citation, Message, RuntimeToolCall } from "@/lib/types";
 import type { PipelineStage } from "@/hooks/use-conversation-manager";
@@ -32,6 +36,7 @@ function CitationChip({
   onClick: (c: Citation) => void;
 }) {
   const deleted = isCitationDeleted(citation);
+  const locationStatus = citationLocationStatus(citation);
   return (
     <button
       type="button"
@@ -45,6 +50,9 @@ function CitationChip({
           · 第 {citation.page_range.join("-")} 页
         </span>
       )}
+      <span className={`dm-location-badge dm-location-badge-${locationStatus}`}>
+        {citationLocationStatusLabel(citation)}
+      </span>
       {deleted && <span className="dm-deleted-source-badge">原文已删除</span>}
     </button>
   );

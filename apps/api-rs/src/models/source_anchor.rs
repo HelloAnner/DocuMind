@@ -150,6 +150,41 @@ impl SourceAnchor {
             anchor_quality: "structural".to_string(),
         }
     }
+
+    /// 为表格的单元格范围生成 structural anchor。
+    pub fn table_cell_range(
+        doc_id: Uuid,
+        parse_job_id: Uuid,
+        tenant_id: Uuid,
+        format: &str,
+        block_id: Uuid,
+        table_id: Uuid,
+        page: Option<i32>,
+        slide: Option<i32>,
+        cell_range: CellRange,
+        source_ref: Value,
+        text: &str,
+    ) -> Self {
+        Self {
+            anchor_id: Uuid::new_v4(),
+            doc_id,
+            parse_job_id,
+            tenant_id,
+            format: format.to_string(),
+            kind: "table_cell_range".to_string(),
+            page,
+            slide,
+            block_id: Some(block_id),
+            table_id: Some(table_id),
+            cell_range: Some(cell_range),
+            char_range: None,
+            bbox: None,
+            source_ref,
+            text: text.to_string(),
+            text_hash: Some(hex_hash(text)),
+            anchor_quality: "structural".to_string(),
+        }
+    }
 }
 
 fn hex_hash(text: &str) -> String {

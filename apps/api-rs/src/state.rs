@@ -10,12 +10,16 @@ use crate::agent::{
 use crate::config::AppConfig;
 use crate::llm::openai::{OpenAiClient, OpenAiClientConfig};
 use crate::llm::OpenAiAnswerGenerator;
-use crate::rag::{HttpReranker, MockReranker, MockRetriever, PgRetriever, SimpleContextAssembler};
+use crate::rag::{
+    EmbeddingClientConfig, EsRetriever, HttpReranker, MockReranker, MockRetriever, PgRetriever,
+    SimpleContextAssembler,
+};
 use crate::repositories::{
     AnswerCache, InMemoryAnswerCache, InMemoryConversationRepository, RedisAnswerCache,
     SqlxConversationRepository,
 };
 use crate::storage::{build_storage, ObjectStorage};
+use tracing::warn;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -35,6 +39,9 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
     ) = if let Some(ref url) = config.database_url {
         let pool = sqlx::PgPool::connect(url).await?;
         crate::auth::seed_identity(&pool, &config).await?;
+        if let Err(err) = crate::api::documents::recover_interrupted_document_jobs(&pool).await {
+            warn!(error = %err, "failed to recover interrupted document jobs");
+        }
         (
             Arc::new(SqlxConversationRepository::new(pool.clone())),
             Some(pool),
@@ -69,7 +76,15 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
             Arc::new(MockAnswerGenerator::new())
         };
 
-    let retriever: Arc<dyn crate::rag::Retriever> = if let Some(pool) = &db_pool {
+    let retriever: Arc<dyn crate::rag::Retriever> = if let Some(es_url) = &config.elasticsearch_url
+    {
+        let embedding_config = EmbeddingClientConfig::try_from(&config.rag.embedding).ok();
+        Arc::new(EsRetriever::new(
+            es_url.clone(),
+            config.rag.embedding.index_name.clone(),
+            embedding_config,
+        )?)
+    } else if let Some(pool) = &db_pool {
         Arc::new(PgRetriever::new(pool.clone()))
     } else {
         Arc::new(MockRetriever::new())

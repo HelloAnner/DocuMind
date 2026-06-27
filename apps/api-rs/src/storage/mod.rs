@@ -164,7 +164,7 @@ impl ObjectStorage for S3Storage {
             .get_object()
             .bucket(&self.bucket)
             .key(key)
-            .range(format!("bytes={}-{}" , start, end.saturating_sub(1)))
+            .range(format!("bytes={}-{}", start, end.saturating_sub(1)))
             .send()
             .await
             .with_context(|| format!("failed to get range s3://{}/{}", self.bucket, key))?
@@ -245,7 +245,8 @@ impl ObjectStorage for LocalStorage {
         let mut buffer = vec![0_u8; len];
         let mut read = 0_usize;
         while read < len {
-            let n = file.read(&mut buffer[read..])
+            let n = file
+                .read(&mut buffer[read..])
                 .await
                 .with_context(|| format!("failed to read local file: {}", path.display()))?;
             if n == 0 {

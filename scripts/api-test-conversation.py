@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -17,6 +18,13 @@ BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8089").rstrip("/")
 LOGIN_EMAIL = os.environ.get("LOGIN_EMAIL", "Anner")
 LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD", "1")
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "180"))
+PG_SSH_HOST = os.environ.get("PG_SSH_HOST", "documind")
+PG_CONTAINER = os.environ.get("PG_CONTAINER", "documind-postgres")
+PG_USER = os.environ.get("PG_USER", "documind")
+PG_DATABASE = os.environ.get("PG_DATABASE", "documind_dev")
+ES_SSH_HOST = os.environ.get("ES_SSH_HOST", PG_SSH_HOST)
+ELASTICSEARCH_URL = os.environ.get("ELASTICSEARCH_URL", "http://127.0.0.1:8104").rstrip("/")
+ES_INDEX = os.environ.get("ES_INDEX_CHUNKS", os.environ.get("ES_INDEX", "chunks"))
 CHECK_COUNT = 0
 
 
@@ -207,6 +215,10 @@ def poll_indexed(doc_id, token):
 
 
 def validate_pg_embeddings(doc_ids):
+    if os.environ.get("SKIP_PG_VALIDATION") == "1":
+        print("WARN: skipping PG embedding validation because SKIP_PG_VALIDATION=1")
+        return {}
+
     sql_doc_ids = ",".join(f"'{doc_id}'" for doc_id in doc_ids)
     sql = f"""
 SET search_path TO documind, public;
@@ -218,34 +230,13 @@ WHERE doc_id IN ({sql_doc_ids})
 GROUP BY doc_id
 ORDER BY doc_id;
 """
-    try:
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "documind-postgres",
-                "psql",
-                "-U",
-                "documind",
-                "-d",
-                "documind_dev",
-                "-qAtX",
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-c",
-                sql,
-            ],
-            check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            universal_newlines=True,
-        )
-    except Exception as exc:
-        print(f"WARN: skipping PG embedding validation: {exc}")
-        return
+    result = run_pg_query(sql)
 
     seen = set()
+    counts_by_doc = {}
     for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
         doc_id, chunks, embeddings = line.split("|")
         chunks = int(chunks)
         embeddings = int(embeddings)
@@ -256,10 +247,162 @@ ORDER BY doc_id;
                 "embeddings": embeddings,
             })
         seen.add(doc_id)
+        counts_by_doc[doc_id] = {"chunks": chunks, "embeddings": embeddings}
     missing = set(doc_ids) - seen
     if missing:
         fail("PG validation missed documents", sorted(missing))
     ok("PostgreSQL chunks and vector embeddings are present")
+    return counts_by_doc
+
+
+def run_pg_query(sql):
+    commands = []
+    if PG_SSH_HOST:
+        remote = " ".join(
+            [
+                "docker",
+                "exec",
+                shlex.quote(PG_CONTAINER),
+                "psql",
+                "-U",
+                shlex.quote(PG_USER),
+                "-d",
+                shlex.quote(PG_DATABASE),
+                "-qAtX",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                shlex.quote(sql),
+            ]
+        )
+        commands.append(["ssh", PG_SSH_HOST, f"bash -lc {shlex.quote(remote)}"])
+    commands.append(
+        [
+            "docker",
+            "exec",
+            PG_CONTAINER,
+            "psql",
+            "-U",
+            PG_USER,
+            "-d",
+            PG_DATABASE,
+            "-qAtX",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            sql,
+        ]
+    )
+
+    errors = []
+    for command in commands:
+        try:
+            return subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+        except subprocess.CalledProcessError as exc:
+            errors.append(
+                {
+                    "command": command,
+                    "error": str(exc),
+                    "stdout": exc.stdout,
+                    "stderr": exc.stderr,
+                }
+            )
+        except Exception as exc:
+            errors.append({"command": command, "error": str(exc)})
+    fail("PG embedding validation unavailable", errors)
+
+
+def validate_es_embeddings(doc_ids, pg_counts):
+    if os.environ.get("SKIP_ES_VALIDATION") == "1":
+        print("WARN: skipping ES embedding validation because SKIP_ES_VALIDATION=1")
+        return
+    if not pg_counts:
+        fail("ES validation requires PG counts; do not skip PG validation")
+
+    deadline = time.time() + 30
+    failures = {}
+    while time.time() < deadline:
+        failures = {}
+        for doc_id in doc_ids:
+            expected = pg_counts[doc_id]["embeddings"]
+            result = run_es_query({"query": {"term": {"doc_id": doc_id}}, "size": 1})
+            total = result.get("hits", {}).get("total", {})
+            hit_count = int(total.get("value", 0) if isinstance(total, dict) else total)
+            first_hit = (result.get("hits", {}).get("hits") or [{}])[0]
+            embedding = first_hit.get("_source", {}).get("embedding") or []
+            if hit_count != expected or not embedding:
+                failures[doc_id] = {
+                    "expected_embeddings": expected,
+                    "es_hits": hit_count,
+                    "embedding_dim": len(embedding),
+                }
+        if not failures:
+            ok("Elasticsearch indexed chunks match PostgreSQL embeddings")
+            return
+        time.sleep(2)
+
+    fail("Elasticsearch validation failed", failures)
+
+
+def run_es_query(payload):
+    body = json.dumps(payload, ensure_ascii=False)
+    url = f"{ELASTICSEARCH_URL}/{ES_INDEX}/_search"
+    commands = []
+    if ES_SSH_HOST:
+        remote = " ".join(
+            [
+                "curl",
+                "-fsS",
+                "-H",
+                shlex.quote("Content-Type: application/json"),
+                "-d",
+                shlex.quote(body),
+                shlex.quote(url),
+            ]
+        )
+        commands.append(["ssh", ES_SSH_HOST, f"bash -lc {shlex.quote(remote)}"])
+
+    errors = []
+    for command in commands:
+        try:
+            result = subprocess.run(
+                command,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True,
+            )
+            return json.loads(result.stdout)
+        except subprocess.CalledProcessError as exc:
+            errors.append(
+                {
+                    "command": command,
+                    "error": str(exc),
+                    "stdout": exc.stdout,
+                    "stderr": exc.stderr,
+                }
+            )
+        except Exception as exc:
+            errors.append({"command": command, "error": str(exc)})
+
+    req = urllib.request.Request(
+        url,
+        data=body.encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as exc:
+        errors.append({"command": ["POST", url], "error": str(exc)})
+    fail("Elasticsearch validation unavailable", errors)
 
 
 def sse_post(path, payload, token):
@@ -494,7 +637,8 @@ def main():
             ok(f"document detail persisted after indexing: {title}")
         ok("documents uploaded and indexed through API")
 
-    validate_pg_embeddings(doc_ids)
+    pg_counts = validate_pg_embeddings(doc_ids)
+    validate_es_embeddings(doc_ids, pg_counts)
 
     conversations_before = http_json("GET", "/api/conversations?limit=50", token=token)
     ok("conversation history list is readable before new conversations")

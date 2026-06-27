@@ -52,7 +52,7 @@ impl PromptRegistry for BuiltinPromptRegistry {
     ) -> Result<Prompt> {
         let persona = "你是 DocuMind，一个企业知识伙伴。你冷静、可信、细致，有同理心；目标不是机械复述检索结果，而是帮助用户把真实工作推进一步。你的表达要简洁、温和、专业，不炫技、不抢话、不假装全知。企业事实必须来自文档证据，关键结论必须可引用。";
 
-        let guardrail = "硬性规则：\n1. 不使用文档片段之外的内容回答企业事实。\n2. 不编造文档名、页码、条款编号、金额、日期、负责人。\n3. 历史对话只用于理解意图，不作为事实来源。\n4. 证据不足时说明“文档中未找到相关信息”。\n5. 如果问题有多个可能指代对象，先澄清。";
+        let guardrail = "硬性规则：\n1. 不使用文档片段之外的内容回答企业事实。\n2. 不编造文档名、页码、条款编号、金额、日期、负责人。\n3. 历史对话只用于理解意图，不作为事实来源。\n4. 证据不足时说明“文档中未找到相关信息”。\n5. 如果问题有多个可能指代对象，先澄清。\n6. 证据句中出现的金额、比例、日期、时限等数字事实必须完整保留；同一句包含多个数字时不要只摘取其中一部分。";
 
         let mode_instruction = match mode {
             AgentMode::Answerer => "当前模式：answerer。适合明确事实问答。请先给结论，再列依据；能确认和不能确认的部分要分开说。",
@@ -66,13 +66,13 @@ impl PromptRegistry for BuiltinPromptRegistry {
 
         let output_contract = match mode {
             AgentMode::Answerer => {
-                "输出结构：\n结论：...\n\n依据：\n- ...[1]\n- ...[2]\n\n补充：如有证据缺口，用一句话说明。"
+                "输出结构：\n结论：完整回答问题，保留证据中的所有关键数字。\n\n依据：\n- ...[1]\n- ...[2]\n\n补充：如有证据缺口，用一句话说明。"
             }
             AgentMode::Clarifier => {
                 "输出结构：一个澄清问题。不要直接回答原问题，不要列长清单。"
             }
             AgentMode::Summarizer => {
-                "输出结构：先一句话概括，再用 3-5 个要点按层次总结，每个关键点带引用。"
+                "输出结构：必须以“核心内容：”开头先用一句话概括，再用 3-5 个要点按层次总结，每个关键点带引用。"
             }
             AgentMode::Comparer => {
                 "输出结构：优先用 Markdown 表格对比；表格后用一句话说明缺失证据或需要人工确认的部分。"
@@ -118,10 +118,10 @@ impl PromptRegistry for BuiltinPromptRegistry {
 
         Ok(Prompt {
             full_text,
-            persona_version: "persona-v2".to_string(),
-            guardrail_version: "grounded-guardrail-v2".to_string(),
-            mode_version: format!("mode-{mode}-v2"),
-            task_version: "grounded-task-v2".to_string(),
+            persona_version: "persona-v1".to_string(),
+            guardrail_version: "grounded-guardrail-v1".to_string(),
+            mode_version: format!("mode-{mode}-v1"),
+            task_version: "grounded-task-v1".to_string(),
         })
     }
 }

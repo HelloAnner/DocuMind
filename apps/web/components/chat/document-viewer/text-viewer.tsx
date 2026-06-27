@@ -1,13 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
 
 interface TextViewerProps {
   blobUrl: string;
-  highlightText?: string;
+  charRange?: { start: number; end: number };
 }
 
-export function TextViewer({ blobUrl, highlightText }: TextViewerProps) {
+export function TextViewer({ blobUrl, charRange }: TextViewerProps) {
+  const highlightRef = useRef<HTMLSpanElement | null>(null);
   const [text, setText] = useState<string>("");
   const [error, setError] = useState(false);
 
@@ -29,36 +31,36 @@ export function TextViewer({ blobUrl, highlightText }: TextViewerProps) {
     };
   }, [blobUrl]);
 
+  useEffect(() => {
+    highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, [text, charRange?.start, charRange?.end]);
+
   if (error) return <div className="dm-document-error">文本加载失败</div>;
 
   return (
     <pre className="dm-text-viewer">
-      {highlightText ? renderHighlightedText(text, highlightText) : text}
+      {charRange ? renderCharRange(text, charRange, highlightRef) : text}
     </pre>
   );
 }
 
-function renderHighlightedText(text: string, highlightText: string) {
-  const terms = highlightText
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return text;
+function renderCharRange(
+  text: string,
+  charRange: { start: number; end: number },
+  highlightRef: MutableRefObject<HTMLSpanElement | null>
+) {
+  const chars = Array.from(text);
+  const start = Math.max(0, Math.min(charRange.start, chars.length));
+  const end = Math.max(start, Math.min(charRange.end, chars.length));
+  if (start === end) return text;
 
-  const pattern = new RegExp(`(${terms.map(escapeRegex).join("|")})`, "gi");
-  const parts = text.split(pattern);
-
-  return parts.map((part, index) =>
-    terms.some((t) => part.toLowerCase() === t.toLowerCase()) ? (
-      <span key={index} className="dm-citation-highlight">
-        {part}
+  return (
+    <>
+      {chars.slice(0, start).join("")}
+      <span ref={highlightRef} className="dm-citation-highlight">
+        {chars.slice(start, end).join("")}
       </span>
-    ) : (
-      part
-    )
+      {chars.slice(end).join("")}
+    </>
   );
-}
-
-function escapeRegex(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

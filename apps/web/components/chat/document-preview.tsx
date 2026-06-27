@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { fetchAdminDocumentOriginalBlob } from "@/lib/api";
+import { FileText } from "lucide-react";
+import { fetchFilePreviewBlob, getFilePreview } from "@/lib/api";
 import type { Citation } from "@/lib/types";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { DocumentViewer } from "./document-viewer";
@@ -47,75 +48,95 @@ function mimeTypeFromType(type: string, blob: Blob): string {
 }
 
 function targetPage(citation: Citation) {
-  return citation.anchor?.page ?? citation.page_range[0] ?? null;
+  return citation.anchor?.page ?? citation.anchor?.slide ?? citation.page_range[0] ?? null;
+}
+
+function locationStatus(citation: Citation) {
+  if (citation.source_status === "deleted") return "unavailable";
+  return citation.anchor?.location_status ?? "unavailable";
+}
+
+function locationStatusCopy(status: string) {
+  switch (status) {
+    case "exact":
+      return {
+        label: "精确定位",
+        detail: "已按原文锚点定位并高亮。",
+      };
+    case "structural_only":
+      return {
+        label: "结构定位",
+        detail: "当前格式没有可用视觉坐标，只能定位到原文结构块。",
+      };
+    case "page_only":
+      return {
+        label: "仅页码",
+        detail: "只能打开对应页，未获得可高亮的原文坐标。",
+      };
+    case "slide_only":
+      return {
+        label: "仅幻灯片",
+        detail: "只能打开对应幻灯片，未获得可高亮的原文坐标。",
+      };
+    default:
+      return {
+        label: "不可定位",
+        detail: "原文已删除、无权限或解析版本不可用。",
+      };
+  }
 }
 
 function citationAnchorBox(citation: Citation) {
   return citation.anchor?.bbox ?? null;
 }
 
-function citationSearchText(citation: Citation) {
-  const beforeFollowingContext = citation.quote.split("【下文】")[0] ?? citation.quote;
-  const normalized = beforeFollowingContext
-    .replace(/【上文】|【下文】/g, " ")
-    .replace(/标题路径[:：][^。！？\n]*/g, " ")
-    .replace(/页码[:：]\s*\d+/g, " ")
-    .trim();
-
-  const candidates = normalized
-    .split(/[。！？；;|\n]+/)
-    .map((segment) => segment.replace(/\s+/g, " ").trim())
-    .filter((segment) => segment.length >= 6 && /[A-Za-z0-9\u4e00-\u9fff]/.test(segment));
-
-  const chosen =
-    candidates
-      .slice()
-      .reverse()
-      .find((segment) => segment.length <= 90) ??
-    candidates[candidates.length - 1] ??
-    normalized.replace(/\s+/g, " ");
-  const chars = Array.from(chosen);
-  if (chars.length <= 80) return chosen;
-
-  const words = chosen.split(/\s+/).filter(Boolean);
-  const selected: string[] = [];
-  for (let index = words.length - 1; index >= 0; index -= 1) {
-    const next = [words[index], ...selected].join(" ");
-    if (Array.from(next).length > 80 && selected.length > 0) break;
-    selected.unshift(words[index]);
-  }
-  const compact = selected.join(" ");
-  return compact || chars.slice(-80).join("");
+function citationCharRange(citation: Citation) {
+  return citation.anchor?.char_range ?? null;
 }
 
 export function DocumentPreview({ citation }: DocumentPreviewProps) {
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const type = fileType(citation);
   const page = targetPage(citation);
+  const status = locationStatus(citation);
+  const statusCopy = locationStatusCopy(status);
   const anchorBox = useMemo(() => citationAnchorBox(citation), [citation]);
-  const searchText = useMemo(() => citationSearchText(citation), [citation]);
+  const exactAnchorBox = status === "exact" ? anchorBox : null;
+  const charRange = useMemo(() => citationCharRange(citation), [citation]);
+  const canOpenSource = status !== "unavailable";
 
   useEffect(() => {
     let revoked = false;
     let currentBlobUrl: string | undefined;
     setState({ status: "loading" });
 
-    // PDF 走服务端单页切片，不需要下载完整 Blob
-    if (type === "pdf") {
-      setState({
-        status: "ready",
-        blobUrl: "",
-        mimeType: "application/pdf",
-        fileName: citation.doc_title,
-      });
+    if (!canOpenSource) {
+      setState({ status: "failed", error: statusCopy.detail });
       return () => {
         revoked = true;
       };
     }
 
-    fetchAdminDocumentOriginalBlob(citation.doc_id)
-      .then((blob) => {
+    getFilePreview(citation.doc_id)
+      .then((preview) => {
         if (revoked) return;
+        if (preview.source_status === "unavailable") {
+          throw new Error("来源不可用");
+        }
+        if (type === "pdf" || preview.preview_type === "office_pdf") {
+          setState({
+            status: "ready",
+            blobUrl: "",
+            mimeType: "application/pdf",
+            fileName: preview.file_name || citation.doc_title,
+          });
+          return null;
+        }
+        return fetchFilePreviewBlob(citation.doc_id).then((blob) => ({ blob, preview }));
+      })
+      .then((result) => {
+        if (revoked || result == null) return;
+        const { blob, preview } = result;
         const mime = mimeTypeFromType(type, blob);
         const typedBlob = new Blob([blob], { type: mime });
         currentBlobUrl = URL.createObjectURL(typedBlob);
@@ -123,7 +144,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
           status: "ready",
           blobUrl: currentBlobUrl,
           mimeType: mime,
-          fileName: citation.doc_title,
+          fileName: preview.file_name || citation.doc_title,
         });
       })
       .catch((error: unknown) => {
@@ -139,17 +160,21 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
       revoked = true;
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [citation.doc_id, type, citation.doc_title]);
+  }, [citation.doc_id, type, citation.doc_title, canOpenSource, statusCopy.detail]);
 
   return (
     <div className="dm-original-document-preview">
       <div className="dm-document-preview-header">
         <div className="dm-document-preview-title">
-          <span className="dm-document-preview-icon">📄</span>
+          <FileText className="dm-document-preview-icon" size={18} />
           <div className="dm-document-preview-meta">
             <strong>{citation.doc_title}</strong>
             {page ? <span>第 {page} 页</span> : null}
           </div>
+        </div>
+        <div className={`dm-location-status dm-location-status-${status}`}>
+          <strong>{statusCopy.label}</strong>
+          <span>{statusCopy.detail}</span>
         </div>
       </div>
 
@@ -164,13 +189,13 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
           <ErrorBoundary>
             <DocumentViewer
               blobUrl={state.blobUrl}
-              docId={type === "pdf" ? citation.doc_id : undefined}
+              docId={state.mimeType === "application/pdf" ? citation.doc_id : undefined}
               cacheKey={citation.doc_id}
               mimeType={state.mimeType}
               fileName={state.fileName}
               initialPage={page}
-              highlightText={searchText}
-              anchorBox={anchorBox ?? undefined}
+              anchorBox={exactAnchorBox ?? undefined}
+              charRange={charRange ?? undefined}
             />
           </ErrorBoundary>
         )}

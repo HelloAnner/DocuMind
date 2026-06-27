@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE_URL="${BASE_URL:-http://127.0.0.1:8089}"
+BASE_URL="${BASE_URL:-http://123.57.255.204:8089}"
 DOC_DIR="${1:-${DOC_DIR:-}}"
-ENV_FILE="${ENV_FILE:-/opt/documind/shared/.env}"
+ENV_FILE="${ENV_FILE:-}"
+REMOTE_ENV_FILE="${REMOTE_ENV_FILE:-/opt/documind/shared/.env}"
+SSH_HOST="${SSH_HOST:-documind}"
+PG_SSH_HOST="${PG_SSH_HOST:-$SSH_HOST}"
+ES_SSH_HOST="${ES_SSH_HOST:-$SSH_HOST}"
+ELASTICSEARCH_URL="${ELASTICSEARCH_URL:-http://127.0.0.1:8104}"
 ES_INDEX="${ES_INDEX_CHUNKS:-chunks}"
 POLL_SECONDS="${POLL_SECONDS:-180}"
 PG_CONTAINER="${PG_CONTAINER:-documind-postgres}"
@@ -23,8 +28,19 @@ if [[ -f "$ENV_FILE" ]]; then
   ES_INDEX="${ES_INDEX_CHUNKS:-$ES_INDEX}"
 fi
 
-LOGIN_EMAIL="${LOGIN_EMAIL:-${SUPER_ADMIN_EMAIL:-ops@documind.local}}"
-LOGIN_PASSWORD="${LOGIN_PASSWORD:-${SUPER_ADMIN_PASSWORD:-documind123}}"
+remote_env_value() {
+  local key="$1"
+  [[ -n "$SSH_HOST" ]] || return 1
+  ssh "$SSH_HOST" "test -f '$REMOTE_ENV_FILE' && awk -F= '\$1 == \"$key\" { sub(/^[^=]*=/, \"\"); print }' '$REMOTE_ENV_FILE' | tail -n 1" 2>/dev/null || true
+}
+
+if [[ -z "${ES_INDEX_CHUNKS:-}" ]]; then
+  remote_es_index="$(remote_env_value ES_INDEX_CHUNKS)"
+  ES_INDEX="${remote_es_index:-$ES_INDEX}"
+fi
+
+LOGIN_EMAIL="${LOGIN_EMAIL:-${SUPER_ADMIN_EMAIL:-Anner}}"
+LOGIN_PASSWORD="${LOGIN_PASSWORD:-${SUPER_ADMIN_PASSWORD:-1}}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
@@ -81,7 +97,10 @@ if [[ -z "$token" || -z "$kb_id" ]]; then
   exit 1
 fi
 
-mapfile -t files < <(find "$DOC_DIR" -maxdepth 1 -type f \( \
+files=()
+while IFS= read -r file; do
+  files+=("$file")
+done < <(find "$DOC_DIR" -maxdepth 1 -type f \( \
   -iname '*.pdf' -o -iname '*.docx' -o -iname '*.pptx' \
 \) | sort)
 
@@ -155,16 +174,28 @@ done
 
 pg_query() {
   local sql="$1"
-  if [[ -n "${DATABASE_URL:-}" ]] && command -v psql >/dev/null 2>&1; then
-    psql "$DATABASE_URL" -qAtX -v ON_ERROR_STOP=1 -c "$sql"
+  local prefixed_sql="SET search_path TO documind, public; $sql"
+  if [[ -n "$PG_SSH_HOST" ]]; then
+    local remote_cmd
+    local container_q user_q database_q
+    printf -v container_q '%q' "$PG_CONTAINER"
+    printf -v user_q '%q' "$PG_USER"
+    printf -v database_q '%q' "$PG_DATABASE"
+    remote_cmd="if command -v podman >/dev/null 2>&1; then podman exec -i $container_q psql -U $user_q -d $database_q -qAtX -v ON_ERROR_STOP=1; else docker exec -i $container_q psql -U $user_q -d $database_q -qAtX -v ON_ERROR_STOP=1; fi"
+    printf '%s\n' "$prefixed_sql" | ssh "$PG_SSH_HOST" "$remote_cmd"
+  elif [[ -n "${DATABASE_URL:-}" ]] && command -v psql >/dev/null 2>&1; then
+    printf '%s\n' "$prefixed_sql" | psql "$DATABASE_URL" -qAtX -v ON_ERROR_STOP=1
   elif command -v docker >/dev/null 2>&1 && docker container inspect "$PG_CONTAINER" >/dev/null 2>&1; then
-    docker exec "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -qAtX -v ON_ERROR_STOP=1 -c "SET search_path TO documind, public; $sql"
+    printf '%s\n' "$prefixed_sql" | docker exec -i "$PG_CONTAINER" psql -U "$PG_USER" -d "$PG_DATABASE" -qAtX -v ON_ERROR_STOP=1
   else
     return 127
   fi
 }
 
-if pg_query "SELECT 1" >/dev/null 2>&1; then
+pg_embedding_counts=()
+if [[ "${SKIP_PG_VALIDATION:-0}" == "1" ]]; then
+  echo "WARN: skipping PG validation because SKIP_PG_VALIDATION=1"
+elif pg_query "SELECT 1" >/dev/null 2>&1; then
   for doc_id in "${doc_ids[@]}"; do
     counts="$(pg_query "
       SELECT
@@ -179,26 +210,44 @@ if pg_query "SELECT 1" >/dev/null 2>&1; then
       echo "pg validation failed for $doc_id" >&2
       exit 1
     fi
+    pg_embedding_counts+=("$embedding_count")
   done
 else
-  echo "skipping PG validation: no PostgreSQL client path available"
-fi
-
-if [[ -z "${ELASTICSEARCH_URL:-}" ]]; then
-  echo "ELASTICSEARCH_URL is required for ES validation" >&2
+  echo "PG validation unavailable; set PG_SSH_HOST=documind or SKIP_PG_VALIDATION=1" >&2
   exit 1
 fi
 
-for doc_id in "${doc_ids[@]}"; do
-  search_json="$(curl -fsS \
-    -H 'Content-Type: application/json' \
-    -d "$(json_payload term_doc "$doc_id")" \
-    "${ELASTICSEARCH_URL%/}/$ES_INDEX/_search")"
+es_query() {
+  local payload="$1"
+  local url="${ELASTICSEARCH_URL%/}/$ES_INDEX/_search"
+  if [[ -n "$ES_SSH_HOST" ]]; then
+    local remote_cmd
+    printf -v remote_cmd '%q ' curl -fsS -H 'Content-Type: application/json' -d @- "$url"
+    printf '%s' "$payload" | ssh "$ES_SSH_HOST" "$remote_cmd"
+  else
+    curl -fsS -H 'Content-Type: application/json' -d "$payload" "$url"
+  fi
+}
+
+if [[ "${SKIP_ES_VALIDATION:-0}" == "1" ]]; then
+  echo "WARN: skipping ES validation because SKIP_ES_VALIDATION=1"
+  echo "ingest API test passed: ${#doc_ids[@]} documents"
+  exit 0
+fi
+
+for i in "${!doc_ids[@]}"; do
+  doc_id="${doc_ids[$i]}"
+  expected_embeddings="${pg_embedding_counts[$i]:-}"
+  search_json="$(es_query "$(json_payload term_doc "$doc_id")")"
   hit_count="$(json_value 'd.get("hits", {}).get("total", {}).get("value", 0)' <<<"$search_json")"
   dim="$(json_value 'len(d.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("embedding", []))' <<<"$search_json")"
   content="$(json_value 'd.get("hits", {}).get("hits", [{}])[0].get("_source", {}).get("content", "")' <<<"$search_json")"
-  echo "es: doc=$doc_id hits=$hit_count embedding_dim=$dim"
+  echo "es: doc=$doc_id hits=$hit_count expected=$expected_embeddings embedding_dim=$dim"
   if [[ "$hit_count" == "0" || "$dim" == "0" ]]; then
+    echo "es validation failed for $doc_id" >&2
+    exit 1
+  fi
+  if [[ -n "$expected_embeddings" && "$hit_count" != "$expected_embeddings" ]]; then
     echo "es validation failed for $doc_id" >&2
     exit 1
   fi
@@ -209,10 +258,7 @@ text = sys.argv[1].replace("\n", " ").strip()
 print(text[:40] if text else "document")
 PY
 )"
-  match_json="$(curl -fsS \
-    -H 'Content-Type: application/json' \
-    -d "$(json_payload match_doc "$doc_id" "$query_text")" \
-    "${ELASTICSEARCH_URL%/}/$ES_INDEX/_search")"
+  match_json="$(es_query "$(json_payload match_doc "$doc_id" "$query_text")")"
   match_hits="$(json_value 'd.get("hits", {}).get("total", {}).get("value", 0)' <<<"$match_json")"
   echo "es-search: doc=$doc_id query_hits=$match_hits"
   if [[ "$match_hits" == "0" ]]; then

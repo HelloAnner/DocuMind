@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, User } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { User } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
@@ -55,9 +54,7 @@ export function AdminMembers() {
 
   return (
     <>
-      <Topbar title="用户管理">
-        <Button icon={<Plus size={14} />}>邀请用户</Button>
-      </Topbar>
+      <Topbar title="用户管理" />
 
       <div className="dm-admin-content">
         <div style={{ alignItems: "center", display: "flex", gap: 12, marginBottom: 16 }}>
@@ -66,7 +63,7 @@ export function AdminMembers() {
           <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 位用户</span>
         </div>
 
-        <Panel title="Users">
+        <Panel title="Users" action={<Badge tone="neutral">只读</Badge>}>
           <div className="dm-table-head dm-user-row">
             <span>用户</span>
             <span>角色</span>
@@ -95,6 +92,7 @@ export function AdminMembers() {
               </span>
             </div>
           ))}
+          {filtered.length === 0 ? <div className="dm-empty-state">没有匹配的用户</div> : null}
         </Panel>
       </div>
     </>

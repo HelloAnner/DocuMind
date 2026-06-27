@@ -40,6 +40,10 @@ export interface CitationAnchor {
   slide?: number;
   block_ids?: UUID[];
   table_ids?: UUID[];
+  char_range?: {
+    start: number;
+    end: number;
+  };
   bbox?: {
     x0: number;
     y0: number;

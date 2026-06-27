@@ -1,6 +1,6 @@
 "use client";
 
-import { adminDocumentPagePdfUrl } from "@/lib/api";
+import { filePreviewPagePdfUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
@@ -9,7 +9,6 @@ interface PdfViewerProps {
   docId: string;
   cacheKey?: string;
   initialPage?: number | null;
-  highlightText?: string;
   anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   fileName?: string;
   onReady?: () => void;
@@ -28,7 +27,7 @@ async function getCachedPageBlob(
   if (cached) return cached;
 
   const promise = (async () => {
-    const response = await fetch(adminDocumentPagePdfUrl(docId, pageNumber), {
+    const response = await fetch(filePreviewPagePdfUrl(docId, pageNumber), {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -78,7 +77,6 @@ export function PdfViewer({
   docId,
   cacheKey,
   initialPage,
-  highlightText,
   anchorBox,
   onReady,
 }: PdfViewerProps) {
@@ -188,7 +186,6 @@ export function PdfViewer({
                 pageNumber={pageNumber}
                 totalPages={totalPages}
                 isTarget={isTarget}
-                highlightText={isTarget ? highlightText : undefined}
                 anchorBox={isTarget ? anchorBox : undefined}
                 onRender={
                   isTarget
@@ -227,7 +224,6 @@ interface SinglePdfPageProps {
   pageNumber: number;
   totalPages: number;
   isTarget: boolean;
-  highlightText?: string;
   anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   onRender?: () => void;
 }
@@ -246,7 +242,6 @@ function SinglePdfPage({
   pageNumber,
   totalPages,
   isTarget,
-  highlightText,
   anchorBox,
   onRender,
 }: SinglePdfPageProps) {
@@ -341,9 +336,6 @@ function SinglePdfPage({
         });
         textLayerTask = textLayer;
         await textLayer.render();
-        if (highlightText && isTarget) {
-          highlightInElement(textLayerDiv, highlightText);
-        }
         renderAnchorBoxOverlay(overlayRef.current, anchorBox, size, isTarget);
       } catch {
         // text layer 是可选能力，失败不影响阅读
@@ -354,7 +346,7 @@ function SinglePdfPage({
       task.cancel?.();
       textLayerTask?.cancel();
     };
-  }, [size, highlightText, anchorBox, isTarget]);
+  }, [size, anchorBox, isTarget]);
 
   return (
     <div
@@ -393,44 +385,6 @@ function SinglePdfPage({
       )}
     </div>
   );
-}
-
-function highlightInElement(root: HTMLElement, text: string) {
-  const terms = text
-    .split(/\s+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length > 1);
-  if (terms.length === 0) return;
-
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  const textNodes: Text[] = [];
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    textNodes.push(node as Text);
-  }
-
-  for (const textNode of textNodes) {
-    const parent = textNode.parentElement;
-    if (!parent) continue;
-    const nodeText = textNode.textContent || "";
-    const lowerNodeText = nodeText.toLowerCase();
-    const term = terms.find((t) => lowerNodeText.includes(t.toLowerCase()));
-    if (!term) continue;
-
-    const index = lowerNodeText.indexOf(term.toLowerCase());
-    const before = nodeText.slice(0, index);
-    const match = nodeText.slice(index, index + term.length);
-    const after = nodeText.slice(index + term.length);
-
-    const highlight = document.createElement("span");
-    highlight.className = "dm-citation-highlight";
-    highlight.textContent = match;
-
-    parent.insertBefore(document.createTextNode(before), textNode);
-    parent.insertBefore(highlight, textNode);
-    parent.insertBefore(document.createTextNode(after), textNode);
-    parent.removeChild(textNode);
-  }
 }
 
 function renderAnchorBoxOverlay(

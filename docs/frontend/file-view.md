@@ -14,7 +14,8 @@
 
 4. **所有坐标都按归一化坐标存储，前端根据当前缩放和旋转转换成屏幕坐标。**
 
-5. **文档原文 URL 用短期签名 URL，不要把 MinIO 内部地址暴露给浏览器。**
+5. **文档原文 URL 不暴露 MinIO 内部地址。**
+   当前已支持 `/api/files/{doc_id}/preview-url` 返回带 `preview_token` 的短期 API 代理 URL；预览端使用 `/api/files/{doc_id}/preview/*` 访问 manifest、content 和 page PDF，不直接接触对象存储地址。
 
 ## 2. 组件结构
 
@@ -45,7 +46,7 @@ type FileViewOpenInput = {
   parseJobId: string
   fileName: string
   format: "pdf" | "docx" | "pptx" | "md" | "txt"
-  previewUrl: string        // 短期签名 URL
+  previewUrl: string        // 当前为带 preview_token 的短期 API 代理 URL
   manifestUrl: string        // 页面尺寸、旋转、页数、预览类型等
   initialLocation: SourceAnchor
   highlights: SourceAnchor[]
@@ -104,6 +105,8 @@ type SourceAnchor = {
 
 技术选型：**PDF.js + 自研 Highlight Layer**
 
+当前实现已通过浏览器 smoke 验证：点击 OCR/PDF citation 后，右侧 FileView 能渲染 PDF canvas、bbox overlay、目标页 ready 状态和精确定位文案。后端 PDF bbox 仍主要受段落级 anchor 精度限制，text-run/word 级 bbox 属于后续增强。
+
 渲染流程：
 
 ```text
@@ -138,7 +141,7 @@ drawHighlight(viewportRect)
 
 ### 4.2 Office / DOCX Preview
 
-Word 原文件没有稳定页码坐标，必须先生成预览版本：
+Word 原文件没有稳定页码坐标，必须先生成预览版本。当前后端已能用 LibreOffice 把 DOCX/PPTX 转为 PDF 并通过 manifest/content/page PDF 端点预览；结构节点到转换后 PDF bbox 的精确映射仍未完成。
 
 ```text
 DOCX / PPTX 原文件
@@ -247,7 +250,7 @@ interface FileViewState {
 | 错误 | 处理 |
 |---|---|
 | manifest 加载失败 | 显示“预览信息加载失败”，提供重试 |
-| PDF 加载失败 | 显示“文件加载失败”，检查签名 URL 是否过期 |
+| PDF 加载失败 | 显示“文件加载失败”，检查 API 代理响应或 preview_token 是否过期 |
 | anchor 格式不兼容 | 降级为 `page_only` 或 `structural_only` |
 | bbox 越界 | 记录错误，只跳页 |
 | 无权限 | 显示“无权限查看来源” |

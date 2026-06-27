@@ -12,6 +12,7 @@ import {
   MessageSquare,
   Scissors,
   Search,
+  Shield,
   Users,
 } from "lucide-react";
 import { NavItem } from "./nav-item";
@@ -22,6 +23,7 @@ const manageNav = [
   { label: "文档管理", href: "/admin/documents", icon: FileText },
   { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
   { label: "用户管理", href: "/admin/members", icon: Users },
+  { label: "权限策略", href: "/admin/permissions", icon: Shield },
 ];
 
 const configNav = [

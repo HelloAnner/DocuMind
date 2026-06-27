@@ -357,11 +357,11 @@ Context:
 └──────────────────────┬──────────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────────┐
-│             DocuMind Rust Binary (:19099)             │
+│             DocuMind Rust Binary (:8089)              │
 │                                                       │
 │  ┌─────────────┐  ┌──────────────┐  ┌─────────────┐ │
 │  │  Axum HTTP   │  │  Agent Kernel │  │  Task Runner │ │
-│  │  (API+SPA)   │  │  (RAG Graph)  │  │  (MQ Worker) │ │
+│  │  (API+SPA)   │  │  (RAG Graph)  │  │ (in-process) │ │
 │  └─────────────┘  └──────────────┘  └─────────────┘ │
 │                                                       │
 │  ┌─────────────────────────────────────────────────┐ │
@@ -386,13 +386,13 @@ Context:
 | **搜索引擎** | Elasticsearch 8.x | 向量检索 (kNN/HNSW) + BM25 全文检索，内置 hybrid search + RRF |
 | **中文分词** | ES ik / jieba 插件 | BM25 关键词检索的中文分词 |
 | **缓存/会话** | Redis 7 (redis-rs 0.25) | 会话状态、LLM 请求去重、热点问答缓存 |
-| **消息队列** | RabbitMQ (lapin / amqprs) | 文档解析、向量化、索引重建等异步任务 |
+| **消息队列** | RabbitMQ（目标态 worker 消费） | 文档解析、向量化、索引重建等异步任务；当前部署已健康检查但未承载完整 worker |
 | **LLM Adapter** | Rig (`rig-core`) + OpenAI-compatible adapter | Rust 生态的 LLM 抽象层，兼容 DashScope / OpenAI / 内网模型 |
-| **Embedding** | ONNX Runtime (`ort` crate) | 本地推理 bge-large-zh-v1.5，无外网依赖 |
+| **Embedding** | OpenAI-compatible API；目标态可选 ONNX Runtime (`ort` crate) | 当前服务器使用 `text-embedding-v3`；本地 bge/ONNX 是可选部署形态 |
 | **文档解析** | `pdf-extract` + `docx-rs` + OpenXML | 纯 Rust 解析，无 Python 依赖 |
 | **中文分词** | jieba-rs | BM25 关键词提取与分词 |
 | **前端嵌入** | `rust-embed` 8.x | 静态资源编译进二进制 |
-| **可观测** | tracing + tracing-subscriber | 结构化日志、OpenTelemetry 导出 |
+| **可观测** | tracing + tracing-subscriber；目标态接 OpenTelemetry | 当前已有结构化日志和健康检查；OpenTelemetry/Prometheus/告警仍待补 |
 | **配置** | dotenvy | .env 文件 → 结构体 |
 
 ### 4.3 前端技术栈
@@ -646,30 +646,32 @@ feedback (feedback_id, qa_id, user_id, rating, correction, created_at)
 
 ## 7. 交付节奏
 
+本节保留最初 PRD 的阶段规划。当前真实交付状态以 [文档与代码实现差距总账](implementation-gap-analysis.md) 和 [上线阶段路线图](production-launch-roadmap.md) 为准；截至 2026-06-28，核心上传、解析、混合检索、SSE 问答、引用定位、RBAC、部署和基础后台均已有服务器部署，但 RabbitMQ worker、完整 OpenTelemetry、Office/PDF 精确 bbox、claim 级引用校验仍未达到目标态。
+
 ### Phase 1 — 筑基（Weeks 1–4）
 
-- [x] 项目骨架：Axum + SQLx + PostgreSQL + Elasticsearch + Redis + MQ 连接
-- [ ] 文档上传与解析（PDF / Word / PPT）
-- [ ] 切割 Pipeline（三级策略 + 异步 MQ 消费）
-- [ ] 向量化 Pipeline（本地 ONNX + bge-large-zh）
-- [ ] 基础问答 API（单轮，非流式）
-- [ ] 管理后台：知识库 + 文档 CRUD
+- [x] 项目骨架：Axum + SQLx + PostgreSQL + Elasticsearch + Redis + RabbitMQ 健康检查
+- [x] 文档上传与解析（PDF / Word / PPT / Markdown / TXT 基础链路）
+- [x] 切割 Pipeline（结构化 block/chunk 已落地；异步 MQ 消费未完成）
+- [x] 向量化 Pipeline（服务器使用 OpenAI-compatible embedding API；本地 ONNX 仍是目标选项）
+- [x] 基础问答 API（SSE 流式已落地）
+- [x] 管理后台：知识库 + 文档 CRUD
 
 ### Phase 2 — 调优（Weeks 5–8）
 
-- [ ] 混合检索（Dense + BM25 + RRF）
-- [ ] Reranker 集成（bge-reranker-v2-m3）
-- [ ] Query Rewrite + HyDE
-- [ ] 多轮对话上下文
-- [ ] 流式 SSE 输出
-- [ ] 答案溯源引用
+- [x] 混合检索（Dense + BM25 + RRF 基础链路）
+- [~] Reranker 集成（HTTP reranker 接口存在；未配置时使用 lexical fallback）
+- [~] Query Rewrite + HyDE（规则改写已落地；HyDE/LLM 改写仍待增强）
+- [x] 多轮对话上下文
+- [x] 流式 SSE 输出
+- [x] 答案溯源引用（SourceAnchor -> CitationResolver -> FileView 主链路已落地；claim 级强校验待增强）
 
 ### Phase 3 — 交付（Weeks 9–12）
 
-- [ ] 权限系统（租户隔离 + RBAC）
-- [ ] 审计日志
-- [ ] 问答统计 Dashboard
-- [ ] 单二进制编译 + 部署文档
+- [x] 权限系统（租户隔离 + RBAC 核心链路）
+- [~] 审计日志（核心事件已落库；覆盖、筛选、导出和保留策略待补）
+- [~] 问答统计 Dashboard（后台只读统计可用；完整告警和运维操作待补）
+- [x] 单二进制编译 + 部署文档
 - [ ] 压测与优化（P95 < 5s）
 - [ ] 灰度上线
 
@@ -685,3 +687,5 @@ feedback (feedback_id, qa_id, user_id, rating, correction, created_at)
 | 文档解析成功率 | ≥ 98% |
 | 单文档向量化时间 | ≤ 30s / MB |
 | 并发问答 | 50 QPS（单节点） |
+
+以上 SLA 是目标指标；当前仓库已有 golden eval、Office/OCR smoke 和浏览器 FileView smoke，尚未完成正式压测、长期趋势记录和发布阻断门禁。

@@ -88,7 +88,7 @@ export async function loginWithPassword(username: string, password: string): Pro
   const res = await fetch(`${BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ username, password }),
+    body: JSON.stringify({ email: username, password }),
   });
   if (!res.ok) throw new Error("用户名或密码错误");
   const data: LoginResponse = await res.json();

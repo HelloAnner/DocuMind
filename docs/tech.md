@@ -1,6 +1,8 @@
 # DocuMind 技术架构总览
 
-本文档是 DocuMind 的技术架构单一来源（single source of truth），说明整体技术选型、服务形态、Ingest Pipeline 与 Query Pipeline 的链式设计，以及各文件类型如何基于“通用链 + 格式特化链”处理。
+本文档是 DocuMind 的技术架构目标态单一来源（single source of truth），说明整体技术选型、服务形态、Ingest Pipeline 与 Query Pipeline 的链式设计，以及各文件类型如何基于“通用链 + 格式特化链”处理。
+
+当前代码和服务器部署并非所有目标态都已完成。已实现能力、未实现差距和下一步优先级以 [文档与代码实现差距总账](implementation-gap-analysis.md) 为准；特别是 RabbitMQ 任务编排、Python Document Intelligence Worker、Office/PDF 精确 bbox、OpenTelemetry/告警仍属于待补齐能力。
 
 ## 1. 总体技术栈
 
@@ -96,7 +98,7 @@ Agent Kernel
 - 对外端口统一为 `8089`。
 - 前端入口为 `/documind/`。
 - Rust 二进制同时服务 API 和静态前端。
-- 文件预览通过短期签名 URL 提供，不直接暴露 MinIO 内网地址。
+- 文件预览目标态支持短期签名 URL，不直接暴露 MinIO 内网地址；当前已部署版本通过应用代理接口 `/api/files/{doc_id}/preview/*` 提供 manifest、content 和 page PDF，权限校验仍在 DocuMind API 内完成。
 
 ## 5. Ingest Pipeline 链式设计
 
@@ -123,8 +125,10 @@ Parser Chain ──► SourceAnchor Generator ──► Cleaner Chain ──► 
                                          PostgreSQL + Elasticsearch
                                                     │
                                                     ▼
-                                           Preview Manifest Cache
+Preview Manifest / Page PDF Cache
 ```
+
+当前实现状态：上传、解析、切块、embedding 和索引主链路已经可用；解析/OCR/embedding 任务仍主要由 Rust API 进程内异步任务执行，尚未切换到 RabbitMQ worker 消费。RabbitMQ 在服务器部署中已健康，但队列编排、重试、死信和 worker 隔离仍按 [实现差距总账](implementation-gap-analysis.md) 跟踪。
 
 ### 5.2 链式架构核心原则
 

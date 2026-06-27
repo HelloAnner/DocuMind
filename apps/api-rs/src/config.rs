@@ -1,10 +1,11 @@
 use std::env;
 
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
 pub struct AppConfig {
+    pub environment: RuntimeEnvironment,
     pub server_host: String,
     pub server_port: u16,
     pub database_url: Option<String>,
@@ -42,6 +43,28 @@ pub struct AppConfig {
     pub standard_user_password: String,
     pub rag: RagConfig,
     pub agent: AgentConfig,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeEnvironment {
+    Development,
+    Production,
+}
+
+impl RuntimeEnvironment {
+    pub fn from_env_value(value: &str) -> Self {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "prod" | "production" | "release" => Self::Production,
+            _ => Self::Development,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Production => "production",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -118,6 +141,11 @@ pub struct AgentConfig {
 pub fn load_config() -> Result<AppConfig> {
     dotenvy::dotenv().ok();
 
+    let environment = env::var("DOCUMIND_ENV")
+        .or_else(|_| env::var("APP_ENV"))
+        .or_else(|_| env::var("RUST_ENV"))
+        .map(|value| RuntimeEnvironment::from_env_value(&value))
+        .unwrap_or(RuntimeEnvironment::Development);
     let server_host = env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
     let server_port = env::var("SERVER_PORT")
         .ok()
@@ -330,7 +358,8 @@ pub fn load_config() -> Result<AppConfig> {
             .unwrap_or_else(|_| "short".to_string()),
     };
 
-    Ok(AppConfig {
+    let config = AppConfig {
+        environment,
         server_host,
         server_port,
         database_url,
@@ -368,7 +397,87 @@ pub fn load_config() -> Result<AppConfig> {
         standard_user_password,
         rag,
         agent,
-    })
+    };
+    config.validate()?;
+    Ok(config)
+}
+
+impl AppConfig {
+    pub fn is_production(&self) -> bool {
+        self.environment == RuntimeEnvironment::Production
+    }
+
+    fn validate(&self) -> Result<()> {
+        if !self.is_production() {
+            return Ok(());
+        }
+
+        let mut missing = vec![];
+        if self.database_url.as_deref().is_none_or(str::is_empty) {
+            missing.push("DATABASE_URL");
+        }
+        if self.redis_url.as_deref().is_none_or(str::is_empty) {
+            missing.push("REDIS_URL");
+        }
+        if self.rabbitmq_url.as_deref().is_none_or(str::is_empty) {
+            missing.push("RABBITMQ_URL");
+        }
+        if self.elasticsearch_url.as_deref().is_none_or(str::is_empty) {
+            missing.push("ELASTICSEARCH_URL");
+        }
+        if self
+            .object_storage_endpoint
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            missing.push("OBJECT_STORAGE_ENDPOINT");
+        }
+        if self
+            .object_storage_access_key
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            missing.push("OBJECT_STORAGE_ACCESS_KEY");
+        }
+        if self
+            .object_storage_secret_key
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            missing.push("OBJECT_STORAGE_SECRET_KEY");
+        }
+        if !self.rag.generation.use_real_llm {
+            missing.push("USE_REAL_LLM=true");
+        }
+        if self.rag.generation.api_key.trim().is_empty() || self.rag.generation.api_key == "ollama"
+        {
+            missing.push("LLM_API_KEY");
+        }
+        if !self.rag.embedding.enabled {
+            missing.push("EMBED_ENABLED=true");
+        }
+        if self
+            .rag
+            .embedding
+            .api_key
+            .as_deref()
+            .is_none_or(str::is_empty)
+        {
+            missing.push("EMBED_API_KEY");
+        }
+        if self.jwt_secret.trim().len() < 32 || self.jwt_secret == "documind-dev-secret-change-me" {
+            missing.push("JWT_SECRET>=32");
+        }
+
+        if missing.is_empty() {
+            Ok(())
+        } else {
+            Err(anyhow!(
+                "production configuration is incomplete: {}",
+                missing.join(", ")
+            ))
+        }
+    }
 }
 
 fn env_bool(key: &str, default: bool) -> bool {

@@ -10,7 +10,7 @@ DEPLOY_TARGET ?= x86_64-unknown-linux-musl
 DEPLOY_TARGET_DIR ?= target/deploy-linux-x86_64-musl
 DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(DEPLOY_TARGET)/release/$(BIN_NAME)
 
-.PHONY: install deploy-web-build deploy-build deploy status health logs clean
+.PHONY: install deploy-web-build deploy-build deploy status health release-gate logs clean
 
 install:
 	cd $(WEB_DIR) && npm install
@@ -34,6 +34,9 @@ health:
 	ssh $(DEPLOY_HOST) 'bash -lc '"'"'set -euo pipefail; \
 		curl -fsS http://127.0.0.1:$(DEPLOY_PORT)/api/health; echo; \
 		curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$(DEPLOY_PORT)/documind/'"'"''
+
+release-gate:
+	BASE_URL=$${BASE_URL:-http://123.57.255.204:$(DEPLOY_PORT)} scripts/release-gate.sh
 
 logs:
 	ssh $(DEPLOY_HOST) 'bash -lc '"'"'tail -n $${LINES:-300} -f /opt/documind/shared/logs/documind-$(DEPLOY_PORT).log'"'"''

@@ -65,7 +65,8 @@ pub fn resolve_citations(answer: &str, evidence: &EvidencePack) -> Vec<CitationO
         );
     }
 
-    order.into_iter()
+    order
+        .into_iter()
         .filter_map(|key| by_key.remove(&key))
         .take(MAX_CITATIONS)
         .collect()
@@ -112,22 +113,21 @@ fn anchor_for_chunk(chunk: &RerankedChunk) -> CitationAnchor {
         .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide_start"))
         .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide"))
         .or_else(|| metadata_i32(&chunk.chunk.metadata, "slide_end"));
-    let kind = primary
-        .map(|a| a.kind.clone())
-        .unwrap_or_else(|| {
-            if !chunk.chunk.table_ids.is_empty() || chunk.chunk.source_type() == "table" {
-                "table_region".to_string()
-            } else if slide.is_some() {
-                "slide_shape".to_string()
-            } else {
-                "paragraph".to_string()
-            }
-        });
+    let kind = primary.map(|a| a.kind.clone()).unwrap_or_else(|| {
+        if !chunk.chunk.table_ids.is_empty() || chunk.chunk.source_type() == "table" {
+            "table_region".to_string()
+        } else if slide.is_some() {
+            "slide_shape".to_string()
+        } else {
+            "paragraph".to_string()
+        }
+    });
     let bbox = primary.and_then(|a| a.bbox.clone());
+    let char_range = primary.and_then(|a| a.char_range.clone());
     let anchor_id = primary.map(|a| a.anchor_id);
     let parse_job_id = primary.map(|a| a.parse_job_id);
 
-    let location_status = if bbox.is_some() {
+    let location_status = if bbox.is_some() || char_range.is_some() {
         "exact"
     } else if !chunk.chunk.block_ids.is_empty() || !chunk.chunk.table_ids.is_empty() {
         "structural_only"
@@ -142,12 +142,15 @@ fn anchor_for_chunk(chunk: &RerankedChunk) -> CitationAnchor {
     CitationAnchor {
         anchor_id,
         parse_job_id,
-        format: primary.map(|a| a.format.clone()).unwrap_or_else(|| chunk.chunk.file_type.clone()),
+        format: primary
+            .map(|a| a.format.clone())
+            .unwrap_or_else(|| chunk.chunk.file_type.clone()),
         kind,
         page,
         slide,
         block_ids: chunk.chunk.block_ids.clone(),
         table_ids: chunk.chunk.table_ids.clone(),
+        char_range,
         bbox,
         location_status: location_status.to_string(),
     }

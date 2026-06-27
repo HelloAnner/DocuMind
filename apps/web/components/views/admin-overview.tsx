@@ -1,39 +1,44 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Download, FileText, Upload } from "lucide-react";
+import { FileText, Upload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
 import { Topbar } from "@/components/ui/topbar";
+import { fetchJson } from "@/lib/api";
 
-const recentDocuments = [
-  { name: "2025年度销售策略.pptx", meta: "2.4 MB · 47 切片 · 2025-06-10", status: "已完成" as const },
-  { name: "Q3 采购合同模板.docx", meta: "856 KB · 12 切片 · 2025-06-09", status: "已完成" as const },
-  { name: "员工报销政策 2025.pdf", meta: "1.2 MB · 28 切片 · 2025-06-08", status: "已完成" as const },
-  { name: "产品安全规范 v2.1.pptx", meta: "3.1 MB · 待解析 · 2025-06-08", status: "解析中" as const },
-];
-
-const healthItems = [
-  { label: "Elasticsearch", value: "正常", width: "80%", tone: "success" as const },
-  { label: "向量索引", value: "正常", width: "92%", tone: "success" as const },
-  { label: "LLM Provider", value: "正常", width: "88%", tone: "success" as const },
-  { label: "Embedding Worker", value: "队列 3", width: "34%", tone: "danger" as const },
-];
-
-const topQuestions = [
-  { question: "Q3 销售目标是多少？", count: 42 },
-  { question: "采购合同违约条款", count: 38 },
-  { question: "员工报销需要哪些材料？", count: 31 },
-  { question: "产品安全规范要求", count: 27 },
-];
+interface AdminOverviewData {
+  doc_count: number;
+  indexed_doc_count: number;
+  chunk_count: number;
+  active_users: number;
+  failed_docs: number;
+  running_jobs: number;
+  knowledge_bases: Array<{
+    name: string;
+    doc_count: number;
+    chunk_count: number;
+    status: string;
+  }>;
+  alerts: Array<{ message: string; action?: string }>;
+}
 
 export function AdminOverview() {
+  const [data, setData] = useState<AdminOverviewData | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchJson<AdminOverviewData>("/api/admin/overview")
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "概览加载失败"));
+  }, []);
+
   return (
     <>
       <Topbar title="概览">
-        <Button variant="secondary" icon={<Download size={14} />}>导出报表</Button>
         <Link href="/admin/documents">
           <Button icon={<Upload size={14} />}>上传文档</Button>
         </Link>
@@ -41,59 +46,53 @@ export function AdminOverview() {
 
       <div className="dm-admin-content">
         <div className="dm-stat-row">
-          <StatCard label="总文档数" value="128" hint="+12 本月" />
-          <StatCard label="总切片数" value="4,832" hint="+312 本周" />
-          <StatCard label="问答总量" value="1,245" hint="+89 今日" />
-          <StatCard label="检索命中率" value="92.4%" hint="↑ 1.2%" />
+          <StatCard label="总文档数" value={String(data?.doc_count ?? "-")} hint={`${data?.indexed_doc_count ?? 0} 已索引`} />
+          <StatCard label="总切片数" value={(data?.chunk_count ?? 0).toLocaleString()} hint="当前租户" />
+          <StatCard label="活跃成员" value={String(data?.active_users ?? "-")} hint="已启用" />
+          <StatCard label="运行任务" value={String(data?.running_jobs ?? "-")} hint={`${data?.failed_docs ?? 0} 失败文档`} />
         </div>
+        {error ? <div className="dm-error-banner">{error}</div> : null}
 
         <div className="dm-overview-grid">
-          <Panel title="Recent Documents" action={<Link href="/admin/documents">查看全部 →</Link>}>
-            {recentDocuments.map((doc) => {
-              const tone = doc.status === "已完成" ? "success" : "warning";
+          <Panel title="知识库状态" action={<Link href="/admin/knowledge">查看全部 →</Link>}>
+            {(data?.knowledge_bases ?? []).map((kb) => {
+              const tone = kb.status === "active" ? "success" : "warning";
               return (
-                <div className="dm-recent-doc-row" key={doc.name}>
+                <div className="dm-recent-doc-row" key={kb.name}>
                   <span className="dm-recent-doc-name">
                     <FileText size={18} />
                     <span>
-                      <strong>{doc.name}</strong>
-                      <small>{doc.meta}</small>
+                      <strong>{kb.name}</strong>
+                      <small>{kb.doc_count.toLocaleString()} 文档 · {kb.chunk_count.toLocaleString()} 切片</small>
                     </span>
                   </span>
-                  <Badge tone={tone}>{doc.status}</Badge>
+                  <Badge tone={tone}>{kb.status}</Badge>
                 </div>
               );
             })}
+            {data && data.knowledge_bases.length === 0 ? <div className="dm-empty-state">暂无知识库</div> : null}
           </Panel>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <Panel title="System Health">
-              {healthItems.map((item) => (
+              {[
+                { label: "索引完成", value: `${data?.indexed_doc_count ?? 0}/${data?.doc_count ?? 0}` },
+                { label: "运行任务", value: String(data?.running_jobs ?? 0) },
+                { label: "失败文档", value: String(data?.failed_docs ?? 0) },
+              ].map((item) => (
                 <div className="dm-health-row" key={item.label}>
-                  <div>
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                  </div>
-                  <div className="dm-bar">
-                    <span className={item.tone} style={{ width: item.width }} />
-                  </div>
+                  <div><span>{item.label}</span><strong>{item.value}</strong></div>
                 </div>
               ))}
             </Panel>
 
-            <Panel title="Top Questions">
-              {topQuestions.map((item) => (
-                <div
-                  className="dm-document-row"
-                  key={item.question}
-                  style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}
-                >
-                  <span style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 500 }}>
-                    {item.question}
-                  </span>
-                  <span style={{ color: "var(--text-muted)", fontSize: 12 }}>{item.count} 次</span>
+            <Panel title="待关注">
+              {(data?.alerts ?? []).map((item) => (
+                <div className="dm-document-row" key={item.message} style={{ gridTemplateColumns: "1fr", cursor: "default" }}>
+                  <span style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 500 }}>{item.message}</span>
                 </div>
               ))}
+              {data && data.alerts.length === 0 ? <div className="dm-empty-state">暂无告警</div> : null}
             </Panel>
           </div>
         </div>

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::source_anchor::NormalizedBBox;
+use super::source_anchor::{CharRange, NormalizedBBox};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CitationAnchor {
@@ -19,6 +19,8 @@ pub struct CitationAnchor {
     pub block_ids: Vec<Uuid>,
     #[serde(default)]
     pub table_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub char_range: Option<CharRange>,
     #[serde(default)]
     pub bbox: Option<NormalizedBBox>,
     #[serde(default)]

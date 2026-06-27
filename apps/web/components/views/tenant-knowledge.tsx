@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { KnowledgeCard } from "@/components/ui/knowledge-card";
 import { SearchInput } from "@/components/ui/search-input";
 import { Topbar } from "@/components/ui/topbar";
@@ -32,7 +31,7 @@ export function TenantKnowledge() {
   return (
     <>
       <Topbar title={`${tenantName} / 知识库`}>
-        <Button icon={<Plus size={14} />}>+ 知识库</Button>
+        <Badge tone="neutral">只读</Badge>
       </Topbar>
 
       <div className="dm-admin-content">

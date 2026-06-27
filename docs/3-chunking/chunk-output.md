@@ -179,7 +179,7 @@ Elasticsearch 保存用于检索的文本、元数据和向量：
 }
 ```
 
-> ES 不是权威存储，可以随时从 PostgreSQL 的 `chunks` 表和 embedding worker 重建。
+> ES 不是权威存储，可以从 PostgreSQL 的 `chunks` 表重建。当前已支持写入 ES；独立 embedding worker 和后台重建任务仍是目标态能力。
 
 ## 字段含义速查
 

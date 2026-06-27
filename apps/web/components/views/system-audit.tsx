@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Topbar } from "@/components/ui/topbar";
+import { fetchJson } from "@/lib/api";
 
 interface AuditEvent {
   id: string;
@@ -15,49 +16,24 @@ interface AuditEvent {
   ip: string;
 }
 
-const mockEvents: AuditEvent[] = [
-  {
-    id: "1",
-    time: "2025-06-16 10:42:18",
-    tenant: "acme",
-    user: "zhang@corp.com",
-    action: "chat.ask",
-    resource: "conv_8821",
-    ip: "10.0.4.12",
-  },
-  {
-    id: "2",
-    time: "2025-06-16 10:38:05",
-    tenant: "acme",
-    user: "admin@acme.com",
-    action: "document.upload",
-    resource: "doc_3391",
-    ip: "10.0.4.9",
-  },
-  {
-    id: "3",
-    time: "2025-06-16 10:15:33",
-    tenant: "beta",
-    user: "li@beta.com",
-    action: "kb.create",
-    resource: "kb_4412",
-    ip: "10.0.7.22",
-  },
-  {
-    id: "4",
-    time: "2025-06-16 09:58:12",
-    tenant: "acme",
-    user: "system",
-    action: "job.retry",
-    resource: "job_1205",
-    ip: "127.0.0.1",
-  },
-];
-
 export function SystemAudit() {
   const [query, setQuery] = useState("");
+  const [events, setEvents] = useState<AuditEvent[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = mockEvents.filter(
+  useEffect(() => {
+    const qs = query.trim() ? `?q=${encodeURIComponent(query.trim())}` : "";
+    setLoading(true);
+    fetchJson<AuditEvent[]>(`/api/system/audit${qs}`)
+      .then(setEvents)
+      .catch((error) => {
+        console.error(error);
+        setEvents([]);
+      })
+      .finally(() => setLoading(false));
+  }, [query]);
+
+  const filtered = events.filter(
     (e) =>
       e.user.toLowerCase().includes(query.toLowerCase()) ||
       e.action.toLowerCase().includes(query.toLowerCase()) ||
@@ -85,9 +61,10 @@ export function SystemAudit() {
             <span>资源</span>
             <span>IP</span>
           </div>
-          {filtered.map((e) => (
+          {loading ? <div className="dm-empty-state">加载审计日志中...</div> : null}
+          {!loading && filtered.map((e) => (
             <div className="dm-audit-row" key={e.id}>
-              <span>{e.time}</span>
+              <span>{new Date(e.time).toLocaleString()}</span>
               <span>{e.tenant}</span>
               <span>{e.user}</span>
               <span>{e.action}</span>
@@ -95,6 +72,7 @@ export function SystemAudit() {
               <span>{e.ip}</span>
             </div>
           ))}
+          {!loading && filtered.length === 0 ? <div className="dm-empty-state">暂无审计日志</div> : null}
         </Panel>
       </div>
     </>

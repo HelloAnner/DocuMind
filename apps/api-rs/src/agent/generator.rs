@@ -59,7 +59,6 @@ impl AnswerGenerator for MockAnswerGenerator {
 
         let report = verifier.verify(&answer, &evidence).await;
         let confidence = report.confidence;
-        let issues = report.issues;
         let usage_input = 512;
         let usage_output = answer.len() as u32;
 
@@ -71,17 +70,11 @@ impl AnswerGenerator for MockAnswerGenerator {
             for citation in citations {
                 let _ = tx.send(AnswerStreamItem::Citation { citation });
             }
-            if !issues.is_empty() {
-                let note = format!("\n[校验提示] {}", issues.join("；"));
-                for segment in split_answer(&note) {
-                    let _ = tx.send(AnswerStreamItem::Delta { text: segment });
-                }
-            }
             let _ = tx.send(AnswerStreamItem::Completed {
                 confidence,
                 usage: Some(crate::models::Usage {
                     input_tokens: usage_input,
-                    output_tokens: usage_output + issues.len() as u32 * 10,
+                    output_tokens: usage_output,
                 }),
             });
         });

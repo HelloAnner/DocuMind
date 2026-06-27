@@ -29,10 +29,13 @@ const filters = [
 export function AdminLogs() {
   const [logs, setLogs] = useState<QaLog[]>([]);
   const [filter, setFilter] = useState<typeof filters[number]["value"]>("today");
+  const [query, setQuery] = useState("");
 
   useEffect(() => {
-    fetchJson<QaLog[]>("/api/admin/logs").then(setLogs).catch(console.error);
-  }, []);
+    const params = new URLSearchParams({ range: filter });
+    if (query.trim()) params.set("q", query.trim());
+    fetchJson<QaLog[]>(`/api/admin/logs?${params.toString()}`).then(setLogs).catch(console.error);
+  }, [filter, query]);
 
   const scoreTone = (score: number) => {
     if (score >= 0.9) return "success";
@@ -54,7 +57,11 @@ export function AdminLogs() {
       <div className="dm-admin-content">
         <div className="dm-log-toolbar">
           <Segmented options={filters} value={filter} onChange={setFilter} />
-          <SearchInput placeholder="搜索问题或用户..." />
+          <SearchInput
+            placeholder="搜索问题、用户或知识库..."
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
         </div>
 
         <Panel title="Q&A Logs" action={<span>共 {logs.length} 条记录</span>}>

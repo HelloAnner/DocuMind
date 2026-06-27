@@ -1,54 +1,70 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { BarChart3 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
 import { StatCard } from "@/components/ui/stat-card";
 import { Topbar } from "@/components/ui/topbar";
+import { fetchJson } from "@/lib/api";
+
+interface SystemOverviewData {
+  tenant_count: number;
+  user_count: number;
+  kb_count: number;
+  doc_count: number;
+  indexed_doc_count: number;
+  chunk_count: number;
+  running_jobs: number;
+  failed_docs: number;
+  models: Array<{ name: string; model: string; status: string }>;
+  alerts: Array<{ message: string; action?: string }>;
+}
 
 export function SystemOverview() {
+  const [data, setData] = useState<SystemOverviewData | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    fetchJson<SystemOverviewData>("/api/system/overview")
+      .then(setData)
+      .catch((err) => setError(err instanceof Error ? err.message : "系统总览加载失败"));
+  }, []);
+
   return (
     <>
       <Topbar title="系统总览" />
       <div className="dm-admin-content">
         <div className="dm-stat-row">
-          <StatCard label="租户数" value="18" hint="+2 本月" />
-          <StatCard label="检索次数（24h）" value="1.2M" hint="↑ 8%" />
-          <StatCard label="生成成功率" value="99.3%" hint="稳定" />
-          <StatCard label="P95 检索" value="42ms" hint="↓ 3ms" />
+          <StatCard label="租户数" value={String(data?.tenant_count ?? "-")} hint="当前实例" />
+          <StatCard label="文档数" value={String(data?.doc_count ?? "-")} hint={`${data?.indexed_doc_count ?? 0} 已索引`} />
+          <StatCard label="切片数" value={(data?.chunk_count ?? 0).toLocaleString()} hint="PostgreSQL" />
+          <StatCard label="运行任务" value={String(data?.running_jobs ?? "-")} hint={`${data?.failed_docs ?? 0} 失败文档`} />
         </div>
+        {error ? <div className="dm-error-banner">{error}</div> : null}
 
         <div className="dm-overview-grid" style={{ marginTop: 24 }}>
           <Panel title="模型服务">
-            {[
-              { name: "chat-default", model: "qwen-plus", status: "healthy", throughput: "18 req/min" },
-              { name: "embedding-default", model: "bge-large-zh", status: "healthy", throughput: "240 chunks/min" },
-              { name: "reranker-default", model: "bge-reranker", status: "degraded", throughput: "p95 890ms" },
-            ].map((m) => (
+            {(data?.models ?? []).map((m) => (
               <div className="dm-system-row" key={m.name}>
                 <div>
                   <strong>{m.name}</strong>
                   <small>{m.model}</small>
                 </div>
-                <Badge tone={m.status === "healthy" ? "success" : "warning"}>{m.status}</Badge>
-                <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{m.throughput}</span>
+                <Badge tone={m.status === "configured" ? "success" : "warning"}>{m.status}</Badge>
+                <span style={{ color: "var(--text-muted)", fontSize: 13 }}>runtime config</span>
               </div>
             ))}
+            {data && data.models.length === 0 ? <div className="dm-empty-state">暂无模型配置</div> : null}
           </Panel>
 
           <Panel title="待关注">
-            {[
-              { message: "tenant:acme 向量化队列积压 2,341 个 chunk", action: "查看任务" },
-              { message: "tenant:beta 本月存储配额使用 86%", action: "调整配额" },
-              { message: "3 次 LLM provider fallback", action: "查看日志" },
-            ].map((a) => (
-              <div className="dm-system-row" key={a.message}>
+            {(data?.alerts ?? []).map((a) => (
+              <div className="dm-system-row" key={a.message} style={{ gridTemplateColumns: "1fr" }}>
                 <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>{a.message}</span>
-                <button className="dm-button ghost" style={{ height: 28, padding: "0 10px", fontSize: 12 }}>
-                  {a.action}
-                </button>
               </div>
             ))}
+            {data && data.alerts.length === 0 ? <div className="dm-empty-state">暂无告警</div> : null}
           </Panel>
         </div>
       </div>

@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row};
 use uuid::Uuid;
 
-use crate::models::agent::AgentTrace;
+use crate::models::agent::{AgentTrace, CitationOutput};
 use crate::models::citation::Citation;
 use crate::models::conversation::{
     ConversationListItem, ConversationListResponse, ConversationSession,
@@ -23,6 +23,103 @@ pub struct SqlxConversationRepository {
 impl SqlxConversationRepository {
     pub fn new(pool: Pool<Postgres>) -> Self {
         Self { pool }
+    }
+
+    async fn save_citation_snapshot(&self, citation: &Citation) -> anyhow::Result<()> {
+        let anchor_id = citation.anchor.as_ref().and_then(|anchor| anchor.anchor_id);
+        let parse_job_id = citation
+            .anchor
+            .as_ref()
+            .and_then(|anchor| anchor.parse_job_id);
+        let parse_job_id = if let Some(parse_job_id) = parse_job_id {
+            Some(parse_job_id)
+        } else {
+            sqlx::query_scalar::<_, Option<Uuid>>(
+                "SELECT latest_parse_job_id FROM documents WHERE id = $1 LIMIT 1",
+            )
+            .bind(citation.doc_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .flatten()
+        };
+        let Some(parse_job_id) = parse_job_id else {
+            return Ok(());
+        };
+
+        let anchor_snapshot = if let Some(anchor_id) = anchor_id {
+            sqlx::query_scalar::<_, serde_json::Value>(
+                "SELECT jsonb_build_object(
+                    'anchor_id', a.id,
+                    'doc_id', a.doc_id,
+                    'parse_job_id', a.parse_job_id,
+                    'tenant_id', a.tenant_id,
+                    'format', a.format,
+                    'kind', a.kind,
+                    'page', a.page,
+                    'slide', a.slide,
+                    'block_id', a.block_id,
+                    'table_id', a.table_id,
+                    'cell_range', a.cell_range,
+                    'char_range', a.char_range,
+                    'bbox', a.bbox,
+                    'source_ref', a.source_ref,
+                    'text', a.text,
+                    'text_hash', a.text_hash,
+                    'anchor_quality', a.anchor_quality
+                 )
+                 FROM document_source_anchors a
+                 WHERE a.id = $1 AND a.doc_id = $2
+                 LIMIT 1",
+            )
+            .bind(anchor_id)
+            .bind(citation.doc_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .unwrap_or_else(|| {
+                serde_json::to_value(&citation.anchor).unwrap_or_else(|_| serde_json::json!({}))
+            })
+        } else {
+            serde_json::to_value(&citation.anchor).unwrap_or_else(|_| serde_json::json!({}))
+        };
+
+        let location_status = citation
+            .anchor
+            .as_ref()
+            .map(|anchor| anchor.location_status.as_str())
+            .unwrap_or("unavailable");
+
+        sqlx::query(
+            "INSERT INTO conversation_citation_snapshots (
+                citation_id, message_id, doc_id, parse_job_id, anchor_id,
+                citation_index, quote, anchor_snapshot, claim_refs,
+                source_status, location_status
+             )
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '[]'::jsonb, $9, $10)
+             ON CONFLICT (citation_id) DO UPDATE SET
+                message_id = EXCLUDED.message_id,
+                doc_id = EXCLUDED.doc_id,
+                parse_job_id = EXCLUDED.parse_job_id,
+                anchor_id = EXCLUDED.anchor_id,
+                citation_index = EXCLUDED.citation_index,
+                quote = EXCLUDED.quote,
+                anchor_snapshot = EXCLUDED.anchor_snapshot,
+                source_status = EXCLUDED.source_status,
+                location_status = EXCLUDED.location_status",
+        )
+        .bind(citation.id)
+        .bind(citation.assistant_message_id)
+        .bind(citation.doc_id)
+        .bind(parse_job_id)
+        .bind(anchor_id)
+        .bind(citation.index)
+        .bind(&citation.quote)
+        .bind(anchor_snapshot)
+        .bind(&citation.source_status)
+        .bind(location_status)
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 }
 
@@ -412,10 +509,10 @@ impl ConversationRepository for SqlxConversationRepository {
             .bind(citation.index)
             .bind(citation.chunk_id)
             .bind(citation.doc_id)
-            .bind(citation.doc_title)
+            .bind(&citation.doc_title)
             .bind(&citation.page_range)
             .bind(serde_json::to_value(&citation.heading_path).unwrap())
-            .bind(citation.quote)
+            .bind(&citation.quote)
             .bind(citation.score)
             .bind(serde_json::to_value(&citation.anchor).unwrap_or(serde_json::Value::Null))
             .bind(
@@ -427,6 +524,7 @@ impl ConversationRepository for SqlxConversationRepository {
             )
             .execute(&self.pool)
             .await?;
+            self.save_citation_snapshot(&citation).await?;
         }
         Ok(())
     }
@@ -570,6 +668,40 @@ impl ConversationRepository for SqlxConversationRepository {
 
         let version_input: String = row.try_get("version_input")?;
         Ok(sha256_hex(version_input.as_bytes()))
+    }
+
+    async fn citations_valid_for_scope(
+        &self,
+        tenant_id: Uuid,
+        kb_ids: &[Uuid],
+        citations: &[CitationOutput],
+    ) -> anyhow::Result<bool> {
+        if kb_ids.is_empty() || citations.is_empty() {
+            return Ok(false);
+        }
+
+        let mut doc_ids: Vec<Uuid> = citations.iter().map(|citation| citation.doc_id).collect();
+        doc_ids.sort();
+        doc_ids.dedup();
+        if doc_ids.is_empty() {
+            return Ok(false);
+        }
+
+        let count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(DISTINCT id)
+             FROM documents
+             WHERE tenant_id = $1
+               AND kb_id = ANY($2)
+               AND id = ANY($3)
+               AND parse_status <> 'deleted'",
+        )
+        .bind(tenant_id)
+        .bind(kb_ids)
+        .bind(&doc_ids)
+        .fetch_one(&self.pool)
+        .await?;
+
+        Ok(count as usize == doc_ids.len())
     }
 
     async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {
