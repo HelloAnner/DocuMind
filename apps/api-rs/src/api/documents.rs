@@ -42,6 +42,10 @@ pub fn router() -> Router<AppState> {
             "/api/admin/documents/:doc_id/original",
             get(download_original),
         )
+        .route(
+            "/api/admin/documents/:doc_id/pages/:page/pdf",
+            get(download_page_pdf),
+        )
         .route("/api/admin/documents/:doc_id/move", post(move_document))
         .route("/api/admin/documents/:doc_id/retry", post(retry_parse))
         .route("/api/admin/documents/retry", post(retry_documents))
@@ -624,6 +628,7 @@ async fn download_original(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     AxumPath(doc_id): AxumPath<Uuid>,
+    req_headers: HeaderMap,
 ) -> Result<Response, AppError> {
     require_permission(&actor, "document.upload")?;
     let pool = state.db_pool.as_ref().ok_or_else(|| {
@@ -645,13 +650,41 @@ async fn download_original(
     })?;
     let file_name: String = row.get("file_name");
     let storage_key: String = row.get("storage_key");
-    let bytes = state.storage.get(&storage_key).await?;
+    let total_size = state.storage.size(&storage_key).await?;
 
+    if let Some(range) = req_headers
+        .get(header::RANGE)
+        .and_then(|value| value.to_str().ok())
+    {
+        if let Some((start, end)) = parse_byte_range(range, total_size) {
+            let bytes = state.storage.get_range(&storage_key, start, end).await?;
+            let mut headers = HeaderMap::new();
+            headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
+            headers.insert(
+                header::CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    start,
+                    end.saturating_sub(1),
+                    total_size
+                ))
+                .unwrap_or_else(|_| HeaderValue::from_static("bytes */*")),
+            );
+            return Ok((StatusCode::PARTIAL_CONTENT, headers, bytes).into_response());
+        }
+    }
+
+    let bytes = state.storage.get(&storage_key).await?;
     let mut headers = HeaderMap::new();
     headers.insert(
         header::CONTENT_TYPE,
         HeaderValue::from_static("application/octet-stream"),
     );
+    headers.insert(header::ACCEPT_RANGES, HeaderValue::from_static("bytes"));
     headers.insert(
         header::CONTENT_DISPOSITION,
         HeaderValue::from_str(&format!(
@@ -661,6 +694,29 @@ async fn download_original(
         .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
     );
     Ok((StatusCode::OK, headers, bytes).into_response())
+}
+
+fn parse_byte_range(range: &str, total_size: u64) -> Option<(u64, u64)> {
+    let range = range.strip_prefix("bytes=")?;
+    let (start_str, end_str) = range.split_once('-')?;
+
+    if start_str.is_empty() {
+        let suffix: u64 = end_str.parse().ok()?;
+        let start = total_size.saturating_sub(suffix);
+        return Some((start, total_size));
+    }
+
+    let start: u64 = start_str.parse().ok()?;
+    let end = if end_str.is_empty() {
+        total_size
+    } else {
+        end_str.parse::<u64>().ok()?.min(total_size)
+    };
+
+    if start >= end || start >= total_size {
+        return None;
+    }
+    Some((start, end))
 }
 
 // ---------------------------------------------------------------------------
@@ -2295,4 +2351,161 @@ mod tests {
         }
         writer.finish().unwrap().into_inner()
     }
+}
+
+async fn download_page_pdf(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    AxumPath((doc_id, page)): AxumPath<(Uuid, u32)>,
+) -> Result<Response, AppError> {
+    require_permission(&actor, "document.upload")?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        AppError::bad_request(
+            "DATABASE_REQUIRED",
+            "文档页预览需要启用 PostgreSQL 数据库连接",
+        )
+    })?;
+    let row = sqlx::query(
+        "SELECT storage_key FROM documents WHERE tenant_id = $1 AND id = $2",
+    )
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| AppError::NotFound {
+        code: "DOCUMENT_NOT_FOUND".to_string(),
+        message: "文档不存在或无权限".to_string(),
+    })?;
+    let storage_key: String = row.get("storage_key");
+
+    let base_dir = Path::new(&state.config.blob_storage_dir);
+    let cache_dir = base_dir
+        .parent()
+        .unwrap_or(base_dir)
+        .join("page_pdfs")
+        .join(doc_id.to_string());
+    let cache_path = cache_dir.join(format!("{}.pdf", page));
+
+    let total_path = cache_dir.join("total_pages.txt");
+
+    if !cache_path.exists() {
+        tokio::fs::create_dir_all(&cache_dir).await.map_err(|e| {
+            AppError::Internal(anyhow::anyhow!(
+                "failed to create page pdf cache dir: {}",
+                e
+            ))
+        })?;
+
+        let pdf_bytes = state.storage.get(&storage_key).await?;
+        let (single_page, total_pages) = tokio::task::spawn_blocking(move || {
+            extract_single_page_pdf(&pdf_bytes, page)
+        })
+        .await
+        .map_err(|e| AppError::Internal(anyhow::anyhow!("page extraction task failed: {:?}", e)))??;
+
+        let tmp_path = cache_path.with_extension("tmp");
+        tokio::fs::write(&tmp_path, &single_page)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to write temp page pdf: {}", e)))?;
+        tokio::fs::rename(&tmp_path, &cache_path)
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to finalize page pdf: {}", e)))?;
+        tokio::fs::write(&total_path, total_pages.to_string())
+            .await
+            .map_err(|e| AppError::Internal(anyhow::anyhow!("failed to write total pages: {}", e)))?;
+    }
+
+    let bytes = tokio::fs::read(&cache_path).await.map_err(|e| {
+        AppError::Internal(anyhow::anyhow!("failed to read cached page pdf: {}", e))
+    })?;
+    let total_pages = tokio::fs::read_to_string(&total_path)
+        .await
+        .ok()
+        .and_then(|s| s.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        header::CONTENT_TYPE,
+        HeaderValue::from_static("application/pdf"),
+    );
+    headers.insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    headers.insert(
+        "Access-Control-Expose-Headers",
+        HeaderValue::from_static("X-Total-Pages"),
+    );
+    if total_pages > 0 {
+        headers.insert(
+            "X-Total-Pages",
+            HeaderValue::from_str(&total_pages.to_string()).unwrap_or_else(|_| HeaderValue::from_static("0")),
+        );
+    }
+    Ok((StatusCode::OK, headers, bytes).into_response())
+}
+
+fn extract_single_page_pdf(pdf_bytes: &[u8], page: u32) -> anyhow::Result<(Vec<u8>, u32)> {
+    use anyhow::{bail, Context};
+    use lopdf::{Document, Object};
+
+    let mut doc = Document::load_mem(pdf_bytes)?;
+    let pages = doc.get_pages();
+    let total = pages.len() as u32;
+    if page < 1 || page > total {
+        bail!("page {} out of range (1-{})", page, total);
+    }
+    let target_id = *pages
+        .get(&page)
+        .with_context(|| format!("page {} not found", page))?;
+
+    let catalog = doc.catalog()?.clone();
+    let root_pages_ref = catalog
+        .get(b"Pages")
+        .context("missing Pages entry in catalog")?
+        .as_reference()
+        .context("Pages entry is not a reference")?;
+
+    for (num, id) in pages.iter() {
+        if *num != page {
+            doc.delete_object(*id);
+        }
+    }
+
+    let intermediate_pages: Vec<lopdf::ObjectId> = doc
+        .objects
+        .iter()
+        .filter(|(id, _)| **id != root_pages_ref)
+        .filter_map(|(id, obj)| {
+            if let Ok(dict) = obj.as_dict() {
+                if dict.get(b"Type").ok()?.as_name().ok() == Some(b"Pages") {
+                    return Some(*id);
+                }
+            }
+            None
+        })
+        .collect();
+    for id in intermediate_pages {
+        doc.delete_object(id);
+    }
+
+    if let Ok(root_pages) = doc.get_object_mut(root_pages_ref)?.as_dict_mut() {
+        root_pages.set(
+            "Kids",
+            Object::Array(vec![Object::Reference(target_id)]),
+        );
+        root_pages.set("Count", Object::Integer(1));
+    }
+    if let Ok(page_obj) = doc.get_object_mut(target_id)?.as_dict_mut() {
+        page_obj.set("Parent", Object::Reference(root_pages_ref));
+    }
+
+    doc.prune_objects();
+    doc.renumber_objects();
+    doc.compress();
+
+    let mut output = Vec::new();
+    doc.save_to(&mut output)?;
+    Ok((output, total))
 }

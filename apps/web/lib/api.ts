@@ -294,15 +294,33 @@ export function adminDocumentOriginalUrl(docId: string): string {
   return `${BASE}/api/admin/documents/${docId}/original`;
 }
 
+export function adminDocumentPagePdfUrl(docId: string, page: number): string {
+  return `${BASE}/api/admin/documents/${docId}/pages/${page}/pdf`;
+}
+
+const originalBlobCache = new Map<string, Promise<Blob>>();
+
 export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blob> {
-  const response = await fetch(adminDocumentOriginalUrl(docId), {
-    headers: getAuthHeaders(),
+  const cached = originalBlobCache.get(docId);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    const response = await fetch(adminDocumentOriginalUrl(docId), {
+      headers: getAuthHeaders(),
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "Unknown error");
+      throw new Error(`API error ${response.status}: ${text}`);
+    }
+    return response.blob();
+  })();
+
+  originalBlobCache.set(docId, promise);
+  promise.catch(() => {
+    originalBlobCache.delete(docId);
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    throw new Error(`API error ${response.status}: ${text}`);
-  }
-  return response.blob();
+
+  return promise;
 }
 
 export async function downloadAdminDocumentOriginal(docId: string, fileName: string): Promise<void> {

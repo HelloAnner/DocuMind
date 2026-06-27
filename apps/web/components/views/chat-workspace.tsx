@@ -130,11 +130,9 @@ export function ChatWorkspace() {
     </div>
   );
 
-  const renderRightRail = () => {
-    if (!rightOpen) return null;
-
-    return (
-      <aside className="dm-right-rail">
+  const renderRightRail = () => (
+    <aside className={`dm-right-rail ${rightOpen ? "open" : ""}`}>
+      <div className="dm-right-rail-inner">
         <IconButton
           aria-label="关闭文件预览"
           className="dm-right-rail-close"
@@ -150,9 +148,9 @@ export function ChatWorkspace() {
             <p className="dm-rail-empty">点击答案下方来源后预览原文</p>
           )}
         </div>
-      </aside>
-    );
-  };
+      </div>
+    </aside>
+  );
 
   return (
     <>

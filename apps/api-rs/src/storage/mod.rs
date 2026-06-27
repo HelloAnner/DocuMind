@@ -1,3 +1,4 @@
+use std::io::SeekFrom;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -7,6 +8,8 @@ use aws_config::BehaviorVersion;
 use aws_credential_types::Credentials;
 use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::{config::Region, Client, Config};
+use tokio::fs::{metadata, File};
+use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tracing::{info, warn};
 
 use crate::config::AppConfig;
@@ -19,6 +22,12 @@ pub trait ObjectStorage: Send + Sync {
 
     /// 读取指定 key 的字节流。
     async fn get(&self, key: &str) -> Result<Vec<u8>>;
+
+    /// 获取指定 key 的字节大小。
+    async fn size(&self, key: &str) -> Result<u64>;
+
+    /// 读取指定 key 的某个字节范围（含 start，不含 end）。
+    async fn get_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>>;
 
     /// 删除指定 key。失败不应阻塞调用方，由实现内部记录日志。
     async fn delete(&self, key: &str) -> Result<()>;
@@ -134,6 +143,39 @@ impl ObjectStorage for S3Storage {
         Ok(aggregated.into_bytes().to_vec())
     }
 
+    async fn size(&self, key: &str) -> Result<u64> {
+        let head = self
+            .client
+            .head_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .with_context(|| format!("failed to head object s3://{}/{}", self.bucket, key))?;
+        head.content_length
+            .map(|len| len as u64)
+            .context("missing content-length in head response")
+    }
+
+    async fn get_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>> {
+        // S3 range 是闭区间：bytes=start-end
+        let stream = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .range(format!("bytes={}-{}" , start, end.saturating_sub(1)))
+            .send()
+            .await
+            .with_context(|| format!("failed to get range s3://{}/{}", self.bucket, key))?
+            .body;
+        let aggregated = stream
+            .collect()
+            .await
+            .with_context(|| format!("failed to read range body s3://{}/{}", self.bucket, key))?;
+        Ok(aggregated.into_bytes().to_vec())
+    }
+
     async fn delete(&self, key: &str) -> Result<()> {
         self.client
             .delete_object()
@@ -181,6 +223,38 @@ impl ObjectStorage for LocalStorage {
         tokio::fs::read(&path)
             .await
             .with_context(|| format!("failed to read local file: {}", path.display()))
+    }
+
+    async fn size(&self, key: &str) -> Result<u64> {
+        let path = self.key_to_path(key);
+        let meta = metadata(&path)
+            .await
+            .with_context(|| format!("failed to stat local file: {}", path.display()))?;
+        Ok(meta.len())
+    }
+
+    async fn get_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>> {
+        let path = self.key_to_path(key);
+        let mut file = File::open(&path)
+            .await
+            .with_context(|| format!("failed to open local file: {}", path.display()))?;
+        file.seek(SeekFrom::Start(start))
+            .await
+            .with_context(|| format!("failed to seek local file: {}", path.display()))?;
+        let len = (end - start) as usize;
+        let mut buffer = vec![0_u8; len];
+        let mut read = 0_usize;
+        while read < len {
+            let n = file.read(&mut buffer[read..])
+                .await
+                .with_context(|| format!("failed to read local file: {}", path.display()))?;
+            if n == 0 {
+                break;
+            }
+            read += n;
+        }
+        buffer.truncate(read);
+        Ok(buffer)
     }
 
     async fn delete(&self, key: &str) -> Result<()> {

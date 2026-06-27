@@ -17,6 +17,7 @@ dotenvy.workspace = true
 futures.workspace = true
 hex = "0.4"
 jsonwebtoken = "9"
+lopdf = "0.42.0"
 pdf-extract = "0.7"
 quick-xml = "0.38"
 redis = { version = "0.25", features = ["tokio-comp"] }
