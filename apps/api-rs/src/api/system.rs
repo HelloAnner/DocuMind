@@ -21,6 +21,7 @@ pub fn router() -> Router<AppState> {
         .route("/api/system/jobs", get(list_jobs))
         .route("/api/system/audit", get(list_audit))
         .route("/api/system/settings", get(settings))
+        .route("/api/system/tenant-integrity", get(tenant_integrity))
         .route("/api/system/vector-indexes", get(list_vector_indexes))
 }
 
@@ -78,6 +79,63 @@ async fn overview(
         "failed_docs": 0,
         "models": runtime_models_json(&state),
         "alerts": []
+    })))
+}
+
+async fn tenant_integrity(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    require_super_admin(&actor)?;
+    let Some(pool) = &state.db_pool else {
+        return Ok(Json(json!({ "ok": true, "checks": {} })));
+    };
+
+    let documents_kb_tenant_mismatch: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM documents d
+         JOIN knowledge_base kb ON kb.id = d.kb_id
+         WHERE d.tenant_id <> kb.tenant_id",
+    )
+    .fetch_one(pool)
+    .await?;
+    let chunks_doc_scope_mismatch: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM chunks c
+         JOIN documents d ON d.id = c.doc_id
+         WHERE c.tenant_id <> d.tenant_id OR c.kb_id <> d.kb_id",
+    )
+    .fetch_one(pool)
+    .await?;
+    let embeddings_chunk_scope_mismatch: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM chunk_embeddings e
+         JOIN chunks c ON c.id = e.chunk_id
+         WHERE e.tenant_id <> c.tenant_id OR e.kb_id <> c.kb_id OR e.doc_id <> c.doc_id",
+    )
+    .fetch_one(pool)
+    .await?;
+    let anchors_doc_scope_mismatch: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*)
+         FROM document_source_anchors a
+         JOIN documents d ON d.id = a.doc_id
+         WHERE a.tenant_id <> d.tenant_id",
+    )
+    .fetch_one(pool)
+    .await?;
+    let ok = documents_kb_tenant_mismatch == 0
+        && chunks_doc_scope_mismatch == 0
+        && embeddings_chunk_scope_mismatch == 0
+        && anchors_doc_scope_mismatch == 0;
+
+    Ok(Json(json!({
+        "ok": ok,
+        "checks": {
+            "documents_kb_tenant_mismatch": documents_kb_tenant_mismatch,
+            "chunks_doc_scope_mismatch": chunks_doc_scope_mismatch,
+            "embeddings_chunk_scope_mismatch": embeddings_chunk_scope_mismatch,
+            "anchors_doc_scope_mismatch": anchors_doc_scope_mismatch
+        }
     })))
 }
 

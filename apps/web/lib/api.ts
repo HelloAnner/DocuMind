@@ -158,6 +158,53 @@ export async function listAdminMembers(): Promise<AdminMember[]> {
   return fetchJson("/api/admin/members");
 }
 
+export interface TenantInvitation {
+  id: string;
+  tenant_id: string;
+  email: string;
+  name?: string;
+  roles: string[];
+  kb_grants: { kb_id: string; permission: KnowledgeBasePermission }[];
+  status: string;
+  invited_by: string;
+  invited_by_label?: string;
+  accepted_by?: string;
+  expires_at: string;
+  accepted_at?: string;
+  revoked_at?: string;
+  created_at: string;
+  invite_url?: string;
+}
+
+export interface CreateTenantInvitationRequest {
+  email: string;
+  name?: string;
+  roles: string[];
+  kb_grants?: { kb_id: string; permission: KnowledgeBasePermission }[];
+  expires_in_days?: number;
+}
+
+export async function listTenantInvitations(): Promise<TenantInvitation[]> {
+  return fetchJson("/api/admin/invitations");
+}
+
+export async function createTenantInvitation(
+  req: CreateTenantInvitationRequest
+): Promise<TenantInvitation> {
+  return fetchJson("/api/admin/invitations", {
+    method: "POST",
+    body: JSON.stringify(req),
+  });
+}
+
+export async function resendTenantInvitation(id: string): Promise<TenantInvitation> {
+  return fetchJson(`/api/admin/invitations/${id}/resend`, { method: "POST" });
+}
+
+export async function revokeTenantInvitation(id: string): Promise<TenantInvitation> {
+  return fetchJson(`/api/admin/invitations/${id}/revoke`, { method: "POST" });
+}
+
 export type PermissionSubjectType = "role" | "user";
 export type KnowledgeBasePermission = "read" | "write" | "manage";
 

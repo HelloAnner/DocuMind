@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { SystemSidebar } from "@/components/ui/system-sidebar";
+import { AdminShellSidebar } from "@/components/ui/admin-shell-sidebar";
 import { useAuth } from "@/components/providers/auth-provider";
 
 export default function SystemLayout({
@@ -23,7 +23,7 @@ export default function SystemLayout({
   if (loading || !me) {
     return (
       <main className="dm-shell">
-        <SystemSidebar />
+        <AdminShellSidebar />
         <section className="dm-workspace" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
           <span>加载中…</span>
         </section>
@@ -33,7 +33,7 @@ export default function SystemLayout({
 
   return (
     <main className="dm-shell">
-      <SystemSidebar />
+      <AdminShellSidebar />
       <section className="dm-workspace">{children}</section>
     </main>
   );

@@ -23,6 +23,14 @@ DocuMind 是企业级文档智能问答系统，权限边界必须在 Prompt 之
 - 早期的 `mock_current_user` 只适合开发原型，不属于服务器验收口径。
 - 登录后按角色和权限收敛导航、接口和知识库范围。
 
+远端核验事实（2026-06-28）：
+
+- `ssh documind` 当前 release 是 `/opt/documind/releases/20260628-015027`。
+- `/api/health` 返回生产 release 正常，PostgreSQL、Redis、RabbitMQ、Elasticsearch、MinIO/object storage、真实 LLM、Embedding 全部可用。
+- `Anner` 是当前超级管理员；远端 `/api/v1/auth/login` 核验返回 `roles=["super_admin"]`、26 个权限、3 个可访问知识库并签发 token。
+- 当前租户为 `AcmeCorp` / `acme`；当前成员包括 `Anner`、`admin@documind.local`、`user@documind.local`。
+- 当前线上兼容角色仍有 `enterprise_admin` 和 `user`：`enterprise_admin` 可访问 `/api/admin/*` 但不可访问 `/api/system/*`；`user` 不可访问后台。
+
 ---
 
 ## 2. 角色模型
@@ -42,6 +50,8 @@ DocuMind 是企业级文档智能问答系统，权限边界必须在 Prompt 之
 - 角色是能力集合，不是身份标签；同一个账号可以在 A 租户是 `tenant_admin`，在 B 租户是 `end_user`。
 - `tenant_owner` 和 `tenant_admin` 可在页面上统称“租户管理员”，但接口鉴权必须保留更高权限能力。
 - `knowledge_admin` 如果未来出现，只作为 `tenant_admin` 的产品文案别名；底层不再新增一套平行角色。
+- 当前线上兼容角色 `enterprise_admin` / `team_admin` / `data_admin` 按租户管理员能力处理；后续迁移到目标态角色时，必须保留兼容映射直到数据库和前端全部清理完成。
+- 当前线上兼容角色 `user` 按普通用户处理，目标态应统一为 `end_user`。
 
 ### 2.2 租户成员关系
 
@@ -139,6 +149,62 @@ hybrid search WHERE tenant_id = ? AND kb_id IN (...)
   ↓
 rerank / context assembly / answer generation
 ```
+
+### 2.4 邀请机制
+
+当前远端数据库只有 `tenant_member.invited_by`、`tenant_member.invited_at` 字段，没有独立 invitation / invite token 表，且当前 3 个成员邀请字段均为空。因此“邀请机制全部有效”必须作为独立闭环补齐，而不是只在成员表里补两个字段。
+
+目标数据模型：
+
+```sql
+CREATE TABLE tenant_invitation (
+    id              UUID PRIMARY KEY,
+    tenant_id       UUID NOT NULL REFERENCES tenant(id),
+    email           VARCHAR(128) NOT NULL,
+    roles           TEXT[] NOT NULL,
+    kb_grants       JSONB NOT NULL DEFAULT '[]',
+    token_hash      VARCHAR(256) NOT NULL UNIQUE,
+    status          VARCHAR(16) NOT NULL DEFAULT 'pending',
+    invited_by      UUID NOT NULL REFERENCES app_user(id),
+    accepted_by     UUID REFERENCES app_user(id),
+    expires_at      TIMESTAMPTZ NOT NULL,
+    accepted_at     TIMESTAMPTZ,
+    revoked_at      TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (tenant_id, email, status)
+);
+```
+
+邀请流程：
+
+```text
+租户管理员创建邀请
+  ↓
+校验 tenant scope 与可分配角色
+  ↓
+写 tenant_invitation(token_hash)，只把明文 token 放进邮件/复制链接
+  ↓
+受邀人打开 /invite/{token}
+  ↓
+校验 token hash、过期时间、状态、租户状态
+  ↓
+已有账号：绑定 tenant_member
+无账号：先创建 app_user，再绑定 tenant_member
+  ↓
+写 knowledge_base_acl 或成员属性 grants
+  ↓
+邀请标记 accepted，写 audit_log
+```
+
+邀请硬规则：
+
+- 租户管理员只能邀请到自己当前租户，不能在请求体里指定任意 `tenant_id`。
+- 租户管理员不能邀请 `super_admin`，也不能授予全局系统权限。
+- 邀请链接只存 hash，不在数据库保存明文 token。
+- 邀请必须支持重发、撤销、过期、接受后幂等处理。
+- 接受邀请后必须立即生效：`/api/me` 返回新租户成员关系、角色、权限和知识库 ACL。
+- 邀请创建、重发、撤销、接受、角色变更都必须写 `audit_log`。
 
 ---
 
@@ -272,9 +338,8 @@ viewer       → /knowledge
 /admin/logs                     问答日志
 /admin/members                  用户管理
 /admin/chunking                 切割策略
-/admin/embedding                向量化模型
 /admin/search                   检索参数
-/admin/llm                      LLM 服务商
+/admin/models                   租户模型绑定
 ```
 
 后续可补：
@@ -285,6 +350,12 @@ viewer       → /knowledge
 /admin/settings                 租户设置 / SSO / 安全
 /admin/usage                    用量与配额
 ```
+
+说明：
+
+- 现有 `/admin/embedding` 和 `/admin/llm` 如果继续保留，只能作为租户级模型绑定或参数覆盖页面，不得展示或修改全局 Provider 密钥。
+- 全局模型 Provider、Embedding 维度、Reranker 服务、fallback 顺序属于 `/system/models`，只允许 `super_admin` 访问。
+- 后台左侧边栏必须遵循 [后台导航统一契约](../frontend/admin-navigation.md)，不能在 `/system`、`/admin`、`/tenant` 各自维护不同顺序的“知识库”入口。
 
 ### 5.3 普通用户页面
 
@@ -433,9 +504,10 @@ DocuMind
 
 系统配置
   切割策略
-  向量化模型
   检索参数
-  LLM 服务商
+  租户模型绑定
+  用量与配额
+  SSO 与安全
 
 返回对话
 ```
@@ -530,6 +602,15 @@ DocuMind
 - 知识库授权：read/write/manage 列表。
 - 活动：加入时间、最后活跃、月问答数、负反馈数。
 - 操作：改角色、重发邀请、停用、移除、踢出 session。
+
+邀请用户抽屉必须包含：
+
+- 邮箱、姓名（可选）、角色。
+- 初始知识库授权：全部知识库 / 指定知识库 / 暂不授权。
+- 邀请有效期，默认 7 天。
+- 发送邀请、复制邀请链接、重发邀请、撤销邀请。
+
+租户管理员可邀请 `tenant_admin`、`end_user`、`viewer`，不可邀请 `super_admin`。
 
 ### 7.6 权限策略 `/admin/permissions`
 

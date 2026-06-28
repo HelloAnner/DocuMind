@@ -14,6 +14,10 @@
 | 依赖检查 | PostgreSQL、Redis、RabbitMQ、Elasticsearch、MinIO、真实 LLM、Embedding 全部 `ok=true` |
 | 模型 | LLM `qwen-max`，Embedding `text-embedding-v3` |
 | 文档状态 | `indexed=346`，`excluded_from_search=1`，`parse_failed=1`，`parse_low_confidence=9`，`parsed=2` |
+| 真实账号 | `Anner` 登录为 `super_admin`，`admin@documind.local` 登录为 `enterprise_admin`，`user@documind.local` 登录为 `user` |
+| 当前租户 | `AcmeCorp` / `acme` / `active` |
+| 当前知识库数据 | 产品文档库 110 文档，销售资料库 249 文档，人力资源库 0 文档 |
+| 当前切片与锚点 | `documents=359`，`chunks=2982`，`document_source_anchors=1195` |
 
 说明：RabbitMQ 依赖健康检查已通过，但当前解析/OCR/embedding 的业务任务仍主要由 Rust 进程内异步任务驱动。应用启动时已能把上次进程中断留下的 in-flight 文档任务标记为明确失败/低置信并允许管理员重试，但尚未形成文档中描述的 RabbitMQ 队列编排、自动重投递和死信链路。
 
@@ -35,6 +39,10 @@
 | Portal SSO | 可选 `AUTH_LOGIN_MODE=portal`，门户 token 换本地登录态 | `apps/api-rs/src/api/auth.rs` 有 portal callback 路由和兼容接口 | 需要继续验证门户真实回调、自动建号和角色映射完整性 |
 | RBAC | 角色权限与知识库 ACL | `derive_permissions`、`require_permission`、`knowledge_base_acl`、前端权限页已接 API | 已具备在线授权/撤销；细粒度审计与多租户配额未完整实现 |
 | 审计 | 权限、登录、文档操作审计可查 | `record_audit_event` 已写 `audit_log`，系统/管理日志接口可查部分事件 | 审计事件覆盖面、筛选、导出、保留策略未达到生产完整态 |
+| 超级管理员 | `Anner` 作为超级管理员可登录并看到全部全局后台能力 | 远端 `/api/v1/auth/login` 验证 `Anner` 返回 `roles=["super_admin"]`、26 个权限、3 个可访问知识库；可访问 `/api/system/users`、`/api/system/models` | 已对齐当前要求；后续需把验收脚本固定为发布门禁 |
+| 租户管理员 | 租户管理员可管理本租户知识库、文档解析、成员、ACL 和租户级配置，不可访问全局模型配置 | `admin@documind.local` 当前为 `enterprise_admin`，可访问 `/api/admin/knowledge-bases`，访问 `/api/system/models` 返回 403 | 角色名仍需从兼容态 `enterprise_admin` 收敛到目标态 `tenant_admin`；前端侧栏还需统一 |
+| 普通用户 | 普通用户不可见后台，只能访问授权知识库和对话 | `user@documind.local` 可登录，访问 `/api/admin/knowledge-bases` 与 `/api/system/models` 均返回 403 | 已对齐核心 API 边界；仍需补浏览器 UI 导航验收 |
+| 邀请机制 | 租户管理员可邀请成员、分配角色和知识库授权，邀请链接可接受/撤销/重发/过期 | 数据库只有 `tenant_member.invited_by/invited_at`，无 invitation token 表；当前邀请字段均为空 | 未完成，需要新增 `tenant_invitation` 表、token hash、接受流程、审计和 E2E 验收 |
 
 ## 3. 知识库与文档管理
 
@@ -46,6 +54,7 @@
 | 文档详情 | blocks、chunks、tables、preview 可查看 | 管理详情和抽屉已有 parsed text preview、blocks、tables | 原文预览与解析文本预览共存；详情页不是完整 FileView |
 | OCR 状态元数据 | OCR 队列/运行/失败状态不被普通解析覆盖 | `parse_running_metadata` / `parse_failed_metadata` 仅在 OCR 任务写入 `ocr_status` | 已修复非 OCR 重解析把 `ocr_status` 覆盖为 JSON null 的风险；队列化仍待实现 |
 | 中断任务恢复 | 进程重启后解析/OCR/embedding 不应永久卡在处理中 | `recover_interrupted_document_jobs` 启动时把 `uploaded/parsing/chunked/embedding/ocr_pending` 且 job 为 `pending/running/ocr_queued` 的任务改为可解释失败态 | 已避免永久卡死；仍需 RabbitMQ worker 级自动重试和死信 |
+| 租户数据隔离 | 知识库、文档、解析、chunk、embedding、anchor 均按租户隔离 | 远端 `documents/chunks/chunk_embeddings/document_source_anchors` scope mismatch 核验均为 0；storage_key 使用 `tenants/{tenant_id}/knowledge-bases/{kb_id}/documents/{doc_id}/...` | 当前数据干净；仍需补更多复合约束和跨租户权限 E2E |
 
 ## 4. 文档解析
 
@@ -130,6 +139,7 @@
 | Runtime Config | 配置页可看切分/embedding/search/llm | `/api/admin/runtime-config` 返回 `read_only=true` 的运行配置 | 在线持久化配置未实现 |
 | Vector Index Ops | 索引管理、重建、迁移 | 系统页可查看基础信息 | 重建/迁移/优化操作未实现 |
 | 部署 | `make deploy` 到 `ssh documind`，健康检查 | 已稳定部署到 release 目录并通过 `make health` | 回滚演练、灰度策略、发布审计仍需补齐 |
+| 后台导航 | 左侧边栏稳定统一，按角色过滤可见菜单 | 当前代码存在 `AdminSidebar`、`SystemSidebar`、`TenantSidebar`、`ChatSidebar` 多套入口；`SystemSidebar` 还内嵌知识库后台快捷组 | 需要按 `docs/frontend/admin-navigation.md` 收敛为统一菜单模型，避免知识库入口在不同页面位置变化 |
 
 ## 13. 测试与评估
 

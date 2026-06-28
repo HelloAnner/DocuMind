@@ -22,6 +22,41 @@
 6. “文档管理”页面和“知识库管理”页面点击文档时复用同一套详情抽屉，避免两边预览能力不一致。
 7. 后端接口返回真实数据库数据；没有数据库时不伪造管理数据。
 
+## 远端现状核验（2026-06-28）
+
+基于 `ssh documind` 的真实 PostgreSQL 和 API：
+
+- 当前只有一个租户 `AcmeCorp`，3 个知识库均为 `active`。
+- `产品文档库` 当前 110 个文档，文档表汇总 chunk_count 为 1430。
+- `销售资料库` 当前 249 个文档，文档表汇总 chunk_count 为 277。
+- `人力资源库` 当前 0 个文档。
+- `documents` 当前总数 359，按状态为：`indexed=346`、`excluded_from_search=1`、`parse_failed=1`、`parse_low_confidence=9`、`parsed=2`。
+- `chunks` 当前总数 2982，覆盖 353 个文档。
+- `document_source_anchors` 当前总数 1195，覆盖 72 个文档。
+- `Anner` 远端登录为 `super_admin`，可访问 `/api/admin/knowledge-bases` 和 `/api/admin/documents?limit=1`。
+- `admin@documind.local` 远端登录为 `enterprise_admin`，可访问 `/api/admin/knowledge-bases`，但不可访问 `/api/system/models`。
+- `user@documind.local` 远端登录为 `user`，不可访问 `/api/admin/knowledge-bases`。
+
+## 租户管理员边界
+
+租户管理员可以管理本租户知识库后台：
+
+- 创建、编辑、归档、删除本租户知识库。
+- 上传、删除、移动、重试和批量重试本租户文档。
+- 查看解析、清洗、切割、向量化状态和失败原因。
+- 查看本租户文档详情、解析块、表格、chunk、source anchor 和引用状态。
+- 配置本租户知识库默认切割策略、检索参数和已授权模型绑定。
+- 管理本租户成员和知识库 ACL。
+
+租户管理员不能管理全局系统能力：
+
+- 不能进入 `/system/models` 修改全局 LLM / Embedding / Reranker Provider。
+- 不能查看或回显全局 API key。
+- 不能修改全局向量索引版本、全局任务队列和全平台审计。
+- 不能跨租户查看其他租户知识库、文档、chunk、引用或解析任务。
+
+后台左侧边栏必须稳定：`知识库` 永远位于“知识库后台”分组第一项，`文档管理` 永远紧随其后。详细菜单契约见 [后台导航统一契约](../frontend/admin-navigation.md)。
+
 ## 信息架构
 
 ```text

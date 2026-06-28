@@ -102,6 +102,28 @@ export async function loginWithPassword(username: string, password: string): Pro
   return data;
 }
 
+export async function acceptInvitation(
+  token: string,
+  name: string,
+  password: string
+): Promise<MeResponse> {
+  const res = await fetch(`${BASE}/api/v1/invitations/accept`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ token, name: name || undefined, password }),
+  });
+  if (!res.ok) throw new Error("邀请链接无效、已过期或密码不符合要求");
+  const data: LoginResponse = await res.json();
+  setStoredAuth({
+    token: data.access_token,
+    userId: data.user.id,
+    tenantId: data.tenant.id,
+    email: data.user.email,
+    roles: data.roles,
+  });
+  return data;
+}
+
 export async function logoutRequest() {
   try {
     await fetch(`${BASE}/api/v1/auth/logout`, {
@@ -120,6 +142,26 @@ export function logout() {
   window.location.href = "/login";
 }
 
+export function isSuperAdminRole(roles: UserRole[] | string[]): boolean {
+  return roles.includes("super_admin");
+}
+
+export function isTenantAdminRole(roles: UserRole[] | string[]): boolean {
+  return roles.some((role) =>
+    [
+      "enterprise_admin",
+      "team_admin",
+      "data_admin",
+      "tenant_owner",
+      "tenant_admin",
+    ].includes(role)
+  );
+}
+
+export function canAccessAdmin(roles: UserRole[] | string[]): boolean {
+  return isSuperAdminRole(roles) || isTenantAdminRole(roles);
+}
+
 export function defaultRouteForRole(role: UserRole): string {
   switch (role) {
     case "super_admin":
@@ -127,10 +169,9 @@ export function defaultRouteForRole(role: UserRole): string {
     case "enterprise_admin":
     case "team_admin":
     case "data_admin":
-      return "/chat";
     case "tenant_owner":
     case "tenant_admin":
-      return "/tenant";
+      return "/admin";
     case "viewer":
       return "/knowledge";
     case "user":

@@ -2,8 +2,10 @@ use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, put};
 use axum::{Json, Router};
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use sha2::{Digest, Sha256};
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -24,6 +26,18 @@ pub fn router() -> Router<AppState> {
             put(update_knowledge_base).delete(delete_knowledge_base),
         )
         .route("/api/admin/members", get(list_members))
+        .route(
+            "/api/admin/invitations",
+            get(list_invitations).post(create_invitation),
+        )
+        .route(
+            "/api/admin/invitations/:invitation_id/resend",
+            axum::routing::post(resend_invitation),
+        )
+        .route(
+            "/api/admin/invitations/:invitation_id/revoke",
+            axum::routing::post(revoke_invitation),
+        )
         .route(
             "/api/admin/permissions",
             get(list_permissions).post(grant_permission),
@@ -49,6 +63,21 @@ struct PermissionGrantRequest {
 }
 
 #[derive(Debug, Deserialize)]
+struct InvitationGrantRequest {
+    kb_id: Uuid,
+    permission: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct InvitationCreateRequest {
+    email: String,
+    name: Option<String>,
+    roles: Vec<String>,
+    kb_grants: Option<Vec<InvitationGrantRequest>>,
+    expires_in_days: Option<i64>,
+}
+
+#[derive(Debug, Deserialize)]
 struct AdminLogQuery {
     range: Option<String>,
     q: Option<String>,
@@ -68,6 +97,31 @@ struct KnowledgeBaseAuthorization {
     created_by: Option<Uuid>,
     created_by_label: Option<String>,
     created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct TenantInvitationSummary {
+    id: Uuid,
+    tenant_id: Uuid,
+    email: String,
+    name: Option<String>,
+    roles: Vec<String>,
+    kb_grants: serde_json::Value,
+    status: String,
+    invited_by: Uuid,
+    invited_by_label: Option<String>,
+    accepted_by: Option<Uuid>,
+    expires_at: chrono::DateTime<chrono::Utc>,
+    accepted_at: Option<chrono::DateTime<chrono::Utc>>,
+    revoked_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+    invite_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct InvitationGrant {
+    kb_id: Uuid,
+    permission: String,
 }
 
 async fn overview(
@@ -541,6 +595,263 @@ async fn list_members(
     ]))
 }
 
+async fn list_invitations(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<Vec<TenantInvitationSummary>>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "member.read")?;
+
+    let Some(pool) = &state.db_pool else {
+        return Ok(Json(vec![]));
+    };
+
+    let rows = sqlx::query(
+        r#"
+        SELECT inv.id,
+               inv.tenant_id,
+               inv.email,
+               inv.name,
+               inv.roles,
+               inv.kb_grants,
+               CASE
+                 WHEN inv.status = 'pending' AND inv.expires_at < NOW() THEN 'expired'
+                 ELSE inv.status
+               END AS status,
+               inv.invited_by,
+               COALESCE(NULLIF(u.name, ''), u.email) AS invited_by_label,
+               inv.accepted_by,
+               inv.expires_at,
+               inv.accepted_at,
+               inv.revoked_at,
+               inv.created_at
+        FROM tenant_invitation inv
+        LEFT JOIN app_user u ON u.id = inv.invited_by
+        WHERE inv.tenant_id = $1
+        ORDER BY inv.created_at DESC
+        LIMIT 100
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .fetch_all(pool)
+    .await?;
+
+    Ok(Json(rows.into_iter().map(invitation_from_row).collect()))
+}
+
+async fn create_invitation(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Json(req): Json<InvitationCreateRequest>,
+) -> Result<Json<TenantInvitationSummary>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "member.write")?;
+
+    let Some(pool) = &state.db_pool else {
+        return Err(crate::error::AppError::bad_request(
+            "DB_REQUIRED",
+            "邀请功能需要数据库",
+        ));
+    };
+
+    let email = normalize_email(&req.email)?;
+    let roles = normalize_invitation_roles(&req.roles)?;
+    let grants =
+        normalize_invitation_grants(pool, actor.tenant_id, req.kb_grants.unwrap_or_default())
+            .await?;
+    let expires_at = Utc::now() + Duration::days(req.expires_in_days.unwrap_or(7).clamp(1, 30));
+    let token = new_invitation_token();
+    let token_hash = invitation_token_hash(&token);
+    let grants_json = serde_json::to_value(&grants)?;
+
+    let row = sqlx::query(
+        r#"
+        INSERT INTO tenant_invitation
+          (tenant_id, email, name, roles, kb_grants, token_hash, status, invited_by, expires_at)
+        VALUES ($1, $2, $3, $4, $5, $6, 'pending', $7, $8)
+        ON CONFLICT DO NOTHING
+        RETURNING id,
+                  tenant_id,
+                  email,
+                  name,
+                  roles,
+                  kb_grants,
+                  status,
+                  invited_by,
+                  NULL::text AS invited_by_label,
+                  accepted_by,
+                  expires_at,
+                  accepted_at,
+                  revoked_at,
+                  created_at
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(&email)
+    .bind(req.name.as_deref().map(str::trim).filter(|v| !v.is_empty()))
+    .bind(&roles)
+    .bind(&grants_json)
+    .bind(&token_hash)
+    .bind(actor.user_id)
+    .bind(expires_at)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::Conflict {
+        code: "INVITATION_EXISTS".to_string(),
+        message: "该邮箱已有待接受邀请".to_string(),
+    })?;
+
+    let mut invitation = invitation_from_row(row);
+    invitation.invite_url = Some(invite_url(&token));
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "tenant_invitation.create",
+        Some("tenant_invitation"),
+        Some(&invitation.id.to_string()),
+        json!({
+            "email": invitation.email,
+            "roles": invitation.roles,
+            "kb_grants": invitation.kb_grants,
+            "expires_at": invitation.expires_at,
+        }),
+    )
+    .await?;
+    Ok(Json(invitation))
+}
+
+async fn resend_invitation(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(invitation_id): Path<Uuid>,
+) -> Result<Json<TenantInvitationSummary>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "member.write")?;
+    let Some(pool) = &state.db_pool else {
+        return Err(crate::error::AppError::bad_request(
+            "DB_REQUIRED",
+            "邀请功能需要数据库",
+        ));
+    };
+
+    let token = new_invitation_token();
+    let token_hash = invitation_token_hash(&token);
+    let expires_at = Utc::now() + Duration::days(7);
+    let row = sqlx::query(
+        r#"
+        UPDATE tenant_invitation
+        SET token_hash = $3,
+            expires_at = $4,
+            status = 'pending',
+            revoked_at = NULL,
+            updated_at = NOW()
+        WHERE tenant_id = $1
+          AND id = $2
+          AND status = 'pending'
+          AND accepted_at IS NULL
+        RETURNING id,
+                  tenant_id,
+                  email,
+                  name,
+                  roles,
+                  kb_grants,
+                  status,
+                  invited_by,
+                  NULL::text AS invited_by_label,
+                  accepted_by,
+                  expires_at,
+                  accepted_at,
+                  revoked_at,
+                  created_at
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(invitation_id)
+    .bind(&token_hash)
+    .bind(expires_at)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::NotFound {
+        code: "INVITATION_NOT_FOUND".to_string(),
+        message: "邀请不存在、已接受或已撤销".to_string(),
+    })?;
+
+    let mut invitation = invitation_from_row(row);
+    invitation.invite_url = Some(invite_url(&token));
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "tenant_invitation.resend",
+        Some("tenant_invitation"),
+        Some(&invitation.id.to_string()),
+        json!({ "email": invitation.email, "expires_at": invitation.expires_at }),
+    )
+    .await?;
+    Ok(Json(invitation))
+}
+
+async fn revoke_invitation(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(invitation_id): Path<Uuid>,
+) -> Result<Json<TenantInvitationSummary>, crate::error::AppError> {
+    require_tenant_admin(&actor)?;
+    require_permission(&actor, "member.write")?;
+    let Some(pool) = &state.db_pool else {
+        return Err(crate::error::AppError::bad_request(
+            "DB_REQUIRED",
+            "邀请功能需要数据库",
+        ));
+    };
+
+    let row = sqlx::query(
+        r#"
+        UPDATE tenant_invitation
+        SET status = 'revoked',
+            revoked_at = NOW(),
+            updated_at = NOW()
+        WHERE tenant_id = $1
+          AND id = $2
+          AND status = 'pending'
+          AND accepted_at IS NULL
+        RETURNING id,
+                  tenant_id,
+                  email,
+                  name,
+                  roles,
+                  kb_grants,
+                  status,
+                  invited_by,
+                  NULL::text AS invited_by_label,
+                  accepted_by,
+                  expires_at,
+                  accepted_at,
+                  revoked_at,
+                  created_at
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(invitation_id)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| crate::error::AppError::NotFound {
+        code: "INVITATION_NOT_FOUND".to_string(),
+        message: "邀请不存在、已接受或已撤销".to_string(),
+    })?;
+
+    let invitation = invitation_from_row(row);
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "tenant_invitation.revoke",
+        Some("tenant_invitation"),
+        Some(&invitation.id.to_string()),
+        json!({ "email": invitation.email }),
+    )
+    .await?;
+    Ok(Json(invitation))
+}
+
 async fn list_permissions(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
@@ -857,6 +1168,101 @@ fn normalize_tags(values: Vec<String>) -> Vec<String> {
     tags.sort();
     tags.dedup();
     tags
+}
+
+fn normalize_email(value: &str) -> Result<String, crate::error::AppError> {
+    let email = value.trim().to_lowercase();
+    if email.is_empty() || !email.contains('@') {
+        return Err(crate::error::AppError::bad_request(
+            "EMAIL_INVALID",
+            "请输入有效邮箱",
+        ));
+    }
+    Ok(email)
+}
+
+fn normalize_invitation_roles(values: &[String]) -> Result<Vec<String>, crate::error::AppError> {
+    if values.is_empty() {
+        return Err(crate::error::AppError::bad_request(
+            "INVITATION_ROLE_REQUIRED",
+            "邀请至少需要一个角色",
+        ));
+    }
+    let mut roles = Vec::new();
+    for value in values {
+        let role = match value.trim() {
+            "tenant_admin" => "tenant_admin",
+            "end_user" | "user" | "analyst" => "end_user",
+            "viewer" => "viewer",
+            "super_admin" => return Err(crate::error::AppError::forbidden()),
+            _ => {
+                return Err(crate::error::AppError::bad_request(
+                    "INVITATION_ROLE_INVALID",
+                    "可邀请角色只能是 tenant_admin / end_user / viewer",
+                ));
+            }
+        };
+        if !roles.iter().any(|item| item == role) {
+            roles.push(role.to_string());
+        }
+    }
+    Ok(roles)
+}
+
+async fn normalize_invitation_grants(
+    pool: &sqlx::PgPool,
+    tenant_id: Uuid,
+    grants: Vec<InvitationGrantRequest>,
+) -> Result<Vec<InvitationGrant>, crate::error::AppError> {
+    let mut out = Vec::new();
+    for grant in grants {
+        ensure_kb_exists(pool, tenant_id, grant.kb_id).await?;
+        let permission = normalize_acl_permission(&grant.permission)?.to_string();
+        if !out.iter().any(|item: &InvitationGrant| {
+            item.kb_id == grant.kb_id && item.permission == permission
+        }) {
+            out.push(InvitationGrant {
+                kb_id: grant.kb_id,
+                permission,
+            });
+        }
+    }
+    Ok(out)
+}
+
+fn new_invitation_token() -> String {
+    format!("inv_{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple())
+}
+
+fn invitation_token_hash(token: &str) -> String {
+    let digest = Sha256::digest(token.as_bytes());
+    hex::encode(digest)
+}
+
+fn invite_url(token: &str) -> String {
+    format!("/invite?token={token}")
+}
+
+fn invitation_from_row(row: sqlx::postgres::PgRow) -> TenantInvitationSummary {
+    TenantInvitationSummary {
+        id: row.get("id"),
+        tenant_id: row.get("tenant_id"),
+        email: row.get("email"),
+        name: row.try_get("name").ok(),
+        roles: row.get("roles"),
+        kb_grants: row
+            .try_get("kb_grants")
+            .unwrap_or_else(|_| serde_json::json!([])),
+        status: row.get("status"),
+        invited_by: row.get("invited_by"),
+        invited_by_label: row.try_get("invited_by_label").ok(),
+        accepted_by: row.try_get("accepted_by").ok(),
+        expires_at: row.get("expires_at"),
+        accepted_at: row.try_get("accepted_at").ok(),
+        revoked_at: row.try_get("revoked_at").ok(),
+        created_at: row.get("created_at"),
+        invite_url: None,
+    }
 }
 
 #[derive(sqlx::FromRow)]

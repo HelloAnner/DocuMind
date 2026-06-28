@@ -686,7 +686,12 @@ fn is_documind_admin(roles: &[String]) -> bool {
     roles.iter().any(|r| {
         matches!(
             r.as_str(),
-            "super_admin" | "enterprise_admin" | "tenant_owner" | "tenant_admin" | "team_admin"
+            "super_admin"
+                | "enterprise_admin"
+                | "tenant_owner"
+                | "tenant_admin"
+                | "team_admin"
+                | "data_admin"
         )
     })
 }

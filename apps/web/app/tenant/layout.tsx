@@ -2,8 +2,9 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { TenantSidebar } from "@/components/ui/tenant-sidebar";
+import { AdminShellSidebar } from "@/components/ui/admin-shell-sidebar";
 import { useAuth } from "@/components/providers/auth-provider";
+import { isTenantAdminRole } from "@/lib/auth";
 
 export default function TenantLayout({
   children,
@@ -15,10 +16,7 @@ export default function TenantLayout({
 
   useEffect(() => {
     if (loading) return;
-    const canAccess = me && (
-      me.roles.includes("tenant_admin") ||
-      me.roles.includes("tenant_owner")
-    );
+    const canAccess = me && isTenantAdminRole(me.roles);
     if (!canAccess) {
       router.replace("/");
     }
@@ -27,7 +25,7 @@ export default function TenantLayout({
   if (loading || !me) {
     return (
       <main className="dm-shell">
-        <TenantSidebar />
+        <AdminShellSidebar />
         <section className="dm-workspace" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
           <span>加载中…</span>
         </section>
@@ -37,7 +35,7 @@ export default function TenantLayout({
 
   return (
     <main className="dm-shell">
-      <TenantSidebar />
+      <AdminShellSidebar />
       <section className="dm-workspace">{children}</section>
     </main>
   );

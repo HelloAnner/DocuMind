@@ -16,7 +16,7 @@ import {
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
 import { useAuth } from "@/components/providers/auth-provider";
-import { defaultRouteForRole } from "@/lib/auth";
+import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
 import type { Conversation } from "@/lib/types";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
@@ -96,14 +96,10 @@ export function ChatSidebar() {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
 
-  const isSuperAdmin = me?.roles.includes("super_admin");
-  const isAdmin =
-    me?.roles.includes("enterprise_admin") ||
-    me?.roles.includes("team_admin") ||
-    me?.roles.includes("data_admin");
-  const isTenantAdmin = me?.roles.includes("tenant_admin") || me?.roles.includes("tenant_owner");
-  const adminHref = isSuperAdmin ? "/system" : isAdmin ? "/admin" : "/tenant";
-  const canAccessAdmin = isSuperAdmin || isAdmin || isTenantAdmin;
+  const isSuperAdmin = isSuperAdminRole(me?.roles ?? []);
+  const isTenantAdmin = isTenantAdminRole(me?.roles ?? []);
+  const adminHref = isSuperAdmin ? "/system" : "/admin";
+  const canAccessAdmin = isSuperAdmin || isTenantAdmin;
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
