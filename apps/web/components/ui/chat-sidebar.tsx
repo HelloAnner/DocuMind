@@ -72,7 +72,12 @@ function useAliases() {
   return { aliases, setAlias };
 }
 
-export function ChatSidebar() {
+interface ChatSidebarProps {
+  width?: number;
+  onResize?: (width: number) => void;
+}
+
+export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
   const router = useRouter();
   const { me } = useAuth();
   const {
@@ -124,6 +129,45 @@ export function ChatSidebar() {
     });
     router.push(`/chat?c=${encodeURIComponent(id)}`);
   };
+
+  const resizeStartX = useRef<number>(0);
+  const resizeStartWidth = useRef<number>(0);
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = (e: React.MouseEvent | React.TouchEvent) => {
+    if (!onResize) return;
+    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+    resizeStartX.current = clientX;
+    resizeStartWidth.current = width ?? 244;
+    setIsResizing(true);
+    e.preventDefault();
+  };
+
+  useEffect(() => {
+    if (!isResizing) return;
+
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
+      const delta = clientX - resizeStartX.current;
+      onResize?.(resizeStartWidth.current + delta);
+    };
+
+    const handleUp = () => {
+      setIsResizing(false);
+    };
+
+    window.addEventListener("mousemove", handleMove);
+    window.addEventListener("mouseup", handleUp);
+    window.addEventListener("touchmove", handleMove, { passive: true });
+    window.addEventListener("touchend", handleUp);
+
+    return () => {
+      window.removeEventListener("mousemove", handleMove);
+      window.removeEventListener("mouseup", handleUp);
+      window.removeEventListener("touchmove", handleMove);
+      window.removeEventListener("touchend", handleUp);
+    };
+  }, [isResizing, onResize]);
 
   useEffect(() => {
     if (unreadIds.size > 0 || conversations.length === 0) return;
@@ -296,6 +340,17 @@ export function ChatSidebar() {
           </Link>
         )}
       </div>
+
+      {onResize && (
+        <div
+          className="dm-sidebar-resize-handle"
+          data-resizing={isResizing}
+          onMouseDown={startResize}
+          onTouchStart={startResize}
+          role="separator"
+          aria-label="调整侧边栏宽度"
+        />
+      )}
     </aside>
   );
 }

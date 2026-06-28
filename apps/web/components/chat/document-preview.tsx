@@ -66,7 +66,7 @@ function locationStatusCopy(status: string) {
     case "structural_only":
       return {
         label: "结构定位",
-        detail: "当前格式没有可用视觉坐标，只能定位到原文结构块。",
+        detail: "",
       };
     case "page_only":
       return {
@@ -174,7 +174,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
         </div>
         <div className={`dm-location-status dm-location-status-${status}`}>
           <strong>{statusCopy.label}</strong>
-          <span>{statusCopy.detail}</span>
+          {statusCopy.detail ? <span>{statusCopy.detail}</span> : null}
         </div>
       </div>
 
