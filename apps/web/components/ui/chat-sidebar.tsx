@@ -5,11 +5,10 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
-  MessageSquare,
+  ChevronDown,
+  Headphones,
   MoreHorizontal,
   Pencil,
-  Plus,
-  Search,
   Settings,
   Trash2,
 } from "lucide-react";
@@ -27,8 +26,6 @@ function formatGroupLabel(date: string) {
   const yesterday = new Date(Date.now() - 86400000).toDateString();
   if (d.toDateString() === today) return "今天";
   if (d.toDateString() === yesterday) return "昨天";
-  const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
-  if (diff < 7) return "近 7 天";
   return "更早";
 }
 
@@ -38,7 +35,7 @@ function groupByDate(items: Conversation[]) {
     const label = formatGroupLabel(item.updated_at);
     groups.set(label, [...(groups.get(label) || []), item]);
   }
-  const order = ["今天", "昨天", "近 7 天", "更早"];
+  const order = ["今天", "昨天", "更早"];
   return Array.from(groups.entries()).sort(([a], [b]) => {
     const ai = order.indexOf(a);
     const bi = order.indexOf(b);
@@ -86,27 +83,21 @@ export function ChatSidebar() {
     isFavorite,
     toggleFavorite,
     deleteConversation,
-    refreshConversations,
   } = useConversation();
 
-  const [search, setSearch] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
   const { aliases, setAlias } = useAliases();
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
 
   const isSuperAdmin = isSuperAdminRole(me?.roles ?? []);
   const isTenantAdmin = isTenantAdminRole(me?.roles ?? []);
   const adminHref = isSuperAdmin ? "/system" : "/admin";
   const canAccessAdmin = isSuperAdmin || isTenantAdmin;
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return q
-      ? conversations.filter((c) => c.title.toLowerCase().includes(q))
-      : conversations;
-  }, [conversations, search]);
+  const filtered = useMemo(() => conversations, [conversations]);
 
   const favorites = useMemo(
     () => filtered.filter((c) => isFavorite(c.conversation_id)),
@@ -125,8 +116,28 @@ export function ChatSidebar() {
 
   const handleSelect = (id: string) => {
     setCurrentId(id);
+    setUnreadIds((prev) => {
+      if (!prev.has(id)) return prev;
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
     router.push(`/chat?c=${encodeURIComponent(id)}`);
   };
+
+  useEffect(() => {
+    if (unreadIds.size > 0 || conversations.length === 0) return;
+    const today = new Date().toDateString();
+    const firstToday = conversations.find(
+      (c) =>
+        new Date(c.updated_at).toDateString() === today &&
+        c.conversation_id !== currentId
+    );
+    if (firstToday) {
+      setUnreadIds(new Set([firstToday.conversation_id]));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [conversations, currentId]);
 
   const handleRename = (conv: Conversation) => {
     setRenamingId(conv.conversation_id);
@@ -157,6 +168,7 @@ export function ChatSidebar() {
     const hovered = hoveredId === conv.conversation_id;
     const menuOpen = menuId === conv.conversation_id;
     const renaming = renamingId === conv.conversation_id;
+    const unread = unreadIds.has(conv.conversation_id);
 
     return (
       <div
@@ -170,7 +182,6 @@ export function ChatSidebar() {
           className="dm-history-item-main"
           onClick={() => handleSelect(conv.conversation_id)}
         >
-          <MessageSquare size={14} className="dm-history-item-icon" />
           {renaming ? (
             <input
               ref={renameInputRef}
@@ -186,6 +197,7 @@ export function ChatSidebar() {
           ) : (
             <span className="dm-history-item-title">{displayTitle(conv)}</span>
           )}
+          {unread && <span className="dm-history-item-dot" aria-hidden="true" />}
         </button>
 
         <div className="dm-history-item-actions">
@@ -244,43 +256,33 @@ export function ChatSidebar() {
   return (
     <aside className="dm-chat-sidebar">
       <div className="dm-sidebar-top">
-        <Link className="dm-chat-logo" href="/chat">
-          DocuMind
-        </Link>
-        <IconButton aria-label="新建问答" onClick={handleCreate}>
-          <Plus size={16} />
-        </IconButton>
-      </div>
-
-      <div className="dm-chat-search-wrap">
-        <div className="dm-chat-search">
-          <Search size={14} />
-          <input
-            type="text"
-            placeholder="搜索历史对话"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
+        <button type="button" className="dm-new-session-button" onClick={handleCreate}>
+          <Headphones size={18} />
+          <span>新会话</span>
+        </button>
       </div>
 
       <div className="dm-chat-history">
         {favorites.length > 0 && (
           <div className="dm-history-group">
-            <div className="dm-history-group-title">收藏</div>
+            <div className="dm-history-group-title">
+              <span>收藏</span>
+              <ChevronDown size={14} />
+            </div>
             {favorites.map(renderItem)}
           </div>
         )}
 
         {filtered.length === 0 && (
-          <div className="dm-history-empty">
-            {search ? "未找到匹配的会话" : "暂无会话"}
-          </div>
+          <div className="dm-history-empty">暂无会话</div>
         )}
 
         {dateGroups.map(([label, items]) => (
           <div className="dm-history-group" key={label}>
-            <div className="dm-history-group-title">{label}</div>
+            <div className="dm-history-group-title">
+              <span>{label}</span>
+              <ChevronDown size={14} />
+            </div>
             {items.map(renderItem)}
           </div>
         ))}
