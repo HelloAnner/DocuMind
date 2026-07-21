@@ -102,10 +102,11 @@ while IFS= read -r file; do
   files+=("$file")
 done < <(find "$DOC_DIR" -maxdepth 1 -type f \( \
   -iname '*.pdf' -o -iname '*.docx' -o -iname '*.pptx' \
+  -o -iname '*.md' -o -iname '*.markdown' -o -iname '*.txt' \
 \) | sort)
 
 if [[ "${#files[@]}" -eq 0 ]]; then
-  echo "no pdf/docx/pptx files found in $DOC_DIR" >&2
+  echo "no supported document files found in $DOC_DIR" >&2
   exit 2
 fi
 
@@ -202,11 +203,13 @@ elif pg_query "SELECT 1" >/dev/null 2>&1; then
         (SELECT count(*) FROM document_blocks WHERE doc_id = '$doc_id'),
         (SELECT count(*) FROM cleaned_blocks WHERE doc_id = '$doc_id' AND is_removed = false),
         (SELECT count(*) FROM chunks WHERE doc_id = '$doc_id'),
-        (SELECT count(*) FROM chunk_embeddings WHERE doc_id = '$doc_id' AND status = 'completed');
+        (SELECT count(*) FROM chunk_embeddings WHERE doc_id = '$doc_id' AND status = 'completed'),
+        (SELECT count(*) FROM document_source_anchors WHERE doc_id = '$doc_id'),
+        (SELECT count(*) FROM document_blocks WHERE doc_id = '$doc_id' AND cardinality(anchor_ids) = 0);
     ")"
-    IFS='|' read -r block_count cleaned_count chunk_count embedding_count <<<"$counts"
-    echo "pg: doc=$doc_id blocks=$block_count cleaned=$cleaned_count chunks=$chunk_count embeddings=$embedding_count"
-    if [[ ! "$chunk_count" =~ ^[0-9]+$ || ! "$embedding_count" =~ ^[0-9]+$ || "$chunk_count" == "0" || "$embedding_count" == "0" || "$chunk_count" != "$embedding_count" ]]; then
+    IFS='|' read -r block_count cleaned_count chunk_count embedding_count anchor_count unanchored_count <<<"$counts"
+    echo "pg: doc=$doc_id blocks=$block_count cleaned=$cleaned_count chunks=$chunk_count embeddings=$embedding_count anchors=$anchor_count unanchored=$unanchored_count"
+    if [[ ! "$chunk_count" =~ ^[0-9]+$ || ! "$embedding_count" =~ ^[0-9]+$ || "$chunk_count" == "0" || "$embedding_count" == "0" || "$chunk_count" != "$embedding_count" || "$anchor_count" == "0" || "$unanchored_count" != "0" ]]; then
       echo "pg validation failed for $doc_id" >&2
       exit 1
     fi

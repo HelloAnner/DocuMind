@@ -24,12 +24,12 @@ use crate::auth::{
 use crate::config::EmbeddingConfig;
 use crate::document::{self as ingest, cleaning::cleaned_block_metadata};
 use crate::error::AppError;
+use crate::models::SourceAnchor;
 use crate::rag::embedding::{EmbeddingClient, EmbeddingClientConfig};
 use crate::rag::vector_index::{
     ElasticsearchChunkIndexer, ElasticsearchConfig, EsRange, IndexedChunk,
 };
 use crate::state::AppState;
-use crate::{models::NormalizedBBox, models::SourceAnchor};
 
 const PARSER_VERSION: &str = ingest::PARSER_VERSION;
 const PREVIEW_CHAR_LIMIT: usize = 60_000;
@@ -393,6 +393,7 @@ struct ParseWriteScope {
     parse_version: i32,
 }
 
+#[derive(Clone)]
 struct ParseJobTask {
     tenant_id: Uuid,
     kb_id: Uuid,
@@ -957,6 +958,7 @@ async fn send_to_ocr(
         config.insert("ocr_status".to_string(), json!("queued"));
         config.insert("ocr_engine".to_string(), json!("tesseract"));
         config.insert("ocr_render_dpi".to_string(), json!(OCR_RENDER_DPI));
+        config.insert("ocr_page_segmentation_mode".to_string(), json!(3));
         config.insert(
             "source_parse_job_id".to_string(),
             json!(doc.latest_parse_job_id),
@@ -2452,8 +2454,19 @@ fn spawn_parse_job(pool: sqlx::PgPool, task: ParseJobTask) {
 
 async fn run_parse_job(pool: sqlx::PgPool, task: ParseJobTask) -> Result<(), AppError> {
     mark_parse_job_running(&pool, &task).await?;
+    let worker_task = task.clone();
+    let artifacts_result =
+        match tokio::task::spawn_blocking(move || build_parse_artifacts(&worker_task)).await {
+            Ok(result) => result,
+            Err(error) => {
+                let error =
+                    AppError::Internal(anyhow::anyhow!("document parse worker failed: {error}"));
+                mark_parse_job_failed(&pool, &task, &error).await?;
+                return Ok(());
+            }
+        };
 
-    match build_parse_artifacts(&task) {
+    match artifacts_result {
         Ok(artifacts) => {
             let mut tx = pool.begin().await?;
             insert_parse_outputs(
@@ -3693,13 +3706,8 @@ fn build_parse_artifacts(task: &ParseJobTask) -> Result<ParseArtifacts, AppError
     let parser_config = task.parser_config.clone();
     let parse_identity = task.parse_identity.clone();
     let quality_score = bundle.parsed.quality_score;
-    let mut parse_status = if ocr_task {
-        "chunked".to_string()
-    } else if scanned_pdf_no_text_layer {
-        "parse_low_confidence".to_string()
-    } else {
-        parse_status_for_quality(quality_score)?
-    };
+    let mut parse_status =
+        parse_status_for_result(quality_score, scanned_pdf_no_text_layer, ocr_task)?;
     if task.force_index && parse_status == "parse_low_confidence" {
         if bundle.chunks.is_empty() {
             return Err(AppError::InvalidState {
@@ -3722,6 +3730,7 @@ fn build_parse_artifacts(task: &ParseJobTask) -> Result<ParseArtifacts, AppError
             config.insert("ocr_status".to_string(), json!("completed"));
             config.insert("ocr_engine".to_string(), json!("tesseract"));
             config.insert("ocr_render_dpi".to_string(), json!(OCR_RENDER_DPI));
+            config.insert("ocr_page_segmentation_mode".to_string(), json!(3));
         }
         config.insert("block_count".to_string(), json!(bundle.parsed.blocks.len()));
         config.insert(
@@ -3733,6 +3742,7 @@ fn build_parse_artifacts(task: &ParseJobTask) -> Result<ParseArtifacts, AppError
             json!(bundle.clean_stats.removed_blocks),
         );
         config.insert("table_count".to_string(), json!(bundle.parsed.tables.len()));
+        config.insert("page_count".to_string(), json!(bundle.parsed.pages));
         config.insert("chunk_count".to_string(), json!(bundle.chunks.len()));
         config.insert(
             "char_count".to_string(),
@@ -3831,6 +3841,7 @@ fn build_ocr_bundle_in_dir(
         "scanned_pdf_no_text_layer".to_string(),
     ];
     let mut empty_pages = 0usize;
+    let mut page_confidences = Vec::new();
 
     for (page_idx, image_path) in page_images.iter().enumerate() {
         let page = (page_idx + 1) as i32;
@@ -3840,7 +3851,8 @@ fn build_ocr_bundle_in_dir(
             .arg("-l")
             .arg("chi_sim+eng")
             .arg("--psm")
-            .arg("6")
+            .arg("3")
+            .arg("tsv")
             .output()
             .map_err(|e| {
                 AppError::bad_request(
@@ -3858,46 +3870,60 @@ fn build_ocr_bundle_in_dir(
             ));
         }
 
-        let text = normalize_ocr_text(&String::from_utf8_lossy(&output.stdout));
-        if text.is_empty() {
+        let ocr_page = ingest::ocr::parse_tesseract_tsv(&String::from_utf8_lossy(&output.stdout))
+            .map_err(|err| {
+            AppError::bad_request(
+                "OCR_OUTPUT_INVALID",
+                format!("Tesseract OCR 输出无效: {err}"),
+            )
+        })?;
+        if ocr_page.blocks.is_empty() {
             empty_pages += 1;
             warnings.push(format!("ocr_page_{}_empty", page));
             continue;
         }
+        page_confidences.push(ocr_page.mean_confidence);
 
-        let block_id = Uuid::new_v4();
-        let bbox = NormalizedBBox::normalized(0.04, 0.06, 0.96, 0.94);
-        let anchor = SourceAnchor::for_pdf_paragraph(
-            task.doc_id,
-            task.parse_job_id,
-            task.tenant_id,
-            block_id,
-            page,
-            &text,
-            bbox.clone(),
-        );
-        let anchor_id = anchor.anchor_id;
-        anchors.push(anchor);
-        blocks.push(ingest::ParsedBlock {
-            block_id,
-            block_index: blocks.len() as i32,
-            block_type: "paragraph".to_string(),
-            text,
-            heading_level: None,
-            heading_path: vec![],
-            page_start: Some(page),
-            page_end: Some(page),
-            slide_index: None,
-            table_id: None,
-            bbox: Some(json!(bbox)),
-            anchor_ids: vec![anchor_id],
-            source_ref: json!({"format": "pdf", "page": page, "source": "ocr"}),
-            metadata: json!({
-                "layout": "ocr",
-                "ocr_engine": "tesseract",
-                "ocr_render_dpi": OCR_RENDER_DPI,
-            }),
-        });
+        for (paragraph_idx, ocr_block) in ocr_page.blocks.into_iter().enumerate() {
+            let block_id = Uuid::new_v4();
+            let anchor = SourceAnchor::for_pdf_paragraph(
+                task.doc_id,
+                task.parse_job_id,
+                task.tenant_id,
+                block_id,
+                page,
+                &ocr_block.text,
+                Some(ocr_block.bbox.clone()),
+            );
+            let anchor_id = anchor.anchor_id;
+            anchors.push(anchor);
+            blocks.push(ingest::ParsedBlock {
+                block_id,
+                block_index: blocks.len() as i32,
+                block_type: "paragraph".to_string(),
+                text: ocr_block.text,
+                heading_level: None,
+                heading_path: vec![],
+                page_start: Some(page),
+                page_end: Some(page),
+                slide_index: None,
+                table_id: None,
+                bbox: Some(json!(ocr_block.bbox)),
+                anchor_ids: vec![anchor_id],
+                source_ref: json!({
+                    "format": "pdf",
+                    "page": page,
+                    "paragraph": paragraph_idx + 1,
+                    "source": "ocr"
+                }),
+                metadata: json!({
+                    "layout": "ocr",
+                    "ocr_engine": "tesseract",
+                    "ocr_render_dpi": OCR_RENDER_DPI,
+                    "ocr_confidence": ocr_block.confidence,
+                }),
+            });
+        }
     }
 
     if blocks.is_empty() {
@@ -3907,6 +3933,13 @@ fn build_ocr_bundle_in_dir(
         ));
     }
 
+    let mean_confidence =
+        page_confidences.iter().sum::<f64>() / page_confidences.len().max(1) as f64;
+    let page_coverage = (page_images.len() - empty_pages) as f64 / page_images.len() as f64;
+    let quality_score = (0.65 * (mean_confidence / 100.0) + 0.35 * page_coverage).clamp(0.0, 1.0);
+    if mean_confidence < 70.0 {
+        warnings.push(format!("ocr_low_confidence:{mean_confidence:.2}"));
+    }
     let parsed = ingest::ParsedDocument {
         doc_id: task.doc_id,
         parse_job_id: task.parse_job_id,
@@ -3917,7 +3950,7 @@ fn build_ocr_bundle_in_dir(
         tables: vec![],
         anchors,
         warnings,
-        quality_score: if empty_pages == 0 { 0.82 } else { 0.76 },
+        quality_score,
     };
     let (cleaned_blocks, clean_stats) =
         ingest::cleaning::clean_blocks(ingest::FileType::Pdf, &parsed.blocks);
@@ -3946,16 +3979,6 @@ fn build_ocr_bundle_in_dir(
     })
 }
 
-fn normalize_ocr_text(raw: &str) -> String {
-    raw.lines()
-        .map(str::trim)
-        .filter(|line| !line.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
-}
-
 fn is_ocr_task(task: &ParseJobTask) -> bool {
     is_ocr_parser_config(&task.parser_config)
 }
@@ -3981,7 +4004,11 @@ fn current_parser_config() -> serde_json::Value {
         "max_pdf_page_text_chars": ingest::MAX_PDF_PAGE_TEXT_CHARS,
         "target_chunk_tokens": env_usize("RAG_TARGET_CHUNK_TOKENS", 800),
         "max_chunk_tokens": env_usize("RAG_MAX_CHUNK_TOKENS", 1500),
+        "hard_split_tokens": env_usize("RAG_HARD_SPLIT_TOKENS", 2000),
+        "min_chunk_tokens": env_usize("RAG_MIN_CHUNK_TOKENS", 200),
         "chunk_overlap_tokens": env_usize("RAG_CHUNK_OVERLAP_TOKENS", 200),
+        "max_table_rows_per_chunk": env_usize("RAG_MAX_TABLE_ROWS_PER_CHUNK", 50),
+        "max_table_token_per_chunk": env_usize("RAG_MAX_TABLE_TOKEN_PER_CHUNK", 1200),
     })
 }
 
@@ -4021,6 +4048,18 @@ fn parse_status_for_quality(score: f64) -> Result<String, AppError> {
             "PARSE_QUALITY_TOO_LOW",
             "文档解析质量过低，未进入索引",
         ))
+    }
+}
+
+fn parse_status_for_result(
+    quality_score: f64,
+    scanned_pdf_no_text_layer: bool,
+    ocr_task: bool,
+) -> Result<String, AppError> {
+    if scanned_pdf_no_text_layer && !ocr_task {
+        Ok("parse_low_confidence".to_string())
+    } else {
+        parse_status_for_quality(quality_score)
     }
 }
 
@@ -4097,6 +4136,11 @@ mod tests {
             .iter()
             .any(|b| b.text.contains("首付款30%")));
         assert!(bundle.parsed.blocks.iter().any(|b| b.block_type == "table"));
+        assert!(bundle
+            .parsed
+            .blocks
+            .iter()
+            .all(|block| !block.anchor_ids.is_empty()));
         assert!(bundle.cleaned_blocks.iter().any(|b| !b.is_removed));
         assert!(bundle.chunks.iter().any(|c| c.source_type == "table"));
         let table_anchor = bundle
@@ -4155,6 +4199,7 @@ mod tests {
         assert_eq!(bundle.parsed.blocks.len(), 1);
         assert_eq!(bundle.parsed.blocks[0].slide_index, Some(1));
         assert!(bundle.parsed.blocks[0].text.contains("1200万元"));
+        assert!(!bundle.parsed.blocks[0].anchor_ids.is_empty());
     }
 
     #[test]
@@ -4188,6 +4233,29 @@ mod tests {
         .to_string();
 
         assert!(err.contains("zip_entry_name_unsafe"));
+    }
+
+    #[test]
+    fn rejects_excessively_nested_office_xml_without_crashing() {
+        let depth = ingest::MAX_OFFICE_XML_DEPTH + 1;
+        let xml = format!(
+            "<w:document xmlns:w=\"urn:test\"><w:body>{}{}</w:body></w:document>",
+            "<w:sdt>".repeat(depth),
+            "</w:sdt>".repeat(depth)
+        );
+        let bytes = zip_with_entries(&[("word/document.xml", &xml)]);
+
+        let err = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "deep.docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            &bytes,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("office_xml_nesting_exceeded"));
     }
 
     #[test]
@@ -4243,6 +4311,84 @@ mod tests {
     }
 
     #[test]
+    fn preserves_unclosed_markdown_fence_and_reports_warning() {
+        let text = "# 示例\n\n```rust\nfn main() { println!(\"ok\"); }";
+        let bundle = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "unfinished.md",
+            "text/markdown",
+            text.as_bytes(),
+        )
+        .unwrap();
+
+        assert!(bundle
+            .parsed
+            .blocks
+            .iter()
+            .any(|block| block.block_type == "code" && block.text.contains("println")));
+        assert!(bundle
+            .parsed
+            .warnings
+            .iter()
+            .any(|warning| warning == "markdown_unclosed_code_fence"));
+    }
+
+    #[test]
+    fn decodes_utf16_and_gbk_plain_text() {
+        let utf16_text = "第一段\r\n\r\n第二段";
+        let mut utf16_bytes = vec![0xff, 0xfe];
+        utf16_bytes.extend(utf16_text.encode_utf16().flat_map(u16::to_le_bytes));
+        let utf16 = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "utf16.txt",
+            "text/plain",
+            &utf16_bytes,
+        )
+        .unwrap();
+        assert_eq!(utf16.parsed.blocks.len(), 2);
+
+        let (gbk_bytes, _, had_errors) = encoding_rs::GBK.encode("中文 GBK 文档");
+        assert!(!had_errors);
+        let gbk = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "gbk.txt",
+            "text/plain",
+            &gbk_bytes,
+        )
+        .unwrap();
+        assert!(gbk.parsed.blocks[0].text.contains("中文 GBK"));
+    }
+
+    #[test]
+    fn splits_large_markdown_table_by_rows_and_repeats_header() {
+        let mut text = String::from("| 编号 | 内容 |\n| --- | --- |\n");
+        for row in 1..=80 {
+            text.push_str(&format!("| {row} | 第 {row} 行 |\n"));
+        }
+        let bundle = ingest::parse_document(
+            Uuid::new_v4(),
+            Uuid::new_v4(),
+            "large-table.md",
+            "text/markdown",
+            text.as_bytes(),
+        )
+        .unwrap();
+
+        let table_chunks = bundle
+            .chunks
+            .iter()
+            .filter(|chunk| chunk.source_type == "table")
+            .collect::<Vec<_>>();
+        assert!(table_chunks.len() >= 2);
+        assert!(table_chunks
+            .iter()
+            .all(|chunk| chunk.content.contains("|编号|内容|")));
+    }
+
+    #[test]
     fn short_parse_is_low_confidence_and_not_indexed() {
         let artifacts = build_parse_artifacts(&test_task("short.txt", "短文本")).unwrap();
 
@@ -4264,6 +4410,18 @@ mod tests {
             .warnings
             .iter()
             .any(|warning| warning == "scanned_pdf_no_text_layer"));
+    }
+
+    #[test]
+    fn completed_ocr_uses_quality_gate_instead_of_original_text_layer_warning() {
+        assert_eq!(
+            parse_status_for_result(0.89, true, true).unwrap(),
+            "chunked"
+        );
+        assert_eq!(
+            parse_status_for_result(0.89, true, false).unwrap(),
+            "parse_low_confidence"
+        );
     }
 
     #[test]

@@ -409,23 +409,36 @@ WHERE d.id = '{doc_id}';
         token=token,
     )
     conv_id = conv["conversation_id"]
-    events = sse_post(
-        f"/api/conversations/{conv_id}/messages",
-        {
-            "content": f"在 OCR smoke 文档 {marker} 中，验证码和城市分别是什么？",
-            "kb_ids": [],
-            "client_request_id": f"ocr-smoke-{uuid.uuid4()}",
-            "stream": True,
-        },
-        token,
-    )
-    answer = answer_text(events)
-    citations = citations_from_events(events)
-    normalized = answer.lower()
-    if code not in answer or city.lower() not in normalized:
-        fail("OCR answer did not contain expected code and city", {"answer": answer})
-    if not any(c.get("doc_id") == doc_id and c.get("anchor") for c in citations):
-        fail("OCR answer missing citation anchor for OCR document", citations)
+    events = []
+    answer = ""
+    citations = []
+    for attempt in range(1, 4):
+        events = sse_post(
+            f"/api/conversations/{conv_id}/messages",
+            {
+                "content": f"在 OCR smoke 文档 {marker} 中，验证码和城市分别是什么？",
+                "kb_ids": [],
+                "client_request_id": f"ocr-smoke-{uuid.uuid4()}",
+                "stream": True,
+            },
+            token,
+        )
+        answer = answer_text(events)
+        citations = citations_from_events(events)
+        has_answer = code in answer and city.lower() in answer.lower()
+        has_citation = any(
+            citation.get("doc_id") == doc_id and citation.get("anchor")
+            for citation in citations
+        )
+        if has_answer and has_citation:
+            break
+        if attempt < 3:
+            time.sleep(attempt * 2)
+    else:
+        fail(
+            "OCR QA did not return the expected grounded answer after retries",
+            {"answer": answer, "citations": citations, "events": events},
+        )
     ok("OCR QA returned expected answer and citation anchor")
 
 

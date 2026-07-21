@@ -87,6 +87,9 @@ impl NormalizedBBox {
 
 impl SourceAnchor {
     /// 从一段 PDF 文本生成一个段落级 anchor。
+    ///
+    /// `bbox` 只能传入解析器返回的真实坐标；仅知道页码时传 `None`，
+    /// 避免把估算位置伪装成可用于高亮的精确坐标。
     pub fn for_pdf_paragraph(
         doc_id: Uuid,
         parse_job_id: Uuid,
@@ -94,8 +97,9 @@ impl SourceAnchor {
         block_id: Uuid,
         page: i32,
         text: &str,
-        bbox: NormalizedBBox,
+        bbox: Option<NormalizedBBox>,
     ) -> Self {
+        let anchor_quality = if bbox.is_some() { "bbox" } else { "page" };
         Self {
             anchor_id: Uuid::new_v4(),
             doc_id,
@@ -109,11 +113,11 @@ impl SourceAnchor {
             table_id: None,
             cell_range: None,
             char_range: None,
-            bbox: Some(bbox),
+            bbox,
             source_ref: serde_json::json!({"format": "pdf", "page": page}),
             text: text.to_string(),
             text_hash: Some(hex_hash(text)),
-            anchor_quality: "bbox".to_string(),
+            anchor_quality: anchor_quality.to_string(),
         }
     }
 

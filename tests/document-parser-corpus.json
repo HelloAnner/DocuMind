@@ -1,0 +1,92 @@
+{
+  "sources": [
+    {
+      "name": "TAMReview.pdf",
+      "url": "https://raw.githubusercontent.com/mozilla/pdf.js/028c02f539a99542a2ef74aa463c7d81ecf9f6d1/test/pdfs/TAMReview.pdf",
+      "sha256": "a6db6d2f5e4f97e1e28a5919a875a40b89e38d0229b33cc023ca4d353f3ab3ec",
+      "type": "pdf",
+      "contains": "Working Papers on Information Systems",
+      "min_blocks": 10,
+      "min_tables": 0
+    },
+    {
+      "name": "160F-2019.pdf",
+      "url": "https://raw.githubusercontent.com/mozilla/pdf.js/028c02f539a99542a2ef74aa463c7d81ecf9f6d1/test/pdfs/160F-2019.pdf",
+      "sha256": "f41f0818365ffd14ca4e55c0556355193bd76632b970d60cc2dec554cac6f379",
+      "type": "pdf",
+      "contains": "Certificat de salaire",
+      "min_blocks": 1,
+      "min_tables": 0
+    },
+    {
+      "name": "TestDocument.docx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/document/TestDocument.docx",
+      "sha256": "527a906b3cc31d0a72a47290a6c8a53854a89a31178a60fa3cb314d70b57a413",
+      "type": "docx",
+      "contains": "This is a test document",
+      "min_blocks": 3,
+      "min_tables": 0
+    },
+    {
+      "name": "deep-table-cell.docx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/document/deep-table-cell.docx",
+      "sha256": "31c5bfe1f68c98699cb356891de2e02fe223f633706d666c430ca79fd2cdf6bb",
+      "type": "docx",
+      "expected_error": "office_xml_nesting_exceeded"
+    },
+    {
+      "name": "shapes-with-text.docx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/document/shapes-with-text.docx",
+      "sha256": "1ef4d8cbfd5e2333897ab3193b58ce445cee7e45476d39e5626a4c7097f72d95",
+      "type": "docx",
+      "contains": "Floating text box",
+      "min_blocks": 1,
+      "min_tables": 0
+    },
+    {
+      "name": "SampleShow.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/slideshow/SampleShow.pptx",
+      "sha256": "bfb4b2f07c9233afd2f32aa5781d849d0c7d225bf03721a10becf487b481d828",
+      "type": "pptx",
+      "contains": "Title of the first slide",
+      "min_blocks": 2,
+      "min_tables": 0
+    },
+    {
+      "name": "table_test2.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/slideshow/table_test2.pptx",
+      "sha256": "e80d09a5fa767f6ee2d024f3a4198f1e8b3241cc638183e5ebafdbacf1fb2838",
+      "type": "pptx",
+      "contains": "Header1",
+      "min_blocks": 1,
+      "min_tables": 1
+    },
+    {
+      "name": "with_japanese.pptx",
+      "url": "https://raw.githubusercontent.com/apache/poi/0d6d4872c491b1f230f51c6878e57407c60ae697/test-data/slideshow/with_japanese.pptx",
+      "sha256": "f0b1efbfbd70f7ee2395dc2505639f99449971ba404a6ec8cf1b97d82cf45c10",
+      "type": "pptx",
+      "contains": "Row 1 Col 1",
+      "min_blocks": 1,
+      "min_tables": 1
+    },
+    {
+      "name": "pdfjs-readme.md",
+      "url": "https://raw.githubusercontent.com/mozilla/pdf.js/028c02f539a99542a2ef74aa463c7d81ecf9f6d1/README.md",
+      "sha256": "b559638d2d8421f86ca16689c92da4d8222df99232e088da94938f01e49f336d",
+      "type": "md",
+      "contains": "PDF.js",
+      "min_blocks": 5,
+      "min_tables": 0
+    },
+    {
+      "name": "pdfjs-license.txt",
+      "url": "https://raw.githubusercontent.com/mozilla/pdf.js/028c02f539a99542a2ef74aa463c7d81ecf9f6d1/LICENSE",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "type": "txt",
+      "contains": "Apache License",
+      "min_blocks": 5,
+      "min_tables": 0
+    }
+  ]
+}

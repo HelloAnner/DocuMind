@@ -5,14 +5,20 @@ use uuid::Uuid;
 use super::cleaning::CleanedBlock;
 use super::{estimate_tokens, ChunkDraft, FileType};
 
-fn anchor_quality_for(file_type: FileType) -> &'static str {
-    match file_type {
-        FileType::Pdf => "bbox",
-        _ => "structural",
+mod overlap;
+mod table;
+
+fn anchor_quality_for(file_type: FileType, has_bbox: bool) -> &'static str {
+    if has_bbox {
+        "bbox"
+    } else if file_type == FileType::Pdf {
+        "page"
+    } else {
+        "structural"
     }
 }
 
-pub const CHUNKER_VERSION: &str = "documind-chunker@0.1.0";
+pub const CHUNKER_VERSION: &str = "documind-chunker@0.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChunkConfig {
@@ -106,17 +112,49 @@ pub fn chunk_blocks(
     if !current.is_empty() {
         groups.push(current);
     }
+    merge_small_groups(&mut groups, cfg);
 
     let mut chunks = Vec::new();
     for group in groups {
         split_group(file_type, kb_id, parse_job_id, group, cfg, &mut chunks);
     }
 
-    add_overlap(&mut chunks, cfg);
+    overlap::add_overlap(&mut chunks, cfg);
     for (idx, chunk) in chunks.iter_mut().enumerate() {
         chunk.chunk_index = idx as i32;
     }
     chunks
+}
+
+fn merge_small_groups(groups: &mut Vec<BlockGroup>, cfg: &ChunkConfig) {
+    if cfg.min_chunk_tokens <= 0 || groups.len() < 2 {
+        return;
+    }
+    let mut merged: Vec<BlockGroup> = Vec::with_capacity(groups.len());
+    for mut group in groups.drain(..) {
+        let can_merge = group.tokens < cfg.min_chunk_tokens
+            && merged.last().is_some_and(|previous| {
+                previous.tokens + group.tokens <= cfg.max_chunk_tokens
+                    && previous.source_type != "table"
+                    && group.source_type != "table"
+                    && group
+                        .blocks
+                        .first()
+                        .is_some_and(|first| !is_hard_boundary(first, previous))
+            });
+        if can_merge {
+            match merged.last_mut() {
+                Some(previous) => {
+                    previous.tokens += group.tokens;
+                    previous.blocks.append(&mut group.blocks);
+                }
+                None => merged.push(group),
+            }
+        } else {
+            merged.push(group);
+        }
+    }
+    *groups = merged;
 }
 
 fn single_block_group(block: CleanedBlock) -> BlockGroup {
@@ -150,6 +188,12 @@ fn split_group(
     cfg: &ChunkConfig,
     chunks: &mut Vec<ChunkDraft>,
 ) {
+    if group.blocks.len() == 1
+        && group.blocks[0].block.block_type == "table"
+        && table::split_table_group(file_type, kb_id, parse_job_id, &group, cfg, chunks)
+    {
+        return;
+    }
     if group.tokens <= cfg.max_chunk_tokens {
         chunks.push(chunk_from_group(
             file_type,
@@ -252,7 +296,8 @@ fn chunk_from_group(
         .blocks
         .iter()
         .find_map(|b| b.block.anchor_ids.first().copied());
-    let anchor_quality = anchor_quality_for(file_type).to_string();
+    let has_bbox = group.blocks.iter().any(|block| block.block.bbox.is_some());
+    let anchor_quality = anchor_quality_for(file_type, has_bbox).to_string();
 
     let mut content_parts = Vec::new();
     if !heading_path.is_empty() {
@@ -329,14 +374,20 @@ fn split_long_text(text: &str, cfg: &ChunkConfig) -> Vec<String> {
             format!("{current}{part}")
         };
         if estimate_tokens(&next) > cfg.max_chunk_tokens && !current.is_empty() {
-            out.extend(force_split(&current, cfg.hard_split_tokens));
+            out.extend(force_split(
+                &current,
+                cfg.hard_split_tokens.min(cfg.max_chunk_tokens),
+            ));
             current = part;
         } else {
             current = next;
         }
     }
     if !current.is_empty() {
-        out.extend(force_split(&current, cfg.hard_split_tokens));
+        out.extend(force_split(
+            &current,
+            cfg.hard_split_tokens.min(cfg.max_chunk_tokens),
+        ));
     }
     out
 }
@@ -371,73 +422,6 @@ fn force_split(text: &str, hard_split_tokens: i32) -> Vec<String> {
         start = end;
     }
     out
-}
-
-fn add_overlap(chunks: &mut [ChunkDraft], cfg: &ChunkConfig) {
-    if chunks.len() < 2 || cfg.overlap_tokens <= 0 {
-        return;
-    }
-    let half = (cfg.overlap_tokens / 2).max(1);
-    let originals = chunks.iter().map(|c| c.content.clone()).collect::<Vec<_>>();
-    let ids = chunks
-        .iter()
-        .map(|c| c.block_ids.clone())
-        .collect::<Vec<_>>();
-
-    for idx in 0..chunks.len() {
-        let mut prev_ids = Vec::new();
-        let mut next_ids = Vec::new();
-        let mut content = chunks[idx].content.clone();
-        if idx > 0 && can_overlap(&chunks[idx - 1], &chunks[idx]) {
-            let prev = tail_text(&originals[idx - 1], half);
-            if !prev.trim().is_empty() {
-                content = format!("【上文】{}\n\n{}", prev.trim(), content);
-                prev_ids = ids[idx - 1].clone();
-            }
-        }
-        if idx + 1 < chunks.len() && can_overlap(&chunks[idx], &chunks[idx + 1]) {
-            let next = head_text(&originals[idx + 1], half);
-            if !next.trim().is_empty() {
-                content = format!("{}\n\n【下文】{}", content, next.trim());
-                next_ids = ids[idx + 1].clone();
-            }
-        }
-
-        chunks[idx].content = content;
-        chunks[idx].token_count = estimate_tokens(&chunks[idx].content);
-        if let Some(meta) = chunks[idx].metadata.as_object_mut() {
-            meta.insert("overlap_tokens".to_string(), json!(cfg.overlap_tokens));
-            meta.insert("overlap_prev_block_ids".to_string(), json!(prev_ids));
-            meta.insert("overlap_next_block_ids".to_string(), json!(next_ids));
-        }
-    }
-}
-
-fn can_overlap(left: &ChunkDraft, right: &ChunkDraft) -> bool {
-    if left.source_type == "table" || right.source_type == "table" {
-        return false;
-    }
-    if left.slide_end.is_some()
-        && right.slide_start.is_some()
-        && left.slide_end != right.slide_start
-    {
-        return false;
-    }
-    let left_h1 = left.heading_path.first();
-    let right_h1 = right.heading_path.first();
-    left_h1.is_none() || right_h1.is_none() || left_h1 == right_h1
-}
-
-fn tail_text(text: &str, tokens: i32) -> String {
-    let max_chars = (tokens * 2).max(1) as usize;
-    let chars = text.chars().collect::<Vec<_>>();
-    let start = chars.len().saturating_sub(max_chars);
-    chars[start..].iter().collect()
-}
-
-fn head_text(text: &str, tokens: i32) -> String {
-    let max_chars = (tokens * 2).max(1) as usize;
-    text.chars().take(max_chars).collect()
 }
 
 fn env_i32(name: &str, default: i32) -> i32 {

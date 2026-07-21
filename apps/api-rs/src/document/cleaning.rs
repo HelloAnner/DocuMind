@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use unicode_normalization::UnicodeNormalization;
 
 use super::{FileType, ParsedBlock};
 
-pub const CLEANER_VERSION: &str = "documind-cleaner@0.1.0";
+pub const CLEANER_VERSION: &str = "documind-cleaner@0.2.0";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CleanedBlock {
@@ -28,13 +29,15 @@ pub fn clean_blocks(
     blocks: &[ParsedBlock],
 ) -> (Vec<CleanedBlock>, CleanStats) {
     let mut cleaned = Vec::with_capacity(blocks.len());
-    let mut op_counts = std::collections::BTreeMap::<String, usize>::new();
+    let mut op_counts = BTreeMap::<String, usize>::new();
+    let repeated_pdf_noise = repeated_pdf_noise(file_type, blocks);
 
     for block in blocks {
         let (mut text, mut ops) = common_clean(&block.text);
         format_specific_clean(file_type, block, &mut text, &mut ops);
 
-        let (is_removed, remove_reason) = removal_reason(block, &text);
+        let (is_removed, remove_reason) =
+            removal_reason(file_type, block, &text, &repeated_pdf_noise);
         for op in &ops {
             *op_counts.entry(op.clone()).or_insert(0) += 1;
         }
@@ -151,7 +154,7 @@ fn clean_pdf_text(block: &ParsedBlock, text: &mut String, ops: &mut Vec<String>)
             ops.push("merge_pdf_line_break".to_string());
         }
     }
-    if looks_like_page_noise(text) {
+    if looks_like_page_number(text) {
         ops.push("remove_pdf_noise".to_string());
     }
 }
@@ -191,7 +194,12 @@ fn clean_markdown_text(block: &ParsedBlock, text: &mut String, ops: &mut Vec<Str
     }
 }
 
-fn removal_reason(block: &ParsedBlock, text: &str) -> (bool, Option<String>) {
+fn removal_reason(
+    file_type: FileType,
+    block: &ParsedBlock,
+    text: &str,
+    repeated_pdf_noise: &HashSet<String>,
+) -> (bool, Option<String>) {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return (true, Some("empty_block".to_string()));
@@ -205,10 +213,15 @@ fn removal_reason(block: &ParsedBlock, text: &str) -> (bool, Option<String>) {
     if block.block_type == "html" && is_script_or_style(trimmed) {
         return (true, Some("script_style".to_string()));
     }
-    if looks_like_page_noise(trimmed) {
+    if file_type == FileType::Pdf
+        && (looks_like_page_number(trimmed) || repeated_pdf_noise.contains(&noise_key(trimmed)))
+    {
         return (true, Some("page_noise".to_string()));
     }
-    if block.block_type == "paragraph" && looks_like_toc_entry(trimmed) {
+    if file_type == FileType::Docx
+        && block.block_type == "paragraph"
+        && looks_like_toc_entry(trimmed)
+    {
         return (true, Some("toc_entry".to_string()));
     }
     (false, None)
@@ -257,28 +270,75 @@ fn merge_pdf_line_breaks(text: &str) -> String {
     out
 }
 
-fn looks_like_page_noise(text: &str) -> bool {
+fn looks_like_page_number(text: &str) -> bool {
     let trimmed = text.trim();
-    if trimmed.chars().count() > 24 {
+    if trimmed.chars().count() > 24 || trimmed.is_empty() {
         return false;
     }
     let lower = trimmed.to_ascii_lowercase();
-    trimmed
-        .chars()
-        .all(|c| c.is_ascii_digit() || matches!(c, '-' | '/' | ' ' | '.'))
-        || lower.starts_with("page ")
-        || lower.starts_with("第") && lower.ends_with("页")
+    let english_page = lower
+        .strip_prefix("page ")
+        .is_some_and(|tail| tail.trim().chars().all(|c| c.is_ascii_digit()));
+    let chinese_page = trimmed
+        .strip_prefix('第')
+        .and_then(|tail| tail.strip_suffix('页'))
+        .is_some_and(|number| {
+            !number.is_empty()
+                && number.chars().all(|c| {
+                    c.is_ascii_digit()
+                        || matches!(
+                            c,
+                            '一' | '二'
+                                | '三'
+                                | '四'
+                                | '五'
+                                | '六'
+                                | '七'
+                                | '八'
+                                | '九'
+                                | '十'
+                                | '百'
+                                | '千'
+                        )
+                })
+        });
+    english_page || chinese_page
 }
 
 fn looks_like_toc_entry(text: &str) -> bool {
     let trimmed = text.trim();
-    trimmed.contains(".....")
-        || trimmed.contains("……")
-        || trimmed
-            .rsplit_once(' ')
-            .map(|(_, tail)| tail.chars().all(|c| c.is_ascii_digit()))
-            .unwrap_or(false)
-            && trimmed.chars().count() < 120
+    (trimmed.contains(".....") || trimmed.contains("……")) && trimmed.chars().count() < 200
+}
+
+fn repeated_pdf_noise(file_type: FileType, blocks: &[ParsedBlock]) -> HashSet<String> {
+    if file_type != FileType::Pdf {
+        return HashSet::new();
+    }
+    let mut pages_by_text = BTreeMap::<String, BTreeSet<i32>>::new();
+    for block in blocks {
+        let Some(page) = block.page_start else {
+            continue;
+        };
+        let text = block.text.trim();
+        if text.is_empty() || text.chars().count() > 120 {
+            continue;
+        }
+        pages_by_text
+            .entry(noise_key(text))
+            .or_default()
+            .insert(page);
+    }
+    pages_by_text
+        .into_iter()
+        .filter_map(|(text, pages)| (pages.len() >= 3).then_some(text))
+        .collect()
+}
+
+fn noise_key(text: &str) -> String {
+    text.split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase()
 }
 
 fn is_script_or_style(text: &str) -> bool {
