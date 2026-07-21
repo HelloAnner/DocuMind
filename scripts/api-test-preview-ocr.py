@@ -449,7 +449,8 @@ WHERE d.id = '{doc_id}';
 def main():
     require_optional_modules()
     token, kb_id = login()
-    marker = f"PVSMOKE-{uuid.uuid4().hex[:8].upper()}"
+    marker_alphabet = str.maketrans("0123456789abcdef", "ABCDEFGHJKLMNPQR")
+    marker = f"PVSMOKE{uuid.uuid4().hex[:8].translate(marker_alphabet)}"
     with tempfile.TemporaryDirectory(prefix="documind-preview-ocr-") as tmpdir:
         docx = Path(tmpdir) / f"office-docx-{marker}.docx"
         write_docx(
