@@ -8,8 +8,7 @@ use crate::models::rag::{RetrievalInput, RetrievedChunk};
 use crate::models::source_anchor::{CharRange, NormalizedBBox, SourceAnchor};
 use crate::models::trace::RetrievalSource;
 use crate::rag::embedding::{
-    cosine_similarity, local_hash_embedding, vector_from_json, EmbeddingClient,
-    EmbeddingClientConfig, LOCAL_HASH_EMBEDDING_DIM, LOCAL_HASH_EMBEDDING_MODEL,
+    cosine_similarity, local_hash_embedding, EmbeddingClient, EmbeddingClientConfig,
 };
 
 #[async_trait::async_trait]
@@ -23,12 +22,16 @@ pub struct MockRetriever {
 
 pub struct PgRetriever {
     pool: PgPool,
+    embedding_client: Option<EmbeddingClient>,
+    embedding_model: String,
+    embedding_dimension: usize,
 }
 
 pub struct EsRetriever {
     http: reqwest::Client,
     base_url: String,
     index_name: String,
+    embedding_model: String,
     embedding_client: Option<EmbeddingClient>,
 }
 
@@ -40,8 +43,19 @@ struct CandidateChunk {
 }
 
 impl PgRetriever {
-    pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+    pub fn new(
+        pool: PgPool,
+        embedding_config: Option<EmbeddingClientConfig>,
+        embedding_model: String,
+        embedding_dimension: usize,
+    ) -> Result<Self> {
+        let embedding_client = embedding_config.map(EmbeddingClient::new).transpose()?;
+        Ok(Self {
+            pool,
+            embedding_client,
+            embedding_model,
+            embedding_dimension,
+        })
     }
 }
 
@@ -50,6 +64,7 @@ impl EsRetriever {
         base_url: String,
         index_name: String,
         embedding_config: Option<EmbeddingClientConfig>,
+        embedding_model: String,
     ) -> Result<Self> {
         let embedding_client = embedding_config.map(EmbeddingClient::new).transpose()?;
         Ok(Self {
@@ -58,6 +73,7 @@ impl EsRetriever {
                 .build()?,
             base_url: base_url.trim_end_matches('/').to_string(),
             index_name,
+            embedding_model,
             embedding_client,
         })
     }
@@ -85,7 +101,8 @@ impl EsRetriever {
                 "num_candidates": input.dense_top_k.max(input.top_k).max(50) * 4,
                 "filter": [
                     { "term": { "tenant_id": input.tenant_id.to_string() } },
-                    { "terms": { "kb_id": uuid_strings(&input.effective_kb_ids) } }
+                    { "terms": { "kb_id": uuid_strings(&input.effective_kb_ids) } },
+                    { "term": { "embedding_model": self.embedding_model } }
                 ]
             }
         });
@@ -104,13 +121,14 @@ impl EsRetriever {
                 "bool": {
                     "filter": [
                         { "term": { "tenant_id": input.tenant_id.to_string() } },
-                        { "terms": { "kb_id": uuid_strings(&input.effective_kb_ids) } }
+                        { "terms": { "kb_id": uuid_strings(&input.effective_kb_ids) } },
+                        { "term": { "embedding_model": self.embedding_model } }
                     ],
                     "must": [
                         {
                             "multi_match": {
                                 "query": query,
-                                "fields": ["doc_title^6", "content^3", "heading_path^1.5"],
+                                "fields": ["doc_title^6", "content^3", "content.standard^1.2", "heading_text^1.5"],
                                 "type": "best_fields"
                             }
                         }
@@ -316,7 +334,7 @@ impl Retriever for PgRetriever {
                     a.anchor_quality AS anchor_anchor_quality,
                     c.metadata,
                     d.updated_at,
-                    e.embedding_vector
+                    e.embedding_values
              FROM chunks c
              JOIN documents d ON d.id = c.doc_id
              LEFT JOIN chunk_embeddings e
@@ -337,20 +355,22 @@ impl Retriever for PgRetriever {
         .bind(input.tenant_id)
         .bind(&input.effective_kb_ids)
         .bind(candidate_limit)
-        .bind(LOCAL_HASH_EMBEDDING_MODEL)
+        .bind(&self.embedding_model)
         .fetch_all(&self.pool)
         .await?;
 
         let mut candidates = vec![];
         for row in rows {
             let content: String = row.try_get("content")?;
-            let embedding_value: Option<serde_json::Value> =
-                row.try_get("embedding_vector").unwrap_or(None);
-            let embedding = embedding_value
-                .as_ref()
-                .and_then(vector_from_json)
-                .filter(|v| v.len() == LOCAL_HASH_EMBEDDING_DIM)
-                .unwrap_or_else(|| local_hash_embedding(&content));
+            let stored_values: Option<Vec<f32>> = row.try_get("embedding_values")?;
+            let embedding = if self.embedding_client.is_some() {
+                stored_values
+                    .filter(|values| values.len() == self.embedding_dimension)
+                    .map(|values| values.into_iter().map(f64::from).collect())
+                    .unwrap_or_default()
+            } else {
+                local_hash_embedding(&content)
+            };
             let updated_at: chrono::DateTime<chrono::Utc> = row.try_get("updated_at")?;
             let primary_anchor: Option<crate::models::SourceAnchor> = row
                 .try_get::<Option<Uuid>, _>("anchor_id")
@@ -419,8 +439,31 @@ impl Retriever for PgRetriever {
             });
         }
 
-        Ok(hybrid_rrf(
+        let query_embeddings = if let Some(client) = &self.embedding_client {
+            let mut embeddings = Vec::with_capacity(input.queries.len());
+            for query in &input.queries {
+                let vector = client.embed_one(query).await?;
+                if vector.len() != self.embedding_dimension {
+                    anyhow::bail!(
+                        "query embedding dimension {} does not match configured {}",
+                        vector.len(),
+                        self.embedding_dimension
+                    );
+                }
+                embeddings.push(vector);
+            }
+            embeddings
+        } else {
+            input
+                .queries
+                .iter()
+                .map(|query| local_hash_embedding(query))
+                .collect()
+        };
+
+        Ok(hybrid_rrf_with_embeddings(
             &input.queries,
+            &query_embeddings,
             candidates,
             input.top_k,
             input.dense_top_k,
@@ -730,8 +773,31 @@ fn overlap_score(query: &str, text: &str) -> f64 {
     score.min(1.0)
 }
 
+#[cfg(test)]
 fn hybrid_rrf(
     queries: &[String],
+    candidates: Vec<CandidateChunk>,
+    top_k: usize,
+    dense_top_k: usize,
+    bm25_top_k: usize,
+) -> Vec<RetrievedChunk> {
+    let query_embeddings: Vec<Vec<f64>> = queries
+        .iter()
+        .map(|query| local_hash_embedding(query))
+        .collect();
+    hybrid_rrf_with_embeddings(
+        queries,
+        &query_embeddings,
+        candidates,
+        top_k,
+        dense_top_k,
+        bm25_top_k,
+    )
+}
+
+fn hybrid_rrf_with_embeddings(
+    queries: &[String],
+    query_embeddings: &[Vec<f64>],
     candidates: Vec<CandidateChunk>,
     top_k: usize,
     dense_top_k: usize,
@@ -740,11 +806,6 @@ fn hybrid_rrf(
     if candidates.is_empty() || queries.is_empty() {
         return vec![];
     }
-
-    let query_embeddings: Vec<Vec<f64>> = queries
-        .iter()
-        .map(|query| local_hash_embedding(query))
-        .collect();
 
     let mut dense_scores = vec![];
     let mut bm25_scores = vec![];

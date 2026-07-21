@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 pub mod agent;
 pub mod api;
 pub mod auth;
@@ -125,6 +127,20 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     .await
     .with_field("model", state.config.rag.embedding.model.as_str())
     .with_field("index", state.config.rag.embedding.index_name.as_str());
+    let vector_consistency = match (&state.db_pool, state.config.elasticsearch_url.as_deref()) {
+        (Some(pool), Some(es_url)) => crate::rag::vector_pipeline::quick_consistency(
+            pool,
+            &state.config.rag.embedding,
+            es_url,
+        )
+        .await
+        .map_err(|error| error.to_string()),
+        _ => Err("vector index dependencies are not configured".to_string()),
+    };
+    let vector_index_consistent = vector_consistency
+        .as_ref()
+        .map(|snapshot| snapshot.consistent)
+        .unwrap_or(false);
     let ok = [
         postgres.ok,
         redis.ok,
@@ -133,6 +149,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         rabbitmq.ok,
         real_llm.ok,
         embedding.ok,
+        vector_index_consistent,
     ]
     .into_iter()
     .all(|item| item);
@@ -150,7 +167,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             "object_storage": object_storage.ok,
             "rabbitmq": rabbitmq.ok,
             "real_llm": real_llm.ok,
-            "embedding": embedding.ok
+            "embedding": embedding.ok,
+            "vector_index_consistent": vector_index_consistent
         },
         "details": {
             "postgres": postgres.into_json(),
@@ -159,7 +177,11 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             "object_storage": object_storage.into_json(),
             "rabbitmq": rabbitmq.into_json(),
             "real_llm": real_llm.into_json(),
-            "embedding": embedding.into_json()
+            "embedding": embedding.into_json(),
+            "vector_index": match vector_consistency {
+                Ok(snapshot) => json!(snapshot),
+                Err(error) => json!({"consistent": false, "error": error})
+            }
         }
     }))
 }
@@ -235,6 +257,40 @@ async fn metrics(State(state): State<AppState>) -> Response {
                 ));
             }
         }
+        if let Some(es_url) = state.config.elasticsearch_url.as_deref() {
+            match crate::rag::vector_pipeline::quick_consistency(
+                pool,
+                &state.config.rag.embedding,
+                es_url,
+            )
+            .await
+            {
+                Ok(snapshot) => {
+                    push_metric(
+                        &mut out,
+                        "documind_vector_index_expected_chunks",
+                        &[],
+                        snapshot.expected_chunks,
+                    );
+                    push_metric(
+                        &mut out,
+                        "documind_vector_index_actual_chunks",
+                        &[],
+                        snapshot.actual_chunks,
+                    );
+                    push_metric(
+                        &mut out,
+                        "documind_vector_index_drift_chunks",
+                        &[],
+                        snapshot.missing_or_stale_chunks,
+                    );
+                }
+                Err(err) => out.push_str(&format!(
+                    "# documind_vector_consistency_error {}\n",
+                    sanitize_prometheus_comment(&err.to_string())
+                )),
+            }
+        }
     } else {
         push_metric(&mut out, "documind_database_metrics_available", &[], 0);
     }
@@ -304,6 +360,44 @@ async fn append_database_metrics(out: &mut String, pool: &PgPool) -> anyhow::Res
             out,
             "documind_parse_jobs_by_status_total",
             &[("status", status.as_str())],
+            count,
+        );
+    }
+
+    out.push_str(
+        "# HELP documind_vector_jobs_by_status_total Durable vector jobs grouped by status.\n",
+    );
+    out.push_str("# TYPE documind_vector_jobs_by_status_total gauge\n");
+    let vector_jobs = sqlx::query_as::<_, (String, i64)>(
+        "SELECT status, COUNT(*)::bigint FROM vector_jobs GROUP BY status ORDER BY status",
+    )
+    .fetch_all(pool)
+    .await?;
+    for (status, count) in vector_jobs {
+        push_metric(
+            out,
+            "documind_vector_jobs_by_status_total",
+            &[("status", status.as_str())],
+            count,
+        );
+    }
+
+    out.push_str("# HELP documind_embeddings_by_status_total Chunk embeddings grouped by generation and index status.\n");
+    out.push_str("# TYPE documind_embeddings_by_status_total gauge\n");
+    let embedding_statuses = sqlx::query_as::<_, (String, String, i64)>(
+        "SELECT status, index_status, COUNT(*)::bigint
+         FROM chunk_embeddings GROUP BY status, index_status ORDER BY status, index_status",
+    )
+    .fetch_all(pool)
+    .await?;
+    for (status, index_status, count) in embedding_statuses {
+        push_metric(
+            out,
+            "documind_embeddings_by_status_total",
+            &[
+                ("status", status.as_str()),
+                ("index_status", index_status.as_str()),
+            ],
             count,
         );
     }

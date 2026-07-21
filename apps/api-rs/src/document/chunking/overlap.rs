@@ -15,19 +15,25 @@ pub(super) fn add_overlap(chunks: &mut [ChunkDraft], cfg: &ChunkConfig) {
         let mut next_ids = Vec::new();
         let mut content = chunks[idx].content.clone();
         let available = (cfg.max_chunk_tokens - estimate_tokens(&content)).max(0);
-        let side_budget = half.min(available / 2);
+        let side_budget = half.min(available.saturating_sub(16) / 2);
         if idx > 0 && can_overlap(&chunks[idx - 1], &chunks[idx]) {
             let prev = tail_text(&originals[idx - 1], side_budget);
             if !prev.trim().is_empty() {
-                content = format!("【上文】{}\n\n{}", prev.trim(), content);
-                prev_ids = ids[idx - 1].clone();
+                let candidate = format!("【上文】{}\n\n{}", prev.trim(), content);
+                if estimate_tokens(&candidate) <= cfg.max_chunk_tokens {
+                    content = candidate;
+                    prev_ids = ids[idx - 1].clone();
+                }
             }
         }
         if idx + 1 < chunks.len() && can_overlap(&chunks[idx], &chunks[idx + 1]) {
             let next = head_text(&originals[idx + 1], side_budget);
             if !next.trim().is_empty() {
-                content = format!("{}\n\n【下文】{}", content, next.trim());
-                next_ids = ids[idx + 1].clone();
+                let candidate = format!("{}\n\n【下文】{}", content, next.trim());
+                if estimate_tokens(&candidate) <= cfg.max_chunk_tokens {
+                    content = candidate;
+                    next_ids = ids[idx + 1].clone();
+                }
             }
         }
 
@@ -60,16 +66,30 @@ fn tail_text(text: &str, tokens: i32) -> String {
     if tokens <= 0 {
         return String::new();
     }
-    let max_chars = (tokens * 2).max(1) as usize;
-    let chars = text.chars().collect::<Vec<_>>();
-    let start = chars.len().saturating_sub(max_chars);
-    chars[start..].iter().collect()
+    let mut selected = Vec::new();
+    for character in text.chars().rev() {
+        selected.push(character);
+        let candidate = selected.iter().rev().collect::<String>();
+        if estimate_tokens(&candidate) > tokens {
+            selected.pop();
+            break;
+        }
+    }
+    selected.into_iter().rev().collect()
 }
 
 fn head_text(text: &str, tokens: i32) -> String {
     if tokens <= 0 {
         return String::new();
     }
-    let max_chars = (tokens * 2).max(1) as usize;
-    text.chars().take(max_chars).collect()
+    let mut selected = String::new();
+    for character in text.chars() {
+        let mut candidate = selected.clone();
+        candidate.push(character);
+        if estimate_tokens(&candidate) > tokens {
+            break;
+        }
+        selected = candidate;
+    }
+    selected
 }

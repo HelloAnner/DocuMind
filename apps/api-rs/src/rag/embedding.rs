@@ -15,6 +15,7 @@ pub struct EmbeddingClientConfig {
     pub model: String,
     pub batch_size: usize,
     pub timeout_seconds: u64,
+    pub retry_max: usize,
 }
 
 impl TryFrom<&EmbeddingConfig> for EmbeddingClientConfig {
@@ -36,6 +37,7 @@ impl TryFrom<&EmbeddingConfig> for EmbeddingClientConfig {
             model: config.model.clone(),
             batch_size: config.batch_size.clamp(1, 100),
             timeout_seconds: 120,
+            retry_max: config.retry_max.max(1) as usize,
         })
     }
 }
@@ -94,27 +96,49 @@ impl EmbeddingClient {
             bail!("embedding input contains empty text");
         }
 
-        let resp = self
-            .http
-            .post(self.embeddings_url())
-            .header("Authorization", format!("Bearer {}", self.config.api_key))
-            .header("Content-Type", "application/json")
-            .json(&EmbeddingRequest {
-                model: &self.config.model,
-                input: texts,
-            })
-            .send()
-            .await?;
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp
-                .text()
-                .await
-                .unwrap_or_else(|_| "<failed to read response body>".to_string());
-            bail!("embedding provider returned HTTP {status}: {body}");
+        let mut payload = None;
+        for attempt in 1..=self.config.retry_max {
+            let response = self
+                .http
+                .post(self.embeddings_url())
+                .header("Authorization", format!("Bearer {}", self.config.api_key))
+                .header("Content-Type", "application/json")
+                .json(&EmbeddingRequest {
+                    model: &self.config.model,
+                    input: texts,
+                })
+                .send()
+                .await;
+            match response {
+                Ok(response) if response.status().is_success() => {
+                    payload = Some(response.json::<EmbeddingResponse>().await?);
+                    break;
+                }
+                Ok(response) => {
+                    let status = response.status();
+                    let retryable = status.as_u16() == 429 || status.is_server_error();
+                    let body = response
+                        .text()
+                        .await
+                        .map(|body| body.chars().take(1_000).collect::<String>())
+                        .unwrap_or_else(|_| "<failed to read response body>".to_string());
+                    if !retryable || attempt == self.config.retry_max {
+                        bail!("embedding provider returned HTTP {status}: {body}");
+                    }
+                }
+                Err(error) => {
+                    if attempt == self.config.retry_max {
+                        return Err(error.into());
+                    }
+                }
+            }
+            let delay =
+                Duration::from_millis((250_u64 * 2_u64.pow(attempt.min(6) as u32)).min(8_000));
+            tokio::time::sleep(delay).await;
         }
 
-        let payload: EmbeddingResponse = resp.json().await?;
+        let payload =
+            payload.ok_or_else(|| anyhow!("embedding retry loop completed without a response"))?;
         if payload.data.len() != texts.len() {
             bail!(
                 "embedding provider returned {} vectors for {} inputs",

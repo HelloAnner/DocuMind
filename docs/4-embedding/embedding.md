@@ -1,386 +1,143 @@
 # 向量化与向量存储（Embedding）
 
-Embedding 是 Ingest Pipeline 的第四阶段：输入来自 Chunking 的 `chunks`，输出是写入 Elasticsearch 的**带稠密向量（dense vector）的索引文档**。它也是 Query Pipeline 中语义检索（Dense Retrieval）的基础。
+本文描述 DocuMind 当前已经落地的向量化链路。PostgreSQL 是权威数据源，Elasticsearch 是可重建的在线检索副本，RabbitMQ 用于任务通知，`vector_jobs` 用于任务状态持久化。
 
-## Pipeline 位置
-
-```text
-Upload
-  -> Document Parsing        (产出 document_blocks / document_tables)
-  -> Text Cleaning           (产出 cleaned_blocks)
-  -> Chunking                (产出 chunks)
-  -> Embedding               (产出 embedding_vector)
-  -> Elasticsearch           (可检索文本 + 稠密向量)
-  -> PostgreSQL              (权威结构与关系)
-```
-
-## 核心职责
-
-1. **加载与管理 Embedding 模型**：本地 ONNX 模型或远程 Embedding API。
-2. **批量向量化**：把 `chunks.content` 转成高维稠密向量。
-3. **写入 Elasticsearch**：每个 chunk 对应一条 ES 文档，包含文本、元数据、稠密向量。
-4. **支持混合检索**：ES 中同时保留 `dense_vector`（语义检索）和 `text` + 中文分词（BM25 关键词检索）。
-5. **幂等去重、失败重试、模型热切换**：同一 chunk 同一模型只保留一份向量；失败可重试；模型切换时可重建索引。
-
-## 输入：Chunk 数据形态
-
-Embedding 阶段消费 PostgreSQL `chunks` 表中的权威记录。每条 chunk 至少包含以下字段：
-
-```json
-{
-  "chunk_id": "chunk_001",
-  "doc_id": "doc_001",
-  "kb_id": "kb_001",
-  "tenant_id": "tenant_001",
-  "parse_job_id": "job_001",
-  "chunk_index": 0,
-  "source_type": "paragraph",
-  "content": "标题路径：年度策略 / Q1 目标\n\n华东区 Q1 销售目标为 1200 万元。重点客户包括 A、B、C。",
-  "heading_path": ["年度策略", "Q1 目标"],
-  "page_range": [3, 3],
-  "token_count": 45,
-  "metadata": {
-    "split_reason": "target_chunk_tokens",
-    "overlap_tokens": 0
-  }
-}
-```
-
-> 向量化只关心 `content` 本身；`heading_path`、`page_range`、`source_type` 等字段原样进入 ES 用于过滤和展示。
-
-## 为什么选用 Elasticsearch
-
-DocuMind 把 Elasticsearch 作为统一的检索与向量存储媒介，而不是单独维护一个向量数据库：
-
-| 能力           | Elasticsearch 方案                 | 独立向量库 + 倒排库方案   |
-| -------------- | ---------------------------------- | ------------------------- |
-| 稠密向量检索   | `dense_vector` + HNSW kNN          | 需额外 Milvus/Pinecone 等 |
-| 全文关键词检索 | 原生 BM25 + `ik_max_word` 中文分词 | 需额外 Elasticsearch/Solr |
-| 混合检索       | 一次查询同时跑 kNN + BM25 + RRF    | 需在应用层做结果融合      |
-| 元数据过滤     | 与检索同索引，pre-filter           | 需跨系统拼接              |
-| 运维成本       | 一套集群、一套备份、统一监控       | 多套系统、数据一致性复杂  |
-| 成熟度         | ES 8.x 向量检索已生产可用          | 组合方案排错链路长        |
-
-结论：Elasticsearch 一个索引即可承载**语义向量 + 关键词全文 + 元数据过滤 + RRF 融合**，与 DocuMind "混合检索优先" 的架构目标最匹配。
-
-## 向量化模型方案
-
-| 场景              | 推荐模型                        | 维度  | 部署方式          |
-| ----------------- | ------------------------------- | ----- | ----------------- |
-| 纯中文文档        | `bge-large-zh-v1.5`             | 1024d | 本地 ONNX Runtime |
-| 中英混合文档      | `multilingual-e5-large`         | 1024d | 本地 ONNX Runtime |
-| 无 GPU / 快速上线 | DashScope `text-embedding-v3`   | 1024d | HTTP API          |
-| 多语言、高精度    | OpenAI `text-embedding-3-large` | 3072d | HTTP API          |
-
-**默认推荐**：目标态默认可选 `bge-large-zh-v1.5`（1024 维，cosine 相似度）；当前服务器使用 DashScope `text-embedding-v3` HTTP API，并已通过 `/api/health` embedding 检查。
-
-模型选择由知识库配置 `embedding_model` 决定，可在知识库粒度切换。切换模型时，目标态应为该知识库重建 ES 索引并重新向量化所有 chunk；当前在线模型热切换和重建操作仍未完整落地。
-
-## Embedding Worker 流程
-
-当前实现状态：上传后的 embedding 与 ES 写入主链路已可用，但仍主要由应用进程内任务执行。下面的 RabbitMQ Embedding Worker 是目标态流程，尚未完整拆分为独立 worker、重试和死信队列。
+## 当前数据流
 
 ```text
-RabbitMQ 队列: documind.embedding.pending
-  │
-  ▼
-Embedding Worker
-  │
-  ├── 1. 消费消息 { doc_id, parse_job_id, embedding_model }
-  │
-  ├── 2. 从 PostgreSQL 加载该 job 下所有未向量化的 chunks
-  │
-  ├── 3. 按 batch_size 批量调用 Embedding 模型
-  │       ├─ 本地 ONNX: ort::Session::run
-  │       └─ 远程 API : HTTP POST /embeddings
-  │
-  ├── 4. 写入 PostgreSQL chunk_embeddings（幂等键：chunk_id + embedding_model）
-  │
-  ├── 5. 批量写入 Elasticsearch `chunks` 索引
-  │
-  └── 6. 更新 documents.parse_status = 'indexed'
+文档解析
+  -> PostgreSQL: document_blocks / cleaned_blocks / chunks
+  -> PostgreSQL: vector_jobs(pending)
+  -> RabbitMQ: documind.embedding.pending（通知）
+  -> Vector Worker
+       1. 按最新 parse_job 读取 chunks
+       2. 构造 embedding input
+       3. 调用 OpenAI-compatible /embeddings
+       4. PostgreSQL: chunk_embeddings.embedding_values
+       5. Elasticsearch: 版本化物理索引
+       6. 刷新并核验该文档的 chunk 数
+       7. PostgreSQL: documents.parse_status=indexed
 ```
 
-### 批量策略
+RabbitMQ 消息只携带 `vector_job_id`，任务内容、重试次数、租约和错误均保存在 PostgreSQL。RabbitMQ 不可用时，Worker 仍会轮询 `vector_jobs`，因此通知丢失或服务重启不会丢任务。当前 Worker 与 API 位于同一个 Rust 二进制中，但任务本身已脱离进程内 `tokio::spawn` 状态，可恢复、可重试、可审计。
 
-- **batch_size**：本地 ONNX 建议 32 ~ 128；远程 API 按服务商限制（通常 32 ~ 100）。
-- **max_concurrent_batches**：根据 GPU 显存或 API QPS 调整，默认 4。
-- **空内容过滤**：`content` 为空或仅 whitespace 的 chunk 不进入向量化，但写入 ES 时 `embedding` 字段可留空或置零向量。
+## PostgreSQL 中存什么
 
-## Elasticsearch 索引设计
+### `chunks`
 
-### 索引与别名
+保存解析后当前及历史 parse job 的文本切片、标题路径、页码、表格和 source anchor。`documents.latest_parse_job_id` 指向当前有效版本，向量化和重建只消费该版本。
 
-- **索引名**：`chunks`（单索引多租户，通过 `tenant_id` / `kb_id` 过滤）。
-- **别名**：`chunks_search`（用于查询，重建索引时可零停机切换）。
+### `chunk_embeddings`
 
-### Settings & Mappings
+保存可重建 ES 索引所需的权威向量：
 
-```json
-// PUT /chunks
-{
-  "settings": {
-    "number_of_shards": 3,
-    "number_of_replicas": 1,
-    "analysis": {
-      "analyzer": {
-        "chinese_analyzer": {
-          "type": "custom",
-          "tokenizer": "ik_max_word",
-          "filter": ["lowercase"]
-        }
-      }
-    }
-  },
-  "mappings": {
-    "properties": {
-      "chunk_id": { "type": "keyword" },
-      "doc_id": { "type": "keyword" },
-      "kb_id": { "type": "keyword" },
-      "tenant_id": { "type": "keyword" },
-      "parse_job_id": { "type": "keyword" },
-      "chunk_index": { "type": "integer" },
-      "source_type": { "type": "keyword" },
-      "content": {
-        "type": "text",
-        "analyzer": "chinese_analyzer",
-        "fields": {
-          "keyword": { "type": "keyword", "ignore_above": 32766 }
-        }
-      },
-      "heading_path": { "type": "keyword" },
-      "page_range": { "type": "integer_range" },
-      "token_count": { "type": "integer" },
-      "table_ids": { "type": "keyword" },
-      "embedding": {
-        "type": "dense_vector",
-        "dims": 1024,
-        "index": true,
-        "similarity": "cosine",
-        "index_options": {
-          "type": "hnsw",
-          "m": 16,
-          "ef_construction": 200
-        }
-      },
-      "created_at": { "type": "date" },
-      "embedded_at": { "type": "date" }
-    }
-  }
-}
-```
+| 字段 | 说明 |
+|---|---|
+| `chunk_id + embedding_model` | 幂等键 |
+| `embedding_values REAL[]` | 当前权威向量存储，避免 JSONB 数字带来的额外空间 |
+| `embedding_dim` | 维度校验，必须等于数组长度 |
+| `content_hash` | embedding input 的 SHA-256；内容未变时复用向量 |
+| `status` | 向量生成状态：`running/completed/failed` |
+| `index_status` | ES 写入状态：`pending/indexed/failed` |
+| `index_name/indexed_at` | 实际写入的物理索引与时间 |
 
-### 字段说明
+旧字段 `embedding_vector JSONB` 仅为滚动发布兼容而保留，数据写成空数组；不再作为权威向量存储。
 
-| 字段                         | 类型          | 说明                                             |
-| ---------------------------- | ------------- | ------------------------------------------------ |
-| `chunk_id`                   | keyword       | chunk 主键，也是 ES 文档 `_id`                   |
-| `doc_id`                     | keyword       | 所属文档                                         |
-| `kb_id`                      | keyword       | 所属知识库，检索范围过滤                         |
-| `tenant_id`                  | keyword       | 租户隔离字段，所有查询必须带 `term` filter       |
-| `parse_job_id`               | keyword       | 解析版本，用于版本切换和旧索引清理               |
-| `chunk_index`                | integer       | 文档内顺序                                       |
-| `source_type`                | keyword       | `paragraph` / `table` / `slide_note` / `code` 等 |
-| `content`                    | text          | 用于 BM25 全文检索和 LLM 上下文                  |
-| `heading_path`               | keyword       | 标题路径，用于过滤和展示                         |
-| `page_range`                 | integer_range | 页码/slide 范围                                  |
-| `token_count`                | integer       | content token 数                                 |
-| `table_ids`                  | keyword       | 关联表格 ID，便于回表取完整表格                  |
-| `embedding`                  | dense_vector  | 1024 维稠密向量，HNSW 索引，cosine 相似度        |
-| `created_at` / `embedded_at` | date          | 创建与向量化时间                                 |
+### `vector_jobs`
 
-### HNSW 参数调优
+保存 `index_document` 和 `rebuild_index` 两类持久化任务。Worker 通过 `FOR UPDATE SKIP LOCKED` 领取任务并设置租约；进程异常后过期租约会恢复为 `pending`。失败采用指数退避，超过 `EMBED_RETRY_MAX` 后进入 `failed`，同时发布到 `documind.embedding.dead`。
 
-| 参数              | 默认值    | 说明                                             |
-| ----------------- | --------- | ------------------------------------------------ |
-| `m`               | 16        | 每个节点双向连接数，越大召回越高、内存越大       |
-| `ef_construction` | 200       | 构建图时的搜索宽度，越大构建越慢、图质量越高     |
-| `ef`（查询时）    | 100 ~ 200 | 查询搜索宽度，通过 `knn.num_candidates` 间接控制 |
+### `vector_index_versions`
 
-## ES 文档示例
+记录查询别名、物理索引、模型、维度、schema 版本和 `building/active/retired/failed` 状态，是索引版本的控制面记录。
 
-写入 ES 后的单条 chunk 文档形态：
+## Embedding input 与复用
 
-```json
-{
-  "chunk_id": "chunk_002",
-  "doc_id": "doc_001",
-  "kb_id": "kb_001",
-  "tenant_id": "tenant_001",
-  "parse_job_id": "job_001",
-  "chunk_index": 1,
-  "source_type": "table",
-  "content": "标题路径：年度策略 / Q2 目标\n表格：区域销售目标\n\n| 区域 | 目标 |\n|---|---|\n| 华东 | 1300 万 |\n| 华南 | 1000 万 |",
-  "heading_path": ["年度策略", "Q2 目标"],
-  "page_range": { "gte": 1, "lte": 1 },
-  "token_count": 28,
-  "table_ids": ["tbl_001"],
-  "embedding": [0.012, -0.034, 0.089, "... 1024 dims ..."],
-  "created_at": "2026-06-23T10:00:00Z",
-  "embedded_at": "2026-06-23T10:05:00Z"
-}
-```
-
-> ES 不是权威存储。`chunks` 表和 `chunk_embeddings` 表保存权威数据，ES 索引可随时从 PostgreSQL 重建。
-
-## 幂等去重
-
-Embedding 阶段必须保证同一 chunk、同一模型只生成一份向量。
-
-- **PostgreSQL 幂等键**：`UNIQUE(chunk_id, embedding_model)`。
-- **ES 文档 `_id`**：直接使用 `chunk_id`，`index` 操作天然幂等（重复写入覆盖旧文档）。
-- **内容变更检测**：通过 `content_hash = md5(content)` 判断 content 是否变化；无变化时跳过模型调用，直接复用已有向量。
+模型输入由以下内容组成：
 
 ```text
-embedding_identity = sha256(chunk_identity + embedding_model + embedding_config)
+文档：<document title>
+章节：<heading path>
+<chunk 正文>
 ```
 
-`chunk_identity` 已在 Chunking 阶段计算；任一 embedding 模型或配置变更都会触发下游重新向量化。
+用于展示的 `标题路径：`、`页码：`、`Slide：` 和 `【上文】/【下文】` 标记不会重复进入模型输入。系统对最终 input 计算 SHA-256；同一 chunk、模型、维度且 hash 未变化时直接复用 `REAL[]` 向量，只为新增或变化的 chunk 调用模型。
 
-## 失败重试
+所有返回向量必须满足：数量与请求一致、维度等于 `EMBED_DIM`、元素均为有限数值。HTTP 传输错误、429 和 5xx 会在单次任务内指数退避重试；任务级失败还会由 `vector_jobs` 再次调度。
 
-| 失败场景           | 处理策略                                                   |
-| ------------------ | ---------------------------------------------------------- |
-| Embedding API 超时 | 按指数退避重试 3 次，仍失败则标记 `status = 'failed'`      |
-| 模型返回非 200     | 记录 `error_message`，不入 ES                              |
-| ES 写入失败        | 重试 3 次；仍失败则保留 PostgreSQL 向量，人工/定时任务补偿 |
-| chunk 内容为空     | 跳过向量化，ES 中 `embedding` 置零向量或不写该字段         |
+## 分块策略
 
-`chunk_embeddings.status` 状态机：
+默认配置为结构感知切分：目标 800 tokens、最大 1500、最小 200、相邻重叠 200。当前实现还包括：
+
+- PDF 的启发式短标题不再被当作强制 H1 边界，避免大量几十 token 的碎片。
+- 长文本按句子和字符硬切，重叠预算预留在最大长度内。
+- Markdown 表格按行数和 token 双阈值拆分，每一片重复表头；超长单行继续硬切。
+- 兼容的短尾块在不超过最大长度时合并；表格、跨 slide、跨一级标题不合并或重叠。
+
+## Elasticsearch 中存什么
+
+ES 保存在线混合检索副本。物理索引名包含 schema、模型和维度，例如：
 
 ```text
-pending -> running -> completed
-              |
-              └-----> failed (可重试)
+chunks-v2-text-embedding-v3-1024
 ```
 
-## 模型热切换与索引重建
+查询始终访问别名 `chunks_search`。主要字段包括：
 
-当管理员切换知识库 embedding 模型时：
+- 身份和隔离：`chunk_id/doc_id/parse_job_id/tenant_id/kb_id`
+- 文本和结构：`doc_title/file_type/content/heading_path/heading_text/source_type`
+- 引用定位：`anchor_*`、页码、slide、block/table IDs
+- 向量：`embedding_model` 与 `dense_vector embedding`
 
-1. 为该 `kb_id` 下的所有 chunk 生成新的 `embedding_identity`。
-2. 异步向量化所有 chunk 到新模型，写入新的 ES 文档（因 `_id` 不变，会覆盖旧向量）。
-3. 向量化完成后，切换 `knowledge_base.embedding_model` 为新的模型名。
-4. 保留最近 2 个旧模型版本的 `chunk_embeddings` 记录，便于回滚；更旧的版本由后台清理任务删除。
+`content`、`doc_title`、`heading_text` 使用 Elasticsearch 内置 `cjk` analyzer，并保留 `content.standard` 子字段；向量使用 cosine HNSW（`m=16`、`ef_construction=200`）。Dense 和 BM25 查询都强制过滤 `tenant_id`、知识库范围和当前 `embedding_model`，结果在应用层用 RRF 融合。
 
-## 查询流程
+## 一致性与索引重建
 
-Embedding 阶段的最终产物在 Query Pipeline 中这样使用：
+索引重建写入一个未挂载查询别名的新物理索引。全部文档完成后，系统比较 PostgreSQL 当前有效 chunk ID 集合与 ES `_id` 集合；只有缺失数和陈旧数都为 0 才原子切换别名并把版本标记为 `active`。切换成功后清理旧物理索引。
 
-```text
-用户问题
-  │
-  ▼
-Query Rewrite (LLM)
-  │  输出 rewritten_query + keywords + hypothetical_answer(HyDE 可选)
-  ▼
-Elasticsearch Hybrid Search
-  │  ├─ kNN: query_vector -> embedding 字段 -> cosine Top-100
-  │  ├─ BM25: rewritten_query -> content 字段 -> Top-100
-  │  └─ pre-filter: tenant_id + kb_id + 其他元数据
-  │
-  ▼
-RRF Fusion (k=60) -> Top-20
-  ▼
-Reranker (Cross-Encoder) -> Top-5
-  ▼
-阈值过滤 (score >= 0.3) -> 进入 LLM 生成答案
-```
+系统启动和定时巡检都会执行同样的 ID 级对账，而不只比较总数。发现缺失或陈旧 chunk 时自动创建持久化重建任务。别名已经切换但数据库状态尚未落盘的异常窗口也可以在重试时恢复。
 
-### Hybrid Search 请求示例
+文档删除、排除检索、替换文件和强制重解析都会清理查询别名中的旧 chunk，并取消未完成的文档向量任务。Worker 在最终提交状态时还会再次检查 `latest_parse_job_id` 和排除状态；如果文档已变化，会清理刚写入的 ES 数据，避免竞态产生孤儿。
 
-```json
-// POST /chunks/_search
-{
-  "size": 20,
-  "query": {
-    "bool": {
-      "must": [
-        {
-          "multi_match": {
-            "query": "2025年 Q3 采购合同 付款节点",
-            "fields": ["content"],
-            "type": "best_fields"
-          }
-        }
-      ],
-      "filter": [
-        { "term": { "tenant_id": "tenant_001" } },
-        { "terms": { "kb_id": ["kb_001", "kb_002"] } }
-      ]
-    }
-  },
-  "knn": {
-    "field": "embedding",
-    "query_vector": [0.012, -0.034, "... 1024 dims ..."],
-    "k": 100,
-    "num_candidates": 200,
-    "filter": [
-      { "term": { "tenant_id": "tenant_001" } },
-      { "terms": { "kb_id": ["kb_001", "kb_002"] } }
-    ]
-  },
-  "rank": {
-    "rrf": {
-      "window_size": 100,
-      "rank_constant": 60
-    }
-  }
-}
-```
+## 完成语义
+
+`documents.parse_status = indexed` 只表示以下条件已经全部满足：
+
+1. 当前 parse job 的所有 chunk 都有合法的权威向量；
+2. 这些 chunk 已写入目标物理索引；
+3. ES refresh 后该文档、该 parse job 的数量与 PostgreSQL 一致；
+4. 文档仍指向同一个 parse job，且未被排除。
+
+因此“向量已生成”和“检索索引已可用”不再混为同一个状态。
+
+## 运维入口
+
+- `GET /api/system/vector-indexes/reconcile`：返回物理索引、期望/实际、missing/stale 和一致性。
+- `POST /api/system/vector-indexes/rebuild`：创建持久化的全量重建任务。
+- `GET /api/health`：用低成本计数检查 `vector_index_consistent`；ID 级巡检由后台和 reconcile API 执行。
+- `GET /api/metrics`：暴露 vector job 状态、embedding/index 状态以及期望、实际和计数漂移。
+- RabbitMQ 队列：`documind.embedding.pending`、`documind.embedding.dead`。
 
 ## 配置项
 
-| 环境变量 / 配置键          | 说明                | 默认值 / 示例                   |
-| -------------------------- | ------------------- | ------------------------------- |
-| `EMBEDDING_PROVIDER`       | 模型来源            | `onnx` / `dashscope` / `openai` |
-| `EMBEDDING_MODEL`          | 模型名              | `bge-large-zh-v1.5`             |
-| `EMBEDDING_DIM`            | 向量维度            | `1024`                          |
-| `EMBEDDING_BATCH_SIZE`     | 单次向量化 chunk 数 | `32`                            |
-| `EMBEDDING_MAX_CONCURRENT` | 并发批次数          | `4`                             |
-| `EMBEDDING_RETRY_MAX`      | 失败重试次数        | `3`                             |
-| `ES_URL`                   | Elasticsearch 地址  | `http://localhost:9200`         |
-| `ES_INDEX_CHUNKS`          | chunk 索引名        | `chunks`                        |
-| `ES_INDEX_ALIAS`           | 查询别名            | `chunks_search`                 |
+| 配置 | 默认值 | 说明 |
+|---|---:|---|
+| `EMBED_MODEL` | `text-embedding-v3` | OpenAI-compatible 模型名 |
+| `EMBED_DIM` | `1024` | 模型和 ES mapping 的固定维度 |
+| `EMBED_BASE_URL` | - | API base URL，客户端调用 `/embeddings` |
+| `EMBED_API_KEY` | - | 服务端密钥 |
+| `EMBED_BATCH_SIZE` | `10` | 每批 chunk 数，允许 1–100 |
+| `EMBED_RETRY_MAX` | `3` | HTTP 与持久化任务最大尝试次数 |
+| `EMBED_WORKER_POLL_MS` | `1000` | PostgreSQL 补偿轮询间隔 |
+| `EMBED_ENABLED` | `true` | 是否启用真实向量链路 |
+| `ES_INDEX_CHUNKS` | `chunks` | 物理索引名前缀 |
+| `ES_INDEX_ALIAS` | `chunks_search` | 线上查询别名 |
+| `ES_INDEX_SCHEMA_VERSION` | `2` | mapping/schema 版本 |
 
-## 安全与隔离
+分块配置使用 `RAG_TARGET_CHUNK_TOKENS`、`RAG_MAX_CHUNK_TOKENS`、`RAG_HARD_SPLIT_TOKENS`、`RAG_MIN_CHUNK_TOKENS`、`RAG_CHUNK_OVERLAP_TOKENS`、`RAG_MAX_TABLE_ROWS_PER_CHUNK` 和 `RAG_MAX_TABLE_TOKEN_PER_CHUNK`。
 
-- **租户隔离**：所有 ES 查询必须带 `tenant_id` term filter；`kb_id` 作为知识库范围过滤。
-- **索引权限**：生产环境 ES 角色应限制只能访问 `chunks` 索引，禁止直接操作 `_cluster` 等管理接口。
-- **API Key 安全**：远程 Embedding API Key 只保存在后端 `.env`，不暴露给前端。
+## 安全边界
 
-## 可观测性
-
-### 关键指标
-
-| 指标                       | 目标     | 说明                   |
-| -------------------------- | -------- | ---------------------- |
-| `embedding_success_rate`   | >= 99%   | 向量化成功 chunk 占比  |
-| `embedding_avg_latency_ms` | 可预期   | 单 batch 平均耗时      |
-| `embedding_queue_lag`      | 不堆积   | MQ 中待处理消息数      |
-| `es_index_size_mb`         | 可预期   | 索引大小，辅助扩容决策 |
-| `es_query_p99_ms`          | <= 200ms | 混合检索 P99 延迟      |
-
-### 结构化日志
-
-```json
-{
-  "event": "document_embedded",
-  "doc_id": "uuid",
-  "parse_job_id": "uuid",
-  "embedding_model": "bge-large-zh-v1.5",
-  "chunk_count": 47,
-  "batch_count": 3,
-  "duration_ms": 1234,
-  "failed_chunks": 0,
-  "version": "documind-embedder@0.1.0"
-}
-```
-
-## 相关文档
-
-- [Chunking 统一切分策略](../3-chunking/chunking.md)
-- [Chunk 输出数据形态](../3-chunking/chunk-output.md)
-- [混合检索](../7-hybrid-search/README.md)
-- [Reranking](../8-reranking/README.md)
-- [知识库管理](../5-knowledge-base/knowledge-base.md)
+- PostgreSQL、ES 查询和索引文档都携带 `tenant_id/kb_id`；检索必须使用授权后的知识库集合。
+- Embedding API Key 只保存在服务器 `.env`。
+- ES 是派生数据，不能反向覆盖 PostgreSQL；索引丢失时从 `chunks + chunk_embeddings` 重建。

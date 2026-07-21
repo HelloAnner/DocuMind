@@ -86,12 +86,20 @@ embed_api_key="$(remote_env_value EMBED_API_KEY)"
 embed_api_key="${embed_api_key:-$llm_api_key}"
 embed_batch_size="$(remote_env_value EMBED_BATCH_SIZE)"
 embed_batch_size="${embed_batch_size:-10}"
+embed_dim="$(remote_env_value EMBED_DIM)"
+embed_dim="${embed_dim:-1024}"
+embed_retry_max="$(remote_env_value EMBED_RETRY_MAX)"
+embed_retry_max="${embed_retry_max:-3}"
+embed_worker_poll_ms="$(remote_env_value EMBED_WORKER_POLL_MS)"
+embed_worker_poll_ms="${embed_worker_poll_ms:-1000}"
 embed_enabled="$(remote_env_value EMBED_ENABLED)"
 embed_enabled="${embed_enabled:-true}"
 es_index_chunks="$(remote_env_value ES_INDEX_CHUNKS)"
 es_index_chunks="${es_index_chunks:-chunks}"
 es_index_alias="$(remote_env_value ES_INDEX_ALIAS)"
 es_index_alias="${es_index_alias:-chunks_search}"
+es_index_schema_version="$(remote_env_value ES_INDEX_SCHEMA_VERSION)"
+es_index_schema_version="${es_index_schema_version:-2}"
 rerank_api_url="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_URL=' | tail -1 | cut -d= -f2- || true)"
 rerank_api_key="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_KEY=' | tail -1 | cut -d= -f2- || true)"
 if [[ -f .env ]]; then
@@ -157,16 +165,16 @@ LLM_MODEL=$llm_model
 USE_REAL_LLM=$use_real_llm
 
 EMBED_MODEL=$embed_model
+EMBED_DIM=$embed_dim
 EMBED_BASE_URL=$embed_base_url
 EMBED_API_KEY=$embed_api_key
 EMBED_BATCH_SIZE=$embed_batch_size
+EMBED_RETRY_MAX=$embed_retry_max
+EMBED_WORKER_POLL_MS=$embed_worker_poll_ms
 EMBED_ENABLED=$embed_enabled
 ES_INDEX_CHUNKS=$es_index_chunks
 ES_INDEX_ALIAS=$es_index_alias
-
-EMBEDDING_MODEL=bge-large-zh-v1.5
-EMBEDDING_DIM=1024
-ONNX_MODEL_PATH=$REMOTE_ROOT/shared/models/bge-large-zh-v1.5.onnx
+ES_INDEX_SCHEMA_VERSION=$es_index_schema_version
 
 JWT_SECRET=$jwt_secret
 AUTH_TOKEN_EXPIRE_HOURS=24
@@ -206,8 +214,13 @@ RAG_RERANK_API_KEY=$rerank_api_key
 RAG_RERANK_THRESHOLD=0.3
 RAG_REQUIRE_CITATION=true
 RAG_VERIFY_CLAIMS=true
-RAG_CHUNK_SIZE=1500
-RAG_CHUNK_OVERLAP=200
+RAG_TARGET_CHUNK_TOKENS=800
+RAG_MAX_CHUNK_TOKENS=1500
+RAG_HARD_SPLIT_TOKENS=2000
+RAG_MIN_CHUNK_TOKENS=200
+RAG_CHUNK_OVERLAP_TOKENS=200
+RAG_MAX_TABLE_ROWS_PER_CHUNK=50
+RAG_MAX_TABLE_TOKEN_PER_CHUNK=1200
 
 LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=1200

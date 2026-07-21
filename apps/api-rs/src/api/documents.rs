@@ -25,10 +25,7 @@ use crate::config::EmbeddingConfig;
 use crate::document::{self as ingest, cleaning::cleaned_block_metadata};
 use crate::error::AppError;
 use crate::models::SourceAnchor;
-use crate::rag::embedding::{EmbeddingClient, EmbeddingClientConfig};
-use crate::rag::vector_index::{
-    ElasticsearchChunkIndexer, ElasticsearchConfig, EsRange, IndexedChunk,
-};
+use crate::rag::vector_index::{ElasticsearchChunkIndexer, ElasticsearchConfig};
 use crate::state::AppState;
 
 const PARSER_VERSION: &str = ingest::PARSER_VERSION;
@@ -408,7 +405,6 @@ struct ParseJobTask {
     parse_identity: String,
     bytes: Vec<u8>,
     embedding_config: EmbeddingConfig,
-    elasticsearch_url: Option<String>,
     force_index: bool,
 }
 
@@ -539,7 +535,6 @@ async fn upload_document(
             parse_identity,
             bytes: uploaded.bytes,
             embedding_config: state.config.rag.embedding.clone(),
-            elasticsearch_url: state.config.elasticsearch_url.clone(),
             force_index: false,
         },
     );
@@ -573,6 +568,26 @@ async fn delete_document(
     let doc = fetch_document(pool, actor.tenant_id, doc_id).await?;
     require_kb_permission(&actor, doc.kb_id, "write")?;
 
+    sqlx::query(
+        "UPDATE documents
+         SET parse_status = 'excluded_from_search',
+             metadata = metadata || $1,
+             updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "delete_pending": true,
+        "delete_requested_at": Utc::now(),
+        "delete_requested_by": actor.user_id,
+        "previous_parse_status": doc.parse_status,
+    }))
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .execute(pool)
+    .await?;
+    crate::rag::vector_jobs::cancel_document(pool, doc_id).await?;
+    let es_deleted_chunks = delete_document_from_search_index(&state, &doc).await?;
+
     sqlx::query("DELETE FROM documents WHERE tenant_id = $1 AND id = $2")
         .bind(actor.tenant_id)
         .bind(doc_id)
@@ -591,6 +606,7 @@ async fn delete_document(
             "title": doc.title,
             "file_type": doc.file_type,
             "storage_key": doc.storage_key,
+            "es_deleted_chunks": es_deleted_chunks,
         }),
     )
     .await?;
@@ -690,10 +706,24 @@ async fn exclude_from_search(
     let doc = fetch_document(pool, actor.tenant_id, doc_id).await?;
     require_kb_permission(&actor, doc.kb_id, "write")?;
     if doc.parse_status == "excluded_from_search" {
+        let deleted = delete_document_from_search_index(&state, &doc).await?;
+        sqlx::query(
+            "UPDATE documents
+             SET metadata = metadata || $1, updated_at = NOW()
+             WHERE tenant_id = $2 AND id = $3",
+        )
+        .bind(json!({
+            "search_cleanup_pending": false,
+            "es_deleted_chunks": deleted,
+        }))
+        .bind(actor.tenant_id)
+        .bind(doc_id)
+        .execute(pool)
+        .await?;
         return Ok(Json(ExcludeFromSearchResponse {
             document_id: doc_id,
             status: "excluded_from_search".to_string(),
-            es_deleted_chunks: 0,
+            es_deleted_chunks: deleted,
         }));
     }
     if !can_exclude_from_search(&doc.parse_status) {
@@ -703,7 +733,6 @@ async fn exclude_from_search(
         });
     }
 
-    let deleted = delete_document_from_search_index(&state, &doc).await?;
     sqlx::query(
         "UPDATE documents
          SET parse_status = 'excluded_from_search',
@@ -716,8 +745,23 @@ async fn exclude_from_search(
         "excluded_from_search_at": Utc::now(),
         "excluded_from_search_by": actor.user_id,
         "previous_parse_status": doc.parse_status,
-        "es_deleted_chunks": deleted,
+        "search_cleanup_pending": true,
         "parse_progress": 100,
+    }))
+    .bind(actor.tenant_id)
+    .bind(doc_id)
+    .execute(pool)
+    .await?;
+    crate::rag::vector_jobs::cancel_document(pool, doc_id).await?;
+    let deleted = delete_document_from_search_index(&state, &doc).await?;
+    sqlx::query(
+        "UPDATE documents
+         SET metadata = metadata || $1, updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "search_cleanup_pending": false,
+        "es_deleted_chunks": deleted,
     }))
     .bind(actor.tenant_id)
     .bind(doc_id)
@@ -792,6 +836,22 @@ async fn replace_document_file(
     let parse_identity = parse_identity_for(&file_sha256, &parser_config);
 
     state.storage.put(&storage_key, &uploaded.bytes).await?;
+    sqlx::query(
+        "UPDATE documents
+         SET parse_status = 'excluded_from_search',
+             metadata = metadata || $1,
+             updated_at = NOW()
+         WHERE tenant_id = $2 AND id = $3",
+    )
+    .bind(json!({
+        "replacement_cleanup_pending": true,
+        "previous_parse_status": doc.parse_status,
+    }))
+    .bind(actor.tenant_id)
+    .bind(doc.id)
+    .execute(pool)
+    .await?;
+    crate::rag::vector_jobs::cancel_document(pool, doc.id).await?;
     let deleted_chunks = match delete_document_from_search_index(&state, &doc).await {
         Ok(deleted) => deleted,
         Err(err) => {
@@ -826,6 +886,7 @@ async fn replace_document_file(
         "previous_storage_key": doc.storage_key.clone(),
         "previous_parse_status": doc.parse_status.clone(),
         "replacement_es_deleted_chunks": deleted_chunks,
+        "replacement_cleanup_pending": false,
     }))
     .bind(actor.tenant_id)
     .bind(doc.id)
@@ -845,6 +906,7 @@ async fn replace_document_file(
     )
     .await?;
     tx.commit().await?;
+    crate::rag::vector_jobs::cancel_document(pool, doc.id).await?;
 
     if doc.storage_key != storage_key {
         let _ = state.storage.delete(&doc.storage_key).await;
@@ -887,7 +949,6 @@ async fn replace_document_file(
             parse_identity,
             bytes: uploaded.bytes,
             embedding_config: state.config.rag.embedding.clone(),
-            elasticsearch_url: state.config.elasticsearch_url.clone(),
             force_index: false,
         },
     );
@@ -1038,7 +1099,6 @@ async fn send_to_ocr(
             parse_identity,
             bytes,
             embedding_config: state.config.rag.embedding.clone(),
-            elasticsearch_url: state.config.elasticsearch_url.clone(),
             force_index: false,
         },
     );
@@ -1137,7 +1197,7 @@ async fn delete_document_from_search_index(
     };
     let indexer = ElasticsearchChunkIndexer::new(ElasticsearchConfig {
         base_url: elasticsearch_url,
-        index_name: state.config.rag.embedding.index_name.clone(),
+        index_name: state.config.rag.embedding.index_alias.clone(),
         alias_name: state.config.rag.embedding.index_alias.clone(),
         timeout_seconds: 120,
     })?;
@@ -2195,6 +2255,39 @@ async fn reprocess_or_retry_document(
     let parse_identity = parse_identity_for(&doc.file_sha256, &parser_config);
     let new_parse_version = doc.parse_version + 1;
 
+    if force {
+        sqlx::query(
+            "UPDATE documents
+             SET parse_status = 'excluded_from_search',
+                 metadata = metadata || $1,
+                 updated_at = NOW()
+             WHERE tenant_id = $2 AND id = $3",
+        )
+        .bind(json!({
+            "reprocess_cleanup_pending": true,
+            "previous_parse_status": doc.parse_status,
+        }))
+        .bind(actor.tenant_id)
+        .bind(doc.id)
+        .execute(pool)
+        .await?;
+        crate::rag::vector_jobs::cancel_document(pool, doc.id).await?;
+        let deleted_chunks = delete_document_from_search_index(state, &doc).await?;
+        sqlx::query(
+            "UPDATE documents
+             SET metadata = metadata || $1, updated_at = NOW()
+             WHERE tenant_id = $2 AND id = $3",
+        )
+        .bind(json!({
+            "reprocess_cleanup_pending": false,
+            "reprocess_es_deleted_chunks": deleted_chunks,
+        }))
+        .bind(actor.tenant_id)
+        .bind(doc.id)
+        .execute(pool)
+        .await?;
+    }
+
     if !force {
         if let Some((parse_job_id, chunk_count, parse_status)) =
             find_completed_parse_by_identity(pool, doc.id, &parse_identity).await?
@@ -2216,6 +2309,20 @@ async fn reprocess_or_retry_document(
             .bind(doc.id)
             .execute(pool)
             .await?;
+
+            if parse_status == "chunked" && chunk_count > 0 {
+                crate::rag::vector_jobs::cancel_document(pool, doc.id).await?;
+                crate::rag::vector_pipeline::enqueue_document(
+                    pool,
+                    doc.tenant_id,
+                    doc.kb_id,
+                    doc.id,
+                    parse_job_id,
+                    &state.config.rag.embedding,
+                    true,
+                )
+                .await?;
+            }
 
             return Ok(ReprocessDocumentResponse {
                 document_id: doc.id,
@@ -2246,6 +2353,7 @@ async fn reprocess_or_retry_document(
     )
     .await?;
     tx.commit().await?;
+    crate::rag::vector_jobs::cancel_document(pool, doc.id).await?;
 
     spawn_parse_job(
         pool.clone(),
@@ -2263,7 +2371,6 @@ async fn reprocess_or_retry_document(
             parse_identity,
             bytes,
             embedding_config: state.config.rag.embedding.clone(),
-            elasticsearch_url: state.config.elasticsearch_url.clone(),
             force_index,
         },
     );
@@ -2483,9 +2590,26 @@ async fn run_parse_job(pool: sqlx::PgPool, task: ParseJobTask) -> Result<(), App
             )
             .await?;
             tx.commit().await?;
-            if artifacts.parse_status == "chunked" {
-                if let Err(err) = run_embedding_job(&pool, &task, &artifacts).await {
-                    mark_embedding_failed(&pool, &task, &err.to_string()).await?;
+            if artifacts.parse_status == "chunked" && task.embedding_config.enabled {
+                if let Err(error) = crate::rag::vector_pipeline::enqueue_document(
+                    &pool,
+                    task.tenant_id,
+                    task.kb_id,
+                    task.doc_id,
+                    task.parse_job_id,
+                    &task.embedding_config,
+                    false,
+                )
+                .await
+                {
+                    crate::rag::vector_store::mark_document_terminal_failure(
+                        &pool,
+                        task.doc_id,
+                        Some(task.parse_job_id),
+                        &task.embedding_config.model,
+                        &error.to_string(),
+                    )
+                    .await?;
                 }
             }
             Ok(())
@@ -2949,248 +3073,6 @@ async fn insert_parse_outputs(
 
     Ok(())
 }
-
-async fn run_embedding_job(
-    pool: &sqlx::PgPool,
-    task: &ParseJobTask,
-    artifacts: &ParseArtifacts,
-) -> Result<(), anyhow::Error> {
-    if !task.embedding_config.enabled {
-        return Ok(());
-    }
-    let elasticsearch_url = task
-        .elasticsearch_url
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("ELASTICSEARCH_URL is required for chunk indexing"))?;
-    let client_config = EmbeddingClientConfig::try_from(&task.embedding_config)?;
-    let embedding_client = EmbeddingClient::new(client_config)?;
-    let indexer = ElasticsearchChunkIndexer::new(ElasticsearchConfig {
-        base_url: elasticsearch_url,
-        index_name: task.embedding_config.index_name.clone(),
-        alias_name: task.embedding_config.index_alias.clone(),
-        timeout_seconds: 120,
-    })?;
-
-    mark_embedding_running(pool, task, embedding_client.model()).await?;
-
-    let now = Utc::now();
-    let mut indexed_chunks = Vec::new();
-    for batch in artifacts
-        .bundle
-        .chunks
-        .chunks(embedding_client.batch_size())
-    {
-        let inputs = batch
-            .iter()
-            .map(|chunk| chunk.content.clone())
-            .collect::<Vec<_>>();
-        let vectors = embedding_client.embed_batch(&inputs).await?;
-        let dims = vectors
-            .first()
-            .map(Vec::len)
-            .ok_or_else(|| anyhow::anyhow!("embedding provider returned no vectors"))?;
-        if vectors.iter().any(|vector| vector.len() != dims) {
-            anyhow::bail!("embedding provider returned vectors with inconsistent dimensions");
-        }
-
-        let mut tx = pool.begin().await?;
-        for (chunk, vector) in batch.iter().zip(vectors.into_iter()) {
-            let vector_dim = vector.len() as i32;
-            let vector_json = json!(vector.clone());
-            sqlx::query(
-                "INSERT INTO chunk_embeddings (
-                    tenant_id, kb_id, doc_id, chunk_id, embedding_model, embedding_dim,
-                    embedding_vector, content_hash, status, error_message, embedded_at
-                 )
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'completed', NULL, NOW())
-                 ON CONFLICT (chunk_id, embedding_model) DO UPDATE
-                 SET embedding_dim = EXCLUDED.embedding_dim,
-                     embedding_vector = EXCLUDED.embedding_vector,
-                     content_hash = EXCLUDED.content_hash,
-                     status = 'completed',
-                     error_message = NULL,
-                     embedded_at = NOW()",
-            )
-            .bind(task.tenant_id)
-            .bind(task.kb_id)
-            .bind(task.doc_id)
-            .bind(chunk.chunk_id)
-            .bind(embedding_client.model())
-            .bind(vector_dim)
-            .bind(vector_json)
-            .bind(sha256_hex(chunk.content.as_bytes()))
-            .execute(&mut *tx)
-            .await?;
-
-            let primary_anchor = chunk.primary_anchor_id.and_then(|id| {
-                artifacts
-                    .bundle
-                    .parsed
-                    .anchors
-                    .iter()
-                    .find(|a| a.anchor_id == id)
-            });
-
-            indexed_chunks.push(IndexedChunk {
-                chunk_id: chunk.chunk_id,
-                doc_id: task.doc_id,
-                doc_title: task.title.clone(),
-                kb_id: task.kb_id,
-                tenant_id: task.tenant_id,
-                parse_job_id: task.parse_job_id,
-                chunk_index: chunk.chunk_index + 1,
-                source_type: chunk.source_type.clone(),
-                content: chunk.content.clone(),
-                heading_path: chunk.heading_path.clone(),
-                page_range: es_range(chunk.page_start, chunk.page_end),
-                slide_start: chunk.slide_start,
-                slide_end: chunk.slide_end,
-                token_count: chunk.token_count,
-                block_ids: chunk.block_ids.clone(),
-                table_ids: chunk.table_ids.clone(),
-                anchor_ids: chunk.anchor_ids.clone(),
-                primary_anchor_id: chunk.primary_anchor_id,
-                anchor_quality: chunk.anchor_quality.clone(),
-                anchor_format: primary_anchor
-                    .map(|a| a.format.clone())
-                    .unwrap_or_else(|| chunk.source_type.clone()),
-                anchor_kind: primary_anchor
-                    .map(|a| a.kind.clone())
-                    .unwrap_or_else(|| chunk.source_type.clone()),
-                anchor_page: primary_anchor.and_then(|a| a.page),
-                anchor_slide: primary_anchor.and_then(|a| a.slide),
-                anchor_char_range: primary_anchor.and_then(|a| a.char_range.clone()),
-                anchor_bbox: primary_anchor.and_then(|a| a.bbox.clone()),
-                anchor_text: primary_anchor.map(|a| a.text.clone()).unwrap_or_default(),
-                embedding_model: embedding_client.model().to_string(),
-                embedding: vector,
-                metadata: chunk.metadata.clone(),
-                created_at: now,
-                embedded_at: now,
-            });
-        }
-        tx.commit().await?;
-    }
-
-    for batch in indexed_chunks.chunks(500) {
-        indexer.bulk_index(batch).await?;
-    }
-    mark_embedding_completed(
-        pool,
-        task,
-        embedding_client.model(),
-        indexed_chunks.len() as i32,
-    )
-    .await?;
-    Ok(())
-}
-
-async fn mark_embedding_running(
-    pool: &sqlx::PgPool,
-    task: &ParseJobTask,
-    model: &str,
-) -> Result<(), anyhow::Error> {
-    sqlx::query(
-        "UPDATE documents
-         SET parse_status = 'embedding',
-             metadata = metadata || $1,
-             updated_at = NOW()
-         WHERE tenant_id = $2 AND id = $3",
-    )
-    .bind(json!({
-        "active_parse_job_id": task.parse_job_id,
-        "parse_progress": 85,
-        "embedding_model": model,
-    }))
-    .bind(task.tenant_id)
-    .bind(task.doc_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-async fn mark_embedding_completed(
-    pool: &sqlx::PgPool,
-    task: &ParseJobTask,
-    model: &str,
-    indexed_chunks: i32,
-) -> Result<(), anyhow::Error> {
-    sqlx::query(
-        "UPDATE documents
-         SET parse_status = 'indexed',
-             metadata = metadata || $1,
-             updated_at = NOW()
-         WHERE tenant_id = $2 AND id = $3",
-    )
-    .bind(json!({
-        "active_parse_job_id": task.parse_job_id,
-        "parse_progress": 100,
-        "embedding_model": model,
-        "indexed_chunks": indexed_chunks,
-    }))
-    .bind(task.tenant_id)
-    .bind(task.doc_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-async fn mark_embedding_failed(
-    pool: &sqlx::PgPool,
-    task: &ParseJobTask,
-    error_message: &str,
-) -> Result<(), AppError> {
-    sqlx::query(
-        "UPDATE documents
-         SET parse_status = 'embedding_failed',
-             metadata = metadata || $1,
-             updated_at = NOW()
-         WHERE tenant_id = $2 AND id = $3",
-    )
-    .bind(json!({
-        "active_parse_job_id": task.parse_job_id,
-        "parse_progress": 100,
-        "error_code": "EMBEDDING_FAILED",
-        "error_message": error_message,
-    }))
-    .bind(task.tenant_id)
-    .bind(task.doc_id)
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        "UPDATE chunk_embeddings
-         SET status = 'failed',
-             error_message = $1
-         WHERE tenant_id = $2
-           AND doc_id = $3
-           AND status <> 'completed'",
-    )
-    .bind(error_message)
-    .bind(task.tenant_id)
-    .bind(task.doc_id)
-    .execute(pool)
-    .await?;
-    Ok(())
-}
-
-fn es_range(start: Option<i32>, end: Option<i32>) -> Option<EsRange> {
-    match (start, end) {
-        (Some(start), Some(end)) => Some(EsRange {
-            gte: start,
-            lte: end,
-        }),
-        (Some(value), None) | (None, Some(value)) => Some(EsRange {
-            gte: value,
-            lte: value,
-        }),
-        (None, None) => None,
-    }
-}
-
-// ---------------------------------------------------------------------------
-// Local-only read helpers (mapped onto the cloud-side schema)
-// ---------------------------------------------------------------------------
 
 async fn fetch_document_summary(
     pool: &sqlx::PgPool,
@@ -4611,11 +4493,14 @@ mod tests {
                 base_url: "http://localhost:11434/v1".to_string(),
                 api_key: Some("test".to_string()),
                 batch_size: 2,
+                dimension: 1024,
+                retry_max: 3,
+                worker_poll_ms: 1_000,
+                index_schema_version: 2,
                 index_name: "chunks".to_string(),
                 index_alias: "chunks_search".to_string(),
                 enabled: false,
             },
-            elasticsearch_url: None,
             force_index: false,
         }
     }
@@ -4642,11 +4527,14 @@ mod tests {
                 base_url: "http://localhost:11434/v1".to_string(),
                 api_key: Some("test".to_string()),
                 batch_size: 2,
+                dimension: 1024,
+                retry_max: 3,
+                worker_poll_ms: 1_000,
+                index_schema_version: 2,
                 index_name: "chunks".to_string(),
                 index_alias: "chunks_search".to_string(),
                 enabled: false,
             },
-            elasticsearch_url: None,
             force_index: false,
         }
     }

@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{anyhow, bail, Result};
@@ -7,6 +8,11 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::models::source_anchor::{CharRange, NormalizedBBox};
+
+mod schema;
+
+use schema::index_definition;
+pub use schema::physical_index_name;
 
 #[derive(Debug, Clone)]
 pub struct ElasticsearchConfig {
@@ -27,6 +33,7 @@ pub struct IndexedChunk {
     pub chunk_id: Uuid,
     pub doc_id: Uuid,
     pub doc_title: String,
+    pub file_type: String,
     pub kb_id: Uuid,
     pub tenant_id: Uuid,
     pub parse_job_id: Uuid,
@@ -34,6 +41,7 @@ pub struct IndexedChunk {
     pub source_type: String,
     pub content: String,
     pub heading_path: Vec<String>,
+    pub heading_text: String,
     pub page_range: Option<EsRange>,
     pub slide_start: Option<i32>,
     pub slide_end: Option<i32>,
@@ -77,6 +85,10 @@ impl ElasticsearchChunkIndexer {
         Ok(Self { config, http })
     }
 
+    pub fn index_name(&self) -> &str {
+        &self.config.index_name
+    }
+
     pub async fn ensure_index(&self, dims: usize) -> Result<()> {
         if dims == 0 {
             bail!("embedding dimension must be greater than zero");
@@ -93,18 +105,74 @@ impl ElasticsearchChunkIndexer {
                 .error_for_status()?;
         } else {
             head.error_for_status()?;
+            self.validate_index_dimension(dims).await?;
         }
+        Ok(())
+    }
 
-        if !self.config.alias_name.trim().is_empty() {
-            let alias_url = format!(
-                "{}/{}/_alias/{}",
-                self.base_url(),
+    pub async fn reset_inactive_index(&self, dims: usize) -> Result<()> {
+        if self
+            .alias_targets()
+            .await?
+            .contains(&self.config.index_name)
+        {
+            bail!(
+                "refusing to reset index {} while it is attached to alias {}",
                 self.config.index_name,
                 self.config.alias_name
             );
-            self.http.put(alias_url).send().await?.error_for_status()?;
         }
-        Ok(())
+        let response = self.http.delete(self.index_url()).send().await?;
+        if response.status().as_u16() != 404 {
+            response.error_for_status()?;
+        }
+        self.ensure_index(dims).await
+    }
+
+    pub async fn switch_alias(&self) -> Result<Vec<String>> {
+        if self.config.alias_name.trim().is_empty() {
+            bail!("elasticsearch search alias is empty");
+        }
+        let previous = self.alias_targets().await?;
+        let mut actions = previous
+            .iter()
+            .filter(|index| *index != &self.config.index_name)
+            .map(|index| json!({"remove": {"index": index, "alias": self.config.alias_name}}))
+            .collect::<Vec<_>>();
+        actions.push(json!({
+            "add": {
+                "index": self.config.index_name,
+                "alias": self.config.alias_name,
+                "is_write_index": true
+            }
+        }));
+        self.http
+            .post(format!("{}/_aliases", self.base_url()))
+            .json(&json!({"actions": actions}))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(previous)
+    }
+
+    pub async fn alias_targets(&self) -> Result<Vec<String>> {
+        let response = self
+            .http
+            .get(format!(
+                "{}/_alias/{}",
+                self.base_url(),
+                self.config.alias_name
+            ))
+            .send()
+            .await?;
+        if response.status().as_u16() == 404 {
+            return Ok(Vec::new());
+        }
+        let payload: Value = response.error_for_status()?.json().await?;
+        let indices = payload
+            .as_object()
+            .ok_or_else(|| anyhow!("elasticsearch alias response is not an object"))?;
+        Ok(indices.keys().cloned().collect())
     }
 
     pub async fn bulk_index(&self, chunks: &[IndexedChunk]) -> Result<()> {
@@ -142,11 +210,11 @@ impl ElasticsearchChunkIndexer {
             .await?
             .error_for_status()?;
         let payload: Value = resp.json().await?;
-        if payload
+        let has_errors = payload
             .get("errors")
             .and_then(Value::as_bool)
-            .unwrap_or(false)
-        {
+            .ok_or_else(|| anyhow!("elasticsearch bulk response is missing errors"))?;
+        if has_errors {
             let reason = payload
                 .get("items")
                 .and_then(Value::as_array)
@@ -184,7 +252,165 @@ impl ElasticsearchChunkIndexer {
             return Ok(0);
         }
         let payload: Value = resp.error_for_status()?.json().await?;
-        Ok(payload.get("deleted").and_then(Value::as_u64).unwrap_or(0))
+        payload
+            .get("deleted")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("elasticsearch delete response is missing deleted"))
+    }
+
+    pub async fn refresh(&self) -> Result<()> {
+        self.http
+            .post(format!("{}/_refresh", self.index_url()))
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn count(&self) -> Result<u64> {
+        let response = self
+            .http
+            .get(format!("{}/_count", self.index_url()))
+            .send()
+            .await?;
+        if response.status().as_u16() == 404 {
+            return Ok(0);
+        }
+        let payload: Value = response.error_for_status()?.json().await?;
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("elasticsearch count response is missing count"))
+    }
+
+    pub async fn chunk_ids(&self) -> Result<HashSet<Uuid>> {
+        let response = self
+            .http
+            .post(format!("{}/_search?scroll=1m", self.index_url()))
+            .json(&json!({
+                "size": 5_000,
+                "_source": false,
+                "sort": ["_doc"]
+            }))
+            .send()
+            .await?;
+        if response.status().as_u16() == 404 {
+            return Ok(HashSet::new());
+        }
+        let mut payload: Value = response.error_for_status()?.json().await?;
+        let mut ids = HashSet::new();
+        let mut scroll_id = payload
+            .get("_scroll_id")
+            .and_then(Value::as_str)
+            .map(ToString::to_string);
+        loop {
+            let hits = payload
+                .pointer("/hits/hits")
+                .and_then(Value::as_array)
+                .ok_or_else(|| anyhow!("elasticsearch scroll response is missing hits"))?;
+            if hits.is_empty() {
+                break;
+            }
+            for hit in hits {
+                let id = hit
+                    .get("_id")
+                    .and_then(Value::as_str)
+                    .and_then(|value| Uuid::parse_str(value).ok())
+                    .ok_or_else(|| anyhow!("elasticsearch chunk document has an invalid _id"))?;
+                ids.insert(id);
+            }
+            let Some(current_scroll_id) = scroll_id.as_deref() else {
+                break;
+            };
+            payload = self
+                .http
+                .post(format!("{}/_search/scroll", self.base_url()))
+                .json(&json!({"scroll": "1m", "scroll_id": current_scroll_id}))
+                .send()
+                .await?
+                .error_for_status()?
+                .json()
+                .await?;
+            scroll_id = payload
+                .get("_scroll_id")
+                .and_then(Value::as_str)
+                .map(ToString::to_string);
+        }
+        if let Some(scroll_id) = scroll_id {
+            let _ = self
+                .http
+                .delete(format!("{}/_search/scroll", self.base_url()))
+                .json(&json!({"scroll_id": [scroll_id]}))
+                .send()
+                .await;
+        }
+        Ok(ids)
+    }
+
+    pub async fn count_document_parse(&self, doc_id: Uuid, parse_job_id: Uuid) -> Result<u64> {
+        let response = self
+            .http
+            .post(format!("{}/_count", self.index_url()))
+            .json(&json!({
+                "query": {"bool": {"filter": [
+                    {"term": {"doc_id": doc_id}},
+                    {"term": {"parse_job_id": parse_job_id}}
+                ]}}
+            }))
+            .send()
+            .await?;
+        if response.status().as_u16() == 404 {
+            return Ok(0);
+        }
+        let payload: Value = response.error_for_status()?.json().await?;
+        payload
+            .get("count")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("elasticsearch document count response is missing count"))
+    }
+
+    pub async fn delete_index(&self, index: &str) -> Result<()> {
+        if index == self.config.index_name {
+            bail!("refusing to delete the active target index");
+        }
+        let response = self
+            .http
+            .delete(format!("{}/{}", self.base_url(), index))
+            .send()
+            .await?;
+        if response.status().as_u16() == 404 {
+            return Ok(());
+        }
+        response.error_for_status()?;
+        Ok(())
+    }
+
+    async fn validate_index_dimension(&self, expected: usize) -> Result<()> {
+        let response = self
+            .http
+            .get(format!("{}/_mapping/field/embedding", self.index_url()))
+            .send()
+            .await?
+            .error_for_status()?;
+        let payload: Value = response.json().await?;
+        let actual = payload
+            .get(&self.config.index_name)
+            .and_then(|value| value.get("mappings"))
+            .and_then(|value| value.get("embedding"))
+            .and_then(|value| value.get("mapping"))
+            .and_then(|value| value.get("embedding"))
+            .and_then(|value| value.get("dims"))
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("elasticsearch embedding mapping is missing dims"))?;
+        if actual as usize != expected {
+            bail!(
+                "elasticsearch index {} uses {} dimensions, expected {}",
+                self.config.index_name,
+                actual,
+                expected
+            );
+        }
+        Ok(())
     }
 
     fn base_url(&self) -> String {
@@ -194,67 +420,4 @@ impl ElasticsearchChunkIndexer {
     fn index_url(&self) -> String {
         format!("{}/{}", self.base_url(), self.config.index_name)
     }
-}
-
-fn index_definition(dims: usize) -> Value {
-    json!({
-        "settings": {
-            "number_of_shards": 1,
-            "number_of_replicas": 0
-        },
-        "mappings": {
-            "properties": {
-                "chunk_id": { "type": "keyword" },
-                "doc_id": { "type": "keyword" },
-                "doc_title": {
-                    "type": "text",
-                    "fields": {
-                        "keyword": { "type": "keyword", "ignore_above": 32766 }
-                    }
-                },
-                "kb_id": { "type": "keyword" },
-                "tenant_id": { "type": "keyword" },
-                "parse_job_id": { "type": "keyword" },
-                "chunk_index": { "type": "integer" },
-                "source_type": { "type": "keyword" },
-                "content": {
-                    "type": "text",
-                    "fields": {
-                        "keyword": { "type": "keyword", "ignore_above": 32766 }
-                    }
-                },
-                "heading_path": { "type": "keyword" },
-                "page_range": { "type": "integer_range" },
-                "slide_start": { "type": "integer" },
-                "slide_end": { "type": "integer" },
-                "token_count": { "type": "integer" },
-                "block_ids": { "type": "keyword" },
-                "table_ids": { "type": "keyword" },
-                "anchor_ids": { "type": "keyword" },
-                "primary_anchor_id": { "type": "keyword" },
-                "anchor_quality": { "type": "keyword" },
-                "anchor_format": { "type": "keyword" },
-                "anchor_kind": { "type": "keyword" },
-                "anchor_page": { "type": "integer" },
-                "anchor_slide": { "type": "integer" },
-                "anchor_char_range": { "type": "object" },
-                "anchor_bbox": { "type": "object" },
-                "anchor_text": { "type": "text", "index": false },
-                "embedding_model": { "type": "keyword" },
-                "embedding": {
-                    "type": "dense_vector",
-                    "dims": dims,
-                    "index": true,
-                    "similarity": "cosine",
-                    "index_options": {
-                        "type": "hnsw",
-                        "m": 16,
-                        "ef_construction": 200
-                    }
-                },
-                "created_at": { "type": "date" },
-                "embedded_at": { "type": "date" }
-            }
-        }
-    })
 }

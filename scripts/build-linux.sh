@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  CURRENT_NOFILE_LIMIT="$(ulimit -n)"
+  if [[ "$CURRENT_NOFILE_LIMIT" != "unlimited" && "$CURRENT_NOFILE_LIMIT" -lt 4096 ]]; then
+    ulimit -n 4096
+  fi
+fi
+
 TARGET="${DEPLOY_TARGET:-x86_64-unknown-linux-musl}"
 TARGET_DIR="${DEPLOY_TARGET_DIR:-target/deploy-linux-x86_64-musl}"
 BIN_NAME="${BIN_NAME:-documind}"

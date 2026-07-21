@@ -107,6 +107,10 @@ pub struct EmbeddingConfig {
     pub base_url: String,
     pub api_key: Option<String>,
     pub batch_size: usize,
+    pub dimension: usize,
+    pub retry_max: i32,
+    pub worker_poll_ms: u64,
+    pub index_schema_version: u32,
     pub index_name: String,
     pub index_alias: String,
     pub enabled: bool,
@@ -287,8 +291,11 @@ pub fn load_config() -> Result<AppConfig> {
                 .unwrap_or(0.3),
         },
         embedding: EmbeddingConfig {
-            model: env::var("EMBED_MODEL").unwrap_or_else(|_| "text-embedding-v3".to_string()),
+            model: env::var("EMBED_MODEL")
+                .or_else(|_| env::var("EMBEDDING_MODEL"))
+                .unwrap_or_else(|_| "text-embedding-v3".to_string()),
             base_url: env::var("EMBED_BASE_URL")
+                .or_else(|_| env::var("EMBEDDING_API_URL"))
                 .or_else(|_| env::var("LLM_BASE_URL"))
                 .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
             api_key: env::var("EMBED_API_KEY")
@@ -297,9 +304,28 @@ pub fn load_config() -> Result<AppConfig> {
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
             batch_size: env::var("EMBED_BATCH_SIZE")
+                .or_else(|_| env::var("EMBEDDING_BATCH_SIZE"))
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(10),
+            dimension: env::var("EMBED_DIM")
+                .or_else(|_| env::var("EMBEDDING_DIM"))
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1024),
+            retry_max: env::var("EMBED_RETRY_MAX")
+                .or_else(|_| env::var("EMBEDDING_RETRY_MAX"))
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(3),
+            worker_poll_ms: env::var("EMBED_WORKER_POLL_MS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1_000),
+            index_schema_version: env::var("ES_INDEX_SCHEMA_VERSION")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(2),
             index_name: env::var("ES_INDEX_CHUNKS").unwrap_or_else(|_| "chunks".to_string()),
             index_alias: env::var("ES_INDEX_ALIAS").unwrap_or_else(|_| "chunks_search".to_string()),
             enabled: env_bool("EMBED_ENABLED", true),
@@ -408,6 +434,15 @@ impl AppConfig {
     }
 
     fn validate(&self) -> Result<()> {
+        if self.rag.embedding.dimension == 0 {
+            return Err(anyhow!("EMBED_DIM must be greater than zero"));
+        }
+        if self.rag.embedding.batch_size == 0 || self.rag.embedding.batch_size > 100 {
+            return Err(anyhow!("EMBED_BATCH_SIZE must be between 1 and 100"));
+        }
+        if self.rag.embedding.retry_max < 1 || self.rag.embedding.retry_max > 20 {
+            return Err(anyhow!("EMBED_RETRY_MAX must be between 1 and 20"));
+        }
         if !self.is_production() {
             return Ok(());
         }

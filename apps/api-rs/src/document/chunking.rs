@@ -6,6 +6,7 @@ use super::cleaning::CleanedBlock;
 use super::{estimate_tokens, ChunkDraft, FileType};
 
 mod overlap;
+mod postprocess;
 mod table;
 
 fn anchor_quality_for(file_type: FileType, has_bbox: bool) -> &'static str {
@@ -91,7 +92,7 @@ pub fn chunk_blocks(
     let mut current = BlockGroup::new();
 
     for block in usable {
-        if is_hard_boundary(&block, &current) {
+        if is_hard_boundary(file_type, &block, &current) {
             if !current.is_empty() {
                 groups.push(current);
                 current = BlockGroup::new();
@@ -112,13 +113,14 @@ pub fn chunk_blocks(
     if !current.is_empty() {
         groups.push(current);
     }
-    merge_small_groups(&mut groups, cfg);
+    merge_small_groups(file_type, &mut groups, cfg);
 
     let mut chunks = Vec::new();
     for group in groups {
         split_group(file_type, kb_id, parse_job_id, group, cfg, &mut chunks);
     }
 
+    postprocess::merge_small_adjacent_chunks(&mut chunks, cfg);
     overlap::add_overlap(&mut chunks, cfg);
     for (idx, chunk) in chunks.iter_mut().enumerate() {
         chunk.chunk_index = idx as i32;
@@ -126,7 +128,7 @@ pub fn chunk_blocks(
     chunks
 }
 
-fn merge_small_groups(groups: &mut Vec<BlockGroup>, cfg: &ChunkConfig) {
+fn merge_small_groups(file_type: FileType, groups: &mut Vec<BlockGroup>, cfg: &ChunkConfig) {
     if cfg.min_chunk_tokens <= 0 || groups.len() < 2 {
         return;
     }
@@ -140,7 +142,7 @@ fn merge_small_groups(groups: &mut Vec<BlockGroup>, cfg: &ChunkConfig) {
                     && group
                         .blocks
                         .first()
-                        .is_some_and(|first| !is_hard_boundary(first, previous))
+                        .is_some_and(|first| !is_hard_boundary(file_type, first, previous))
             });
         if can_merge {
             match merged.last_mut() {
@@ -164,14 +166,17 @@ fn single_block_group(block: CleanedBlock) -> BlockGroup {
     group
 }
 
-fn is_hard_boundary(block: &CleanedBlock, current: &BlockGroup) -> bool {
+fn is_hard_boundary(file_type: FileType, block: &CleanedBlock, current: &BlockGroup) -> bool {
     if current.is_empty() {
         return false;
     }
     if block.block.block_type == "table" || block.block.block_type == "code" {
         return true;
     }
-    if block.block.heading_level == Some(1) {
+    // The PDF parser only has heuristic headings and no reliable heading path.
+    // Treating every short PDF line as H1 previously fragmented long PDFs into
+    // hundreds of tiny chunks.
+    if file_type != FileType::Pdf && block.block.heading_level == Some(1) {
         return true;
     }
     let current_slide = current.blocks.last().and_then(|b| b.block.slide_index);
@@ -194,7 +199,14 @@ fn split_group(
     {
         return;
     }
-    if group.tokens <= cfg.max_chunk_tokens {
+    let content_limit = if group.source_type == "table" {
+        cfg.max_chunk_tokens.max(1)
+    } else {
+        cfg.max_chunk_tokens
+            .saturating_sub(cfg.overlap_tokens.max(0) + 20)
+            .max(100)
+    };
+    if group.tokens <= content_limit {
         chunks.push(chunk_from_group(
             file_type,
             kb_id,
@@ -209,7 +221,7 @@ fn split_group(
         let mut current = BlockGroup::new();
         for block in group.blocks {
             let tokens = estimate_tokens(&block.cleaned_text);
-            if !current.is_empty() && current.tokens + tokens > cfg.max_chunk_tokens {
+            if !current.is_empty() && current.tokens + tokens > content_limit {
                 let finished = std::mem::replace(&mut current, BlockGroup::new());
                 chunks.push(chunk_from_group(
                     file_type,
@@ -237,7 +249,7 @@ fn split_group(
         return;
     };
 
-    for part in split_long_text(&block.cleaned_text, cfg) {
+    for part in split_long_text(&block.cleaned_text, cfg, content_limit) {
         let mut part_block = block.clone();
         part_block.cleaned_text = part;
         chunks.push(chunk_from_group(
@@ -359,8 +371,8 @@ fn source_type_for(block: &CleanedBlock) -> String {
     .to_string()
 }
 
-fn split_long_text(text: &str, cfg: &ChunkConfig) -> Vec<String> {
-    if estimate_tokens(text) <= cfg.max_chunk_tokens {
+fn split_long_text(text: &str, cfg: &ChunkConfig, max_tokens: i32) -> Vec<String> {
+    if estimate_tokens(text) <= max_tokens {
         return vec![text.to_string()];
     }
 
@@ -373,21 +385,15 @@ fn split_long_text(text: &str, cfg: &ChunkConfig) -> Vec<String> {
         } else {
             format!("{current}{part}")
         };
-        if estimate_tokens(&next) > cfg.max_chunk_tokens && !current.is_empty() {
-            out.extend(force_split(
-                &current,
-                cfg.hard_split_tokens.min(cfg.max_chunk_tokens),
-            ));
+        if estimate_tokens(&next) > max_tokens && !current.is_empty() {
+            out.extend(force_split(&current, max_tokens.min(cfg.hard_split_tokens)));
             current = part;
         } else {
             current = next;
         }
     }
     if !current.is_empty() {
-        out.extend(force_split(
-            &current,
-            cfg.hard_split_tokens.min(cfg.max_chunk_tokens),
-        ));
+        out.extend(force_split(&current, max_tokens.min(cfg.hard_split_tokens)));
     }
     out
 }
@@ -412,16 +418,7 @@ fn force_split(text: &str, hard_split_tokens: i32) -> Vec<String> {
     if estimate_tokens(text) <= hard_split_tokens {
         return vec![text.to_string()];
     }
-    let max_chars = (hard_split_tokens.max(100) * 2) as usize;
-    let chars = text.chars().collect::<Vec<_>>();
-    let mut out = Vec::new();
-    let mut start = 0usize;
-    while start < chars.len() {
-        let end = (start + max_chars).min(chars.len());
-        out.push(chars[start..end].iter().collect());
-        start = end;
-    }
-    out
+    postprocess::split_by_token_limit(text, hard_split_tokens)
 }
 
 fn env_i32(name: &str, default: i32) -> i32 {

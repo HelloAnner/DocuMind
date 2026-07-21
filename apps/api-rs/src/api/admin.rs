@@ -227,8 +227,16 @@ async fn runtime_config(
             "base_url": cfg.rag.embedding.base_url,
             "api_key_configured": cfg.rag.embedding.api_key.as_ref().is_some_and(|key| !key.trim().is_empty()),
             "batch_size": cfg.rag.embedding.batch_size,
+            "dimension": cfg.rag.embedding.dimension,
+            "retry_max": cfg.rag.embedding.retry_max,
+            "worker_poll_ms": cfg.rag.embedding.worker_poll_ms,
             "index_name": cfg.rag.embedding.index_name,
-            "index_alias": cfg.rag.embedding.index_alias
+            "index_alias": cfg.rag.embedding.index_alias,
+            "index_schema_version": cfg.rag.embedding.index_schema_version,
+            "queue": "documind.embedding.pending",
+            "dead_letter_queue": "documind.embedding.dead",
+            "canonical_vector_store": "postgresql.chunk_embeddings.embedding_values",
+            "retrieval_store": "elasticsearch"
         },
         "search": {
             "strategy": "Dense + BM25 + RRF",

@@ -1,6 +1,6 @@
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
 use serde_json::json;
@@ -35,6 +35,14 @@ pub fn router() -> Router<AppState> {
         .route("/api/system/settings", get(settings))
         .route("/api/system/tenant-integrity", get(tenant_integrity))
         .route("/api/system/vector-indexes", get(list_vector_indexes))
+        .route(
+            "/api/system/vector-indexes/reconcile",
+            get(reconcile_vector_index),
+        )
+        .route(
+            "/api/system/vector-indexes/rebuild",
+            post(rebuild_vector_index),
+        )
 }
 
 #[derive(Debug, Deserialize)]
@@ -57,11 +65,12 @@ async fn overview(
                 (SELECT COUNT(*) FROM documents) AS doc_count,
                 (SELECT COUNT(*) FROM documents WHERE parse_status = 'indexed') AS indexed_doc_count,
                 (SELECT COALESCE(SUM(chunk_count), 0) FROM documents) AS chunk_count,
-                (SELECT COUNT(*)
-                   FROM document_parse_jobs j
-                   JOIN documents d ON d.id = j.doc_id
-                  WHERE j.status IN ('pending', 'running')
-                    AND d.parse_status NOT IN ('indexed', 'parse_low_confidence', 'ocr_pending')) AS running_jobs,
+                ((SELECT COUNT(*)
+                    FROM document_parse_jobs j
+                    JOIN documents d ON d.id = j.doc_id
+                   WHERE j.status IN ('pending', 'running')
+                     AND d.parse_status NOT IN ('indexed', 'parse_low_confidence', 'ocr_pending'))
+                 + (SELECT COUNT(*) FROM vector_jobs WHERE status IN ('pending', 'running'))) AS running_jobs,
                 (SELECT COUNT(*) FROM documents WHERE parse_status IN ('parse_failed', 'parse_low_confidence', 'ocr_pending', 'embedding_failed', 'parsing', 'parsed')) AS failed_docs",
         )
         .fetch_one(pool)
@@ -376,13 +385,31 @@ async fn list_jobs(
     if let Some(pool) = &state.db_pool {
         reconcile_terminal_document_jobs(pool).await?;
         let rows = sqlx::query(
-            "SELECT j.parse_job_id, j.tenant_id, t.slug AS tenant_name, j.status,
-                    COALESCE((d.metadata->>'parse_progress')::int, 0) AS progress,
-                    j.created_at
-             FROM document_parse_jobs j
-             JOIN tenant t ON t.id = j.tenant_id
-             JOIN documents d ON d.id = j.doc_id
-             ORDER BY j.created_at DESC
+            "SELECT id, tenant_id, tenant_name, kind, status, progress, created_at
+             FROM (
+                 SELECT j.parse_job_id AS id, j.tenant_id, t.slug AS tenant_name,
+                        'document_parse'::text AS kind, j.status,
+                        COALESCE((d.metadata->>'parse_progress')::int, 0) AS progress,
+                        j.created_at
+                 FROM document_parse_jobs j
+                 JOIN tenant t ON t.id = j.tenant_id
+                 JOIN documents d ON d.id = j.doc_id
+                 UNION ALL
+                 SELECT v.id,
+                        COALESCE(v.tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
+                        COALESCE(t.slug, 'system'),
+                        'vector_' || v.operation,
+                        v.status,
+                        CASE v.status
+                            WHEN 'pending' THEN 0
+                            WHEN 'running' THEN 50
+                            ELSE 100
+                        END,
+                        v.created_at
+                 FROM vector_jobs v
+                 LEFT JOIN tenant t ON t.id = v.tenant_id
+             ) jobs
+             ORDER BY created_at DESC
              LIMIT 100",
         )
         .fetch_all(pool)
@@ -390,10 +417,10 @@ async fn list_jobs(
         return Ok(Json(
             rows.into_iter()
                 .map(|row| JobSummary {
-                    id: row.get("parse_job_id"),
+                    id: row.get("id"),
                     tenant_id: row.get("tenant_id"),
                     tenant_name: row.get("tenant_name"),
-                    kind: "document_parse".to_string(),
+                    kind: row.get("kind"),
                     status: row.get("status"),
                     progress: row.get("progress"),
                     created_at: row.get("created_at"),
@@ -468,14 +495,29 @@ async fn list_vector_indexes(
     let Some(pool) = &state.db_pool else {
         return Ok(Json(vec![]));
     };
-    let es_doc_count = elasticsearch_index_count(&state).await.unwrap_or_default();
+    let es_doc_count = elasticsearch_index_count(&state).await?;
+    let consistency = if let Some(es_url) = state.config.elasticsearch_url.as_deref() {
+        Some(
+            crate::rag::vector_pipeline::consistency(pool, &state.config.rag.embedding, es_url)
+                .await?,
+        )
+    } else {
+        None
+    };
+    let index_consistent = consistency
+        .as_ref()
+        .map(|snapshot| snapshot.consistent)
+        .unwrap_or(false);
+    let physical_index = consistency
+        .as_ref()
+        .and_then(|snapshot| snapshot.physical_index.clone());
     let rows = sqlx::query(
         "SELECT t.id AS tenant_id,
                 t.name AS tenant_name,
                 kb.id AS kb_id,
                 kb.name AS kb_name,
                 COALESCE(e.embedding_model, $1) AS embedding_model,
-                COALESCE(MAX(e.embedding_dim), 0)::int AS embedding_dim,
+                COALESCE(MAX(e.embedding_dim), $2)::int AS embedding_dim,
                 COUNT(DISTINCT d.id) FILTER (WHERE d.parse_status = 'indexed')::bigint AS indexed_documents,
                 COUNT(DISTINCT d.id) FILTER (
                     WHERE d.parse_status IN ('uploaded', 'parsing', 'chunked', 'embedding')
@@ -484,9 +526,13 @@ async fn list_vector_indexes(
                     WHERE d.parse_status IN ('parse_failed', 'parse_low_confidence', 'ocr_pending', 'embedding_failed', 'parsed')
                 )::bigint AS degraded_documents,
                 COUNT(DISTINCT c.id)::bigint AS chunks,
-                COUNT(DISTINCT e.chunk_id) FILTER (WHERE e.status = 'completed')::bigint AS embedded_chunks,
-                COUNT(DISTINCT e.chunk_id) FILTER (WHERE e.status <> 'completed')::bigint AS failed_embeddings,
-                MAX(e.embedded_at) AS last_indexed_at
+                COUNT(DISTINCT e.chunk_id) FILTER (
+                    WHERE e.status = 'completed' AND e.index_status = 'indexed'
+                )::bigint AS embedded_chunks,
+                COUNT(DISTINCT e.chunk_id) FILTER (
+                    WHERE e.status <> 'completed' OR e.index_status = 'failed'
+                )::bigint AS failed_embeddings,
+                MAX(e.indexed_at) AS last_indexed_at
          FROM knowledge_base kb
          JOIN tenant t ON t.id = kb.tenant_id
          LEFT JOIN documents d
@@ -505,6 +551,7 @@ async fn list_vector_indexes(
          ORDER BY t.name ASC, kb.name ASC",
     )
     .bind(&state.config.rag.embedding.model)
+    .bind(state.config.rag.embedding.dimension as i32)
     .fetch_all(pool)
     .await?;
 
@@ -521,6 +568,7 @@ async fn list_vector_indexes(
                 } else if degraded_documents > 0
                     || failed_embeddings > 0
                     || embedded_chunks < chunks
+                    || !index_consistent
                 {
                     "degraded"
                 } else {
@@ -531,6 +579,7 @@ async fn list_vector_indexes(
                     "id": format!("{}:{}", kb_id, row.get::<String, _>("embedding_model")),
                     "name": state.config.rag.embedding.index_name.clone(),
                     "alias": state.config.rag.embedding.index_alias.clone(),
+                    "physical_index": physical_index.clone(),
                     "tenant_id": row.get::<Uuid, _>("tenant_id"),
                     "tenant": row.get::<String, _>("tenant_name"),
                     "kb_id": kb_id,
@@ -548,6 +597,7 @@ async fn list_vector_indexes(
                     "chunks": chunks,
                     "embedded_chunks": embedded_chunks,
                     "es_documents": es_doc_count,
+                    "index_consistent": index_consistent,
                     "status": status,
                     "lastIndexed": row
                         .get::<Option<chrono::DateTime<chrono::Utc>>, _>("last_indexed_at")
@@ -558,6 +608,48 @@ async fn list_vector_indexes(
     ))
 }
 
+async fn reconcile_vector_index(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<crate::rag::vector_pipeline::VectorConsistency>, crate::error::AppError> {
+    require_super_admin(&actor)?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        crate::error::AppError::bad_request("DATABASE_REQUIRED", "向量索引对账需要 PostgreSQL")
+    })?;
+    let es_url = state.config.elasticsearch_url.as_deref().ok_or_else(|| {
+        crate::error::AppError::bad_request(
+            "ELASTICSEARCH_REQUIRED",
+            "向量索引对账需要 Elasticsearch",
+        )
+    })?;
+    Ok(Json(
+        crate::rag::vector_pipeline::consistency(pool, &state.config.rag.embedding, es_url).await?,
+    ))
+}
+
+async fn rebuild_vector_index(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+) -> Result<Json<serde_json::Value>, crate::error::AppError> {
+    require_super_admin(&actor)?;
+    let pool = state.db_pool.as_ref().ok_or_else(|| {
+        crate::error::AppError::bad_request("DATABASE_REQUIRED", "向量索引重建需要 PostgreSQL")
+    })?;
+    if state.config.elasticsearch_url.is_none() {
+        return Err(crate::error::AppError::bad_request(
+            "ELASTICSEARCH_REQUIRED",
+            "向量索引重建需要 Elasticsearch",
+        ));
+    }
+    let (job_id, target_index) =
+        crate::rag::vector_pipeline::schedule_rebuild(pool, &state.config.rag.embedding).await?;
+    Ok(Json(json!({
+        "job_id": job_id,
+        "target_index": target_index,
+        "status": "pending",
+    })))
+}
+
 async fn elasticsearch_index_count(state: &AppState) -> Result<i64, crate::error::AppError> {
     let Some(base_url) = &state.config.elasticsearch_url else {
         return Ok(0);
@@ -565,7 +657,7 @@ async fn elasticsearch_index_count(state: &AppState) -> Result<i64, crate::error
     let url = format!(
         "{}/{}/_count",
         base_url.trim_end_matches('/'),
-        state.config.rag.embedding.index_name
+        state.config.rag.embedding.index_alias
     );
     let response = reqwest::Client::new()
         .get(url)

@@ -76,16 +76,27 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
             Arc::new(MockAnswerGenerator::new())
         };
 
+    let embedding_config = config
+        .rag
+        .embedding
+        .enabled
+        .then(|| EmbeddingClientConfig::try_from(&config.rag.embedding))
+        .transpose()?;
     let retriever: Arc<dyn crate::rag::Retriever> = if let Some(es_url) = &config.elasticsearch_url
     {
-        let embedding_config = EmbeddingClientConfig::try_from(&config.rag.embedding).ok();
         Arc::new(EsRetriever::new(
             es_url.clone(),
-            config.rag.embedding.index_name.clone(),
-            embedding_config,
+            config.rag.embedding.index_alias.clone(),
+            embedding_config.clone(),
+            config.rag.embedding.model.clone(),
         )?)
     } else if let Some(pool) = &db_pool {
-        Arc::new(PgRetriever::new(pool.clone()))
+        Arc::new(PgRetriever::new(
+            pool.clone(),
+            embedding_config,
+            config.rag.embedding.model.clone(),
+            config.rag.embedding.dimension,
+        )?)
     } else {
         Arc::new(MockRetriever::new())
     };
@@ -117,6 +128,15 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
     );
 
     let storage = build_storage(&config);
+
+    if let Some(pool) = db_pool.clone() {
+        crate::rag::vector_pipeline::start_vector_worker(
+            pool,
+            config.rag.embedding.clone(),
+            config.elasticsearch_url.clone(),
+            config.rabbitmq_url.clone(),
+        );
+    }
 
     Ok(AppState {
         config,

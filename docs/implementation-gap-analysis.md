@@ -79,17 +79,17 @@
 
 | 模块 | 文档目标 | 当前代码/部署 | 实现差距 |
 |---|---|---|---|
-| 结构化切片 | heading/list/table aware，多粒度 chunk | `document/chunking.rs` 产出 block/table/chunk，带 block_ids、table_ids、anchor_ids、primary_anchor_id | atomic/parent/summary 多粒度体系未完整实现 |
-| 表格切片 | 小表整体、中表按行组、大表摘要 | 已有 table markdown 与 table chunk | 大表摘要、列语义、cell-level 精确 anchor 仍不足 |
-| overlap | 按结构边界控制 overlap | 已有 chunk 配置和结构化输出 | 与文档设计中的复杂边界策略仍有差距 |
+| 结构化切片 | heading/list/table aware，多粒度 chunk | `document/chunking.rs` 已有目标/最小/最大长度、PDF 防碎片、短尾合并和严格长文本切分 | atomic/parent/summary 多粒度体系未完整实现 |
+| 表格切片 | 小表整体、中表按行组、大表摘要 | 表格按行数与 token 双阈值拆分并重复表头，超长单行有硬切保护 | 大表摘要、列语义、cell-level 精确 anchor 仍不足 |
+| overlap | 按结构边界控制 overlap | overlap 受标题、slide、表格边界约束，并预留在最大 token 预算内 | 可继续用离线评估校准不同文档类型的 overlap 参数 |
 
 ## 7. Embedding 与索引
 
 | 模块 | 文档目标 | 当前代码/部署 | 实现差距 |
 |---|---|---|---|
-| Embedding | OpenAI-compatible embedding 批量写入 | 服务器 embedding 已启用 `text-embedding-v3`；`rag/embedding.rs` 支持真实/本地 hash | 已对齐核心向量化 |
-| ES 索引 | dense vector + BM25 + anchor 字段 | `rag/vector_index.rs` 写入 embedding、doc metadata、anchor_format/kind/char_range/bbox | 索引别名热切换、重建任务、HNSW 参数调优后台未完整实现 |
-| 失败重试 | 队列失败重试与状态恢复 | 文档管理有 retry API；启动时可恢复进程中断任务为可重试失败态 | 自动补偿、指数退避、死信队列未实现 |
+| Embedding | OpenAI-compatible embedding 批量写入 | `vector_jobs` 持久化编排；按标题/章节/正文生成 input；SHA-256 复用；`REAL[]` 保存权威向量 | 已对齐核心向量化；模型质量仍需持续评估 |
+| ES 索引 | dense vector + BM25 + anchor 字段 | 版本化物理索引、`chunks_search` 原子别名切换、CJK BM25、HNSW、ID 级对账和自动重建均已实现 | HNSW 与召回参数需要基于 golden set 持续调优 |
+| 失败重试 | 队列失败重试与状态恢复 | RabbitMQ pending/DLX、PostgreSQL 补偿轮询、租约恢复、指数退避、终态失败和死信均已实现 | Worker 当前与 API 同二进制，后续可按容量独立部署 |
 
 ## 8. 查询改写、检索与重排
 
@@ -137,7 +137,7 @@
 | Admin Overview | 租户级概览、文档、任务、告警 | 管理 overview 接 DB 统计，alerts 为空数组 | 告警规则未实现 |
 | System Overview | 系统租户、用户、模型、任务、审计、索引 | `api/system.rs` 大多接 DB 或 runtime config；`/api/metrics` 可供 Prometheus 类系统抓取基础汇总指标 | 部分字段仍是 `not_measured`、只读、fallback 数据；不应承诺完整运维大屏 |
 | Runtime Config | 配置页可看切分/embedding/search/llm | `/api/admin/runtime-config` 返回 `read_only=true` 的运行配置 | 在线持久化配置未实现 |
-| Vector Index Ops | 索引管理、重建、迁移 | 系统页可查看基础信息 | 重建/迁移/优化操作未实现 |
+| Vector Index Ops | 索引管理、重建、迁移 | 已提供索引列表、ID 级 reconcile、持久化 rebuild API、健康检查和指标 | 前端尚未提供更细粒度的版本回滚与参数编辑 |
 | 部署 | `make deploy` 到 `ssh documind`，健康检查 | 已稳定部署到 release 目录并通过 `make health` | 回滚演练、灰度策略、发布审计仍需补齐 |
 | 后台导航 | 左侧边栏稳定统一，按角色过滤可见菜单 | 当前代码存在 `AdminSidebar`、`SystemSidebar`、`TenantSidebar`、`ChatSidebar` 多套入口；`SystemSidebar` 还内嵌知识库后台快捷组 | 需要按 `docs/frontend/admin-navigation.md` 收敛为统一菜单模型，避免知识库入口在不同页面位置变化 |
 
@@ -155,7 +155,7 @@
 
 按当前差距，后续应优先处理：
 
-1. **RabbitMQ 外部任务编排**：把 parse/OCR/embedding 从进程内任务拆到队列 worker，补 retry、DLX、补偿扫描和队列指标。
+1. **解析/OCR 外部任务编排**：Embedding 已完成持久化任务、RabbitMQ 通知、retry/DLX 和补偿扫描；下一步把 parse/OCR 也迁移到同类可独立扩容的 worker。
 2. **Office 精确定位**：建立 DOCX paragraph/table cell、PPTX shape/table cell 到转换 PDF/page preview 的 bbox 映射。
 3. **PDF 精确 bbox**：用 text run/word bbox 替代当前段落垂直分带近似坐标。
 4. **Claim 级 CitationResolver**：补 claim extractor、数字/日期/实体强校验、引用快照回看核验。
