@@ -14,8 +14,12 @@ from pathlib import Path
 
 
 BASE_URL = os.environ.get("BASE_URL", "http://123.57.255.204:8089").rstrip("/")
-LOGIN_EMAIL = os.environ.get("LOGIN_EMAIL", "Anner")
-LOGIN_PASSWORD = os.environ.get("LOGIN_PASSWORD", "1")
+LOGIN_EMAIL = os.environ.get(
+    "LOGIN_EMAIL", os.environ.get("ENTERPRISE_ADMIN_EMAIL", "admin@documind.local")
+)
+LOGIN_PASSWORD = os.environ.get(
+    "LOGIN_PASSWORD", os.environ.get("ENTERPRISE_ADMIN_PASSWORD", "documind123")
+)
 POLL_SECONDS = int(os.environ.get("POLL_SECONDS", "240"))
 PG_SSH_HOST = os.environ.get("PG_SSH_HOST", "documind")
 PG_CONTAINER = os.environ.get("PG_CONTAINER", "documind-postgres")

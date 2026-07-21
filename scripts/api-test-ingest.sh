@@ -39,8 +39,8 @@ if [[ -z "${ES_INDEX_CHUNKS:-}" ]]; then
   ES_INDEX="${remote_es_index:-$ES_INDEX}"
 fi
 
-LOGIN_EMAIL="${LOGIN_EMAIL:-${SUPER_ADMIN_EMAIL:-Anner}}"
-LOGIN_PASSWORD="${LOGIN_PASSWORD:-${SUPER_ADMIN_PASSWORD:-1}}"
+LOGIN_EMAIL="${LOGIN_EMAIL:-${ENTERPRISE_ADMIN_EMAIL:-admin@documind.local}}"
+LOGIN_PASSWORD="${LOGIN_PASSWORD:-${ENTERPRISE_ADMIN_PASSWORD:-documind123}}"
 
 need_cmd() {
   command -v "$1" >/dev/null 2>&1 || {
