@@ -503,11 +503,17 @@ async fn list_members(
 
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, MemberSummaryRow>(
-            "SELECT u.id, u.email, u.name, tm.roles, u.status,
+            "SELECT u.id, u.email, u.name, tm.roles, tm.status,
+                    tm.joined_at, tm.last_seen_at,
                     0::bigint as query_count
              FROM app_user u
              JOIN tenant_member tm ON tm.user_id = u.id
-             WHERE tm.tenant_id = $1",
+             LEFT JOIN platform_admin pa ON pa.user_id = u.id AND pa.status = 'active'
+             WHERE tm.tenant_id = $1
+               AND tm.status <> 'removed'
+               AND pa.user_id IS NULL
+             ORDER BY CASE WHEN 'tenant_admin' = ANY(tm.roles) THEN 0 ELSE 1 END,
+                      tm.joined_at DESC NULLS LAST",
         )
         .bind(actor.tenant_id)
         .fetch_all(pool)
@@ -532,6 +538,8 @@ async fn list_members(
                 allowed_kb_names,
                 query_count: row.query_count,
                 status: row.status,
+                joined_at: row.joined_at,
+                last_seen_at: row.last_seen_at,
             });
         }
         return Ok(Json(members));
@@ -546,6 +554,8 @@ async fn list_members(
             allowed_kb_names: vec!["全部".to_string()],
             query_count: 156,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: Some(Utc::now()),
         },
         MemberSummary {
             id: Uuid::new_v4(),
@@ -555,6 +565,8 @@ async fn list_members(
             allowed_kb_names: vec!["产品文档库".to_string(), "销售资料库".to_string()],
             query_count: 89,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: Some(Utc::now()),
         },
         MemberSummary {
             id: Uuid::new_v4(),
@@ -564,6 +576,8 @@ async fn list_members(
             allowed_kb_names: vec!["人力资源库".to_string()],
             query_count: 34,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: None,
         },
         MemberSummary {
             id: Uuid::new_v4(),
@@ -573,6 +587,8 @@ async fn list_members(
             allowed_kb_names: vec!["全部".to_string()],
             query_count: 156,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: Some(Utc::now()),
         },
         MemberSummary {
             id: Uuid::new_v4(),
@@ -582,6 +598,8 @@ async fn list_members(
             allowed_kb_names: vec!["产品文档库".to_string(), "销售资料库".to_string()],
             query_count: 89,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: Some(Utc::now()),
         },
         MemberSummary {
             id: Uuid::new_v4(),
@@ -591,6 +609,8 @@ async fn list_members(
             allowed_kb_names: vec!["人力资源库".to_string()],
             query_count: 34,
             status: "active".to_string(),
+            joined_at: Some(Utc::now()),
+            last_seen_at: None,
         },
     ]))
 }
@@ -1192,13 +1212,12 @@ fn normalize_invitation_roles(values: &[String]) -> Result<Vec<String>, crate::e
     for value in values {
         let role = match value.trim() {
             "tenant_admin" => "tenant_admin",
-            "end_user" | "user" | "analyst" => "end_user",
-            "viewer" => "viewer",
+            "end_user" | "user" | "analyst" | "viewer" => "end_user",
             "super_admin" => return Err(crate::error::AppError::forbidden()),
             _ => {
                 return Err(crate::error::AppError::bad_request(
                     "INVITATION_ROLE_INVALID",
-                    "可邀请角色只能是 tenant_admin / end_user / viewer",
+                    "可邀请角色只能是 tenant_admin / end_user",
                 ));
             }
         };
@@ -1273,6 +1292,8 @@ struct MemberSummaryRow {
     roles: Vec<String>,
     status: String,
     query_count: i64,
+    joined_at: Option<chrono::DateTime<chrono::Utc>>,
+    last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 async fn ensure_kb_exists(

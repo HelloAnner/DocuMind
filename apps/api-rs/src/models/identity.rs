@@ -24,7 +24,7 @@ impl CurrentActor {
     }
 
     pub fn can_manage_kb(&self, kb_id: Uuid) -> bool {
-        self.is_super_admin || self.allowed_kb_ids.contains(&kb_id)
+        self.allowed_kb_ids.contains(&kb_id)
     }
 }
 
@@ -66,6 +66,9 @@ pub struct TenantSummary {
     pub kb_count: i64,
     pub doc_count: i64,
     pub monthly_queries: i64,
+    pub active_admin_count: i64,
+    pub pending_invitation_count: i64,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +127,8 @@ pub struct MemberSummary {
     pub allowed_kb_names: Vec<String>,
     pub query_count: i64,
     pub status: String,
+    pub joined_at: Option<DateTime<Utc>>,
+    pub last_seen_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -84,6 +84,61 @@ export async function getMe(): Promise<MeResponse> {
   return res.json();
 }
 
+export interface AccountTenant {
+  id: string;
+  name: string;
+  slug: string;
+  status: string;
+  roles: UserRole[];
+  current: boolean;
+}
+
+async function authJson<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${BASE}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      ...getAuthHeaders(),
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    throw new Error(detail || `请求失败（${response.status}）`);
+  }
+  return response.json() as Promise<T>;
+}
+
+export async function updateAccountProfile(name: string, avatarUrl?: string): Promise<MeResponse> {
+  return authJson("/api/account/profile", {
+    method: "PATCH",
+    body: JSON.stringify({ name, avatar_url: avatarUrl || null }),
+  });
+}
+
+export async function listAccountTenants(): Promise<AccountTenant[]> {
+  return authJson("/api/account/tenants");
+}
+
+export async function switchAccountTenant(tenantId: string): Promise<LoginResponse> {
+  const data = await authJson<LoginResponse>("/api/account/switch-tenant", {
+    method: "POST",
+    body: JSON.stringify({ tenant_id: tenantId }),
+  });
+  storeLoginResponse(data);
+  return data;
+}
+
+function storeLoginResponse(data: LoginResponse) {
+  setStoredAuth({
+    token: data.access_token,
+    userId: data.user.id,
+    tenantId: data.tenant.id,
+    email: data.user.email,
+    roles: data.roles,
+  });
+}
+
 export async function loginWithPassword(username: string, password: string): Promise<MeResponse> {
   const res = await fetch(`${BASE}/api/v1/auth/login`, {
     method: "POST",
@@ -92,13 +147,7 @@ export async function loginWithPassword(username: string, password: string): Pro
   });
   if (!res.ok) throw new Error("用户名或密码错误");
   const data: LoginResponse = await res.json();
-  setStoredAuth({
-    token: data.access_token,
-    userId: data.user.id,
-    tenantId: data.tenant.id,
-    email: data.user.email,
-    roles: data.roles,
-  });
+  storeLoginResponse(data);
   return data;
 }
 
@@ -114,13 +163,7 @@ export async function acceptInvitation(
   });
   if (!res.ok) throw new Error("邀请链接无效、已过期或密码不符合要求");
   const data: LoginResponse = await res.json();
-  setStoredAuth({
-    token: data.access_token,
-    userId: data.user.id,
-    tenantId: data.tenant.id,
-    email: data.user.email,
-    roles: data.roles,
-  });
+  storeLoginResponse(data);
   return data;
 }
 
@@ -159,7 +202,7 @@ export function isTenantAdminRole(roles: UserRole[] | string[]): boolean {
 }
 
 export function canAccessAdmin(roles: UserRole[] | string[]): boolean {
-  return isSuperAdminRole(roles) || isTenantAdminRole(roles);
+  return !isSuperAdminRole(roles) && isTenantAdminRole(roles);
 }
 
 export function defaultRouteForRole(role: UserRole): string {

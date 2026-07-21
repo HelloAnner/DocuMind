@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
@@ -9,14 +8,12 @@ import {
   Headphones,
   MoreHorizontal,
   Pencil,
-  Settings,
   Trash2,
 } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
-import { useAuth } from "@/components/providers/auth-provider";
-import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
 import type { Conversation } from "@/lib/types";
+import { UserAccountMenu } from "./user-account-menu";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
 
@@ -79,12 +76,10 @@ interface ChatSidebarProps {
 
 export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
   const router = useRouter();
-  const { me } = useAuth();
   const {
     conversations,
     currentId,
     setCurrentId,
-    createAndSelect,
     isFavorite,
     toggleFavorite,
     deleteConversation,
@@ -96,11 +91,6 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
-
-  const isSuperAdmin = isSuperAdminRole(me?.roles ?? []);
-  const isTenantAdmin = isTenantAdminRole(me?.roles ?? []);
-  const adminHref = isSuperAdmin ? "/system" : "/admin";
-  const canAccessAdmin = isSuperAdmin || isTenantAdmin;
 
   const filtered = useMemo(() => conversations, [conversations]);
 
@@ -333,12 +323,7 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
       </div>
 
       <div style={{ marginTop: "auto" }}>
-        {canAccessAdmin && (
-          <Link className="dm-chat-admin-entry" href={adminHref}>
-            <Settings size={15} />
-            <span>管理后台</span>
-          </Link>
-        )}
+        <UserAccountMenu />
       </div>
 
       {onResize && (

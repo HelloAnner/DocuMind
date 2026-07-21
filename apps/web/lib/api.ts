@@ -152,10 +152,100 @@ export interface AdminMember {
   allowed_kb_names: string[];
   query_count: number;
   status: string;
+  joined_at?: string;
+  last_seen_at?: string;
 }
 
 export async function listAdminMembers(): Promise<AdminMember[]> {
   return fetchJson("/api/admin/members");
+}
+
+export async function updateAdminMember(
+  userId: string,
+  input: { role?: "tenant_admin" | "end_user"; status?: "active" | "suspended" }
+): Promise<{ user_id: string; roles: string[]; status: string }> {
+  return fetchJson(`/api/admin/members/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function removeAdminMember(userId: string): Promise<{ user_id: string; status: string }> {
+  return fetchJson(`/api/admin/members/${userId}`, { method: "DELETE" });
+}
+
+export interface SystemTenant {
+  id: string;
+  name: string;
+  slug: string;
+  status: "pending" | "active" | "suspended" | "archived" | "deletion_pending";
+  plan: "trial" | "team" | "enterprise";
+  member_count: number;
+  kb_count: number;
+  doc_count: number;
+  monthly_queries: number;
+  active_admin_count: number;
+  pending_invitation_count: number;
+  updated_at: string;
+}
+
+export interface CreateSystemTenantRequest {
+  name: string;
+  slug?: string;
+  plan: SystemTenant["plan"];
+  admin_email: string;
+  admin_name?: string;
+  expires_in_days: number;
+}
+
+export interface CreateSystemTenantResponse {
+  tenant: Pick<SystemTenant, "id" | "name" | "slug" | "plan" | "status">;
+  invitation: {
+    id: string;
+    email: string;
+    roles: string[];
+    status: string;
+    expires_at: string;
+    invite_url: string;
+  };
+}
+
+export async function listSystemTenants(): Promise<SystemTenant[]> {
+  return fetchJson("/api/system/tenants");
+}
+
+export async function createSystemTenant(input: CreateSystemTenantRequest): Promise<CreateSystemTenantResponse> {
+  return fetchJson("/api/system/tenants", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function updateSystemTenant(
+  id: string,
+  input: { name?: string; plan?: SystemTenant["plan"]; status?: SystemTenant["status"] }
+): Promise<SystemTenant> {
+  return fetchJson(`/api/system/tenants/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+}
+
+export async function requestSystemTenantDeletion(id: string, slug: string) {
+  return fetchJson<{ id: string; slug: string; status: "deletion_pending" }>(
+    `/api/system/tenants/${id}?confirm_slug=${encodeURIComponent(slug)}`,
+    { method: "DELETE" }
+  );
+}
+
+export async function resendSystemTenantInvitation(id: string, expiresInDays: number) {
+  return fetchJson<{ id: string; email: string; expires_at: string; invite_url: string }>(
+    `/api/system/tenants/${id}/invitations/resend`,
+    {
+      method: "POST",
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    }
+  );
 }
 
 export interface TenantInvitation {

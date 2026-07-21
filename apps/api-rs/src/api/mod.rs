@@ -1,4 +1,6 @@
+pub mod account;
 pub mod admin;
+pub mod admin_members;
 pub mod auth;
 pub mod conversations;
 pub mod documents;
@@ -6,8 +8,12 @@ pub mod history;
 pub mod knowledge;
 pub mod runtime_events;
 pub mod system;
+pub mod system_tenant_invitations;
+pub mod system_tenants;
 
+pub use account::router as account_router;
 pub use admin::router as admin_router;
+pub use admin_members::router as admin_members_router;
 pub use auth::router as auth_router;
 pub use conversations::router as conversations_router;
 pub use documents::router as documents_router;

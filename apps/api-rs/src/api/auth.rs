@@ -326,6 +326,20 @@ async fn provision_portal_actor(
     .execute(pool)
     .await?;
 
+    if roles.iter().any(|role| role == "super_admin") {
+        sqlx::query(
+            r#"
+            INSERT INTO platform_admin (user_id, role, status)
+            VALUES ($1, 'super_admin', 'active')
+            ON CONFLICT (user_id)
+            DO UPDATE SET role = 'super_admin', status = 'active', updated_at = NOW()
+            "#,
+        )
+        .bind(user_id)
+        .execute(pool)
+        .await?;
+    }
+
     sqlx::query(
         r#"
         INSERT INTO tenant_member (tenant_id, user_id, roles, attributes, status, joined_at, last_seen_at)
@@ -347,7 +361,10 @@ async fn provision_portal_actor(
     let claims = auth::Claims {
         sub: user_id,
         email,
-        role: roles.first().cloned().unwrap_or_else(|| "user".to_string()),
+        role: roles
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "end_user".to_string()),
         tenant_id: portal.tenant_id,
         sid: None,
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -380,7 +397,7 @@ fn map_documind_roles(portal: &PortalContext) -> Vec<String> {
         }
     }
     if mapped.is_empty() {
-        mapped.push("user".to_string());
+        mapped.push("end_user".to_string());
     }
     sort_documind_roles_by_priority(mapped)
 }
@@ -441,15 +458,10 @@ fn intersect_permissions(local: &[String], portal: &[String]) -> Vec<String> {
 fn map_documind_role(role: &str) -> Option<String> {
     match role {
         "super_admin" => Some("super_admin".to_string()),
-        "tenant_owner" => Some("tenant_owner".to_string()),
+        "tenant_owner" => Some("tenant_admin".to_string()),
         "tenant_admin" => Some("tenant_admin".to_string()),
-        "enterprise_admin" => Some("enterprise_admin".to_string()),
-        "team_admin" => Some("team_admin".to_string()),
-        "data_admin" => Some("data_admin".to_string()),
-        "analyst" => Some("analyst".to_string()),
-        "user" => Some("user".to_string()),
-        "viewer" => Some("viewer".to_string()),
-        "end_user" => Some("user".to_string()),
+        "enterprise_admin" | "team_admin" | "data_admin" => Some("tenant_admin".to_string()),
+        "analyst" | "user" | "viewer" | "end_user" => Some("end_user".to_string()),
         _ => None,
     }
 }
@@ -457,31 +469,21 @@ fn map_documind_role(role: &str) -> Option<String> {
 fn map_portal_role_for_documind(role: &str) -> Option<String> {
     match role {
         "super-admin" | "super_admin" => Some("super_admin".to_string()),
-        "tenant-owner" | "tenant_owner" => Some("tenant_owner".to_string()),
+        "tenant-owner" | "tenant_owner" => Some("tenant_admin".to_string()),
         "tenant-admin" | "tenant_admin" => Some("tenant_admin".to_string()),
         "module-admin" | "module_admin" | "subsystem-admin" | "subsystem_admin" => {
-            Some("team_admin".to_string())
+            Some("tenant_admin".to_string())
         }
-        "admin" | "enterprise-admin" | "enterprise_admin" => Some("enterprise_admin".to_string()),
+        "admin" | "enterprise-admin" | "enterprise_admin" => Some("tenant_admin".to_string()),
         "normal-user" | "normal_user" | "normal" | "user" | "viewer" | "end_user" => {
-            Some("user".to_string())
+            Some("end_user".to_string())
         }
         _ => None,
     }
 }
 
 fn sort_documind_roles_by_priority(roles: Vec<String>) -> Vec<String> {
-    let priority = [
-        "super_admin",
-        "tenant_owner",
-        "tenant_admin",
-        "enterprise_admin",
-        "team_admin",
-        "data_admin",
-        "analyst",
-        "user",
-        "viewer",
-    ];
+    let priority = ["super_admin", "tenant_admin", "end_user"];
     priority
         .iter()
         .filter(|role| roles.iter().any(|value| value == **role))
@@ -777,7 +779,19 @@ async fn accept_invitation(
     let tenant_id: Uuid = invitation.get("tenant_id");
     let email: String = invitation.get("email");
     let invitation_name: Option<String> = invitation.try_get("name").ok();
-    let roles: Vec<String> = invitation.get("roles");
+    let invitation_roles: Vec<String> = invitation.get("roles");
+    let mut roles = invitation_roles
+        .iter()
+        .filter_map(|role| match role.as_str() {
+            "tenant_admin" | "enterprise_admin" | "team_admin" | "data_admin" | "tenant_owner" => {
+                Some("tenant_admin".to_string())
+            }
+            "end_user" | "user" | "analyst" | "viewer" => Some("end_user".to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    roles.sort();
+    roles.dedup();
     let status: String = invitation.get("status");
     let expires_at: chrono::DateTime<chrono::Utc> = invitation.get("expires_at");
     if status != "pending" {
@@ -798,8 +812,11 @@ async fn accept_invitation(
             message: "邀请已过期".to_string(),
         });
     }
-    if roles.iter().any(|role| role == "super_admin") {
-        return Err(crate::error::AppError::forbidden());
+    if roles.is_empty() || invitation_roles.iter().any(|role| role == "super_admin") {
+        return Err(crate::error::AppError::Forbidden {
+            code: "INVITATION_ROLE_FORBIDDEN".to_string(),
+            message: "邀请角色无效或无权授予".to_string(),
+        });
     }
 
     let existing_user = sqlx::query(
@@ -929,6 +946,15 @@ async fn accept_invitation(
         });
     }
 
+    if roles.iter().any(|role| role == "tenant_admin") {
+        sqlx::query(
+            "UPDATE tenant SET status = 'active', updated_at = NOW() WHERE id = $1 AND status = 'pending'",
+        )
+        .bind(tenant_id)
+        .execute(pool)
+        .await?;
+    }
+
     let claims = auth::Claims {
         sub: user_id,
         email: email.clone(),
@@ -1007,11 +1033,20 @@ async fn logout(
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn me_response(
+pub(crate) async fn me_response(
     state: &AppState,
     actor: crate::models::CurrentActor,
 ) -> Result<MeResponse, crate::error::AppError> {
     let tenant = tenant_profile(state, actor.tenant_id).await?;
+    let avatar_url = if let Some(pool) = &state.db_pool {
+        sqlx::query_scalar::<_, Option<String>>("SELECT avatar_url FROM app_user WHERE id = $1")
+            .bind(actor.user_id)
+            .fetch_optional(pool)
+            .await?
+            .flatten()
+    } else {
+        None
+    };
     Ok(MeResponse {
         user: UserProfile {
             id: actor.user_id,
@@ -1021,7 +1056,7 @@ async fn me_response(
             } else {
                 Some(actor.name.clone())
             },
-            avatar_url: None,
+            avatar_url,
             status: "active".to_string(),
         },
         tenant,

@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { AdminShellSidebar } from "@/components/ui/admin-shell-sidebar";
 import { useAuth } from "@/components/providers/auth-provider";
-import { isTenantAdminRole } from "@/lib/auth";
+import { canAccessAdmin } from "@/lib/auth";
 
 export default function TenantLayout({
   children,
@@ -16,7 +16,7 @@ export default function TenantLayout({
 
   useEffect(() => {
     if (loading) return;
-    const canAccess = me && isTenantAdminRole(me.roles);
+    const canAccess = me && canAccessAdmin(me.roles);
     if (!canAccess) {
       router.replace("/");
     }

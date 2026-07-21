@@ -14,8 +14,20 @@ use crate::state::AppState;
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/api/system/overview", get(overview))
-        .route("/api/system/tenants", get(list_tenants))
-        .route("/api/system/tenants/:id", get(get_tenant))
+        .route(
+            "/api/system/tenants",
+            get(list_tenants).post(super::system_tenants::create_tenant),
+        )
+        .route(
+            "/api/system/tenants/:id",
+            get(get_tenant)
+                .patch(super::system_tenants::update_tenant)
+                .delete(super::system_tenants::request_tenant_deletion),
+        )
+        .route(
+            "/api/system/tenants/:id/invitations/resend",
+            axum::routing::post(super::system_tenant_invitations::resend_initial_invitation),
+        )
         .route("/api/system/users", get(list_users))
         .route("/api/system/models", get(list_models))
         .route("/api/system/jobs", get(list_jobs))
@@ -148,10 +160,13 @@ async fn list_tenants(
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, TenantSummaryRow>(
             "SELECT t.id, t.name, t.slug, t.status, t.plan,
-                    COALESCE((SELECT COUNT(*) FROM tenant_member m WHERE m.tenant_id = t.id), 0) as member_count,
+                    COALESCE((SELECT COUNT(*) FROM tenant_member m WHERE m.tenant_id = t.id AND m.status = 'active' AND NOT EXISTS (SELECT 1 FROM platform_admin pa WHERE pa.user_id = m.user_id AND pa.status = 'active')), 0) as member_count,
                     COALESCE((SELECT COUNT(*) FROM knowledge_base kb WHERE kb.tenant_id = t.id), 0) as kb_count,
                     COALESCE((SELECT COUNT(*) FROM documents d WHERE d.tenant_id = t.id), 0) as doc_count,
-                    0::bigint as monthly_queries
+                    0::bigint as monthly_queries,
+                    COALESCE((SELECT COUNT(*) FROM tenant_member m WHERE m.tenant_id = t.id AND m.status = 'active' AND 'tenant_admin' = ANY(m.roles)), 0) as active_admin_count,
+                    COALESCE((SELECT COUNT(*) FROM tenant_invitation i WHERE i.tenant_id = t.id AND i.status = 'pending' AND i.expires_at > NOW()), 0) as pending_invitation_count,
+                    t.updated_at
              FROM tenant t
              ORDER BY t.created_at DESC"
         )
@@ -170,6 +185,9 @@ async fn list_tenants(
         kb_count: 3,
         doc_count: 128,
         monthly_queries: 18203,
+        active_admin_count: 1,
+        pending_invitation_count: 0,
+        updated_at: chrono::Utc::now(),
     }]))
 }
 
@@ -224,16 +242,29 @@ async fn list_users(
 
         let mut users = Vec::with_capacity(rows.len());
         for (id, email, name, status) in rows {
-            let tenants: Vec<String> = sqlx::query_scalar(
+            let mut tenants: Vec<String> = sqlx::query_scalar(
                 "SELECT t.name || '(' || UNNEST(tm.roles) || ')'
                  FROM tenant_member tm
                  JOIN tenant t ON t.id = tm.tenant_id
-                 WHERE tm.user_id = $1",
+                 WHERE tm.user_id = $1
+                   AND NOT EXISTS (
+                     SELECT 1 FROM platform_admin pa
+                     WHERE pa.user_id = tm.user_id AND pa.status = 'active'
+                   )",
             )
             .bind(id)
             .fetch_all(pool)
             .await
             .unwrap_or_default();
+            let is_platform_admin: bool = sqlx::query_scalar(
+                "SELECT EXISTS(SELECT 1 FROM platform_admin WHERE user_id = $1 AND status = 'active')",
+            )
+            .bind(id)
+            .fetch_one(pool)
+            .await?;
+            if is_platform_admin {
+                tenants.push("平台(超级管理员)".to_string());
+            }
             users.push(SystemUserSummary {
                 id,
                 email,
@@ -681,6 +712,9 @@ struct TenantSummaryRow {
     kb_count: i64,
     doc_count: i64,
     monthly_queries: i64,
+    active_admin_count: i64,
+    pending_invitation_count: i64,
+    updated_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl From<TenantSummaryRow> for TenantSummary {
@@ -695,6 +729,9 @@ impl From<TenantSummaryRow> for TenantSummary {
             kb_count: r.kb_count,
             doc_count: r.doc_count,
             monthly_queries: r.monthly_queries,
+            active_admin_count: r.active_admin_count,
+            pending_invitation_count: r.pending_invitation_count,
+            updated_at: r.updated_at,
         }
     }
 }

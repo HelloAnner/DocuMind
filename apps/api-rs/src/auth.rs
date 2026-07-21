@@ -190,7 +190,13 @@ async fn authenticate_from_db(
             JOIN tenant t ON t.id = tm.tenant_id
             WHERE tm.user_id = $1
               AND tm.status = 'active'
-              AND t.status = 'active'
+              AND (
+                t.status = 'active'
+                OR EXISTS (
+                  SELECT 1 FROM platform_admin pa
+                  WHERE pa.user_id = tm.user_id AND pa.status = 'active'
+                )
+              )
               AND (tm.tenant_id::text = $2 OR t.slug = $2)
             LIMIT 1
             "#,
@@ -207,11 +213,22 @@ async fn authenticate_from_db(
             JOIN tenant t ON t.id = tm.tenant_id
             WHERE tm.user_id = $1
               AND tm.status = 'active'
-              AND t.status = 'active'
+              AND (
+                t.status = 'active'
+                OR EXISTS (
+                  SELECT 1 FROM platform_admin pa
+                  WHERE pa.user_id = tm.user_id AND pa.status = 'active'
+                )
+              )
             ORDER BY
               CASE
-                WHEN 'super_admin' = ANY(tm.roles) THEN 0
-                WHEN 'enterprise_admin' = ANY(tm.roles) THEN 1
+                WHEN EXISTS (
+                  SELECT 1 FROM platform_admin pa
+                  WHERE pa.user_id = tm.user_id AND pa.status = 'active'
+                ) THEN 0
+                WHEN tm.tenant_id = (
+                  SELECT last_active_tenant FROM app_user WHERE id = tm.user_id
+                ) THEN 1
                 WHEN 'tenant_admin' = ANY(tm.roles) THEN 2
                 ELSE 3
               END,
@@ -226,7 +243,9 @@ async fn authenticate_from_db(
     .ok_or_else(AppError::unauthorized)?;
 
     let tenant_id: Uuid = membership.get("tenant_id");
-    let roles: Vec<String> = membership.get("roles");
+    let membership_roles: Vec<String> = membership.get("roles");
+    let is_super_admin = platform_admin_active(pool, user_id).await?;
+    let roles = normalized_actor_roles(&membership_roles, is_super_admin);
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -242,7 +261,7 @@ async fn authenticate_from_db(
         roles: roles.clone(),
         permissions,
         allowed_kb_ids,
-        is_super_admin: roles.iter().any(|r| r == "super_admin"),
+        is_super_admin,
     })
 }
 
@@ -327,14 +346,31 @@ async fn resolve_actor_from_db(
     }
 
     let membership = sqlx::query(
-        "SELECT roles, attributes FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 AND status = 'active' LIMIT 1",
+        r#"
+        SELECT tm.roles, tm.attributes
+        FROM tenant_member tm
+        JOIN tenant t ON t.id = tm.tenant_id
+        WHERE tm.tenant_id = $1
+          AND tm.user_id = $2
+          AND tm.status = 'active'
+          AND (
+            t.status = 'active'
+            OR EXISTS (
+              SELECT 1 FROM platform_admin pa
+              WHERE pa.user_id = tm.user_id AND pa.status = 'active'
+            )
+          )
+        LIMIT 1
+        "#,
     )
     .bind(tenant_id)
     .bind(user_id)
     .fetch_optional(pool)
     .await?
     .ok_or_else(AppError::unauthorized)?;
-    let roles: Vec<String> = membership.get("roles");
+    let membership_roles: Vec<String> = membership.get("roles");
+    let is_super_admin = platform_admin_active(pool, user_id).await?;
+    let roles = normalized_actor_roles(&membership_roles, is_super_admin);
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -355,8 +391,37 @@ async fn resolve_actor_from_db(
         roles: roles.clone(),
         permissions,
         allowed_kb_ids,
-        is_super_admin: roles.iter().any(|r| r == "super_admin"),
+        is_super_admin,
     })
+}
+
+async fn platform_admin_active(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS (SELECT 1 FROM platform_admin WHERE user_id = $1 AND status = 'active')",
+    )
+    .bind(user_id)
+    .fetch_one(pool)
+    .await?)
+}
+
+fn normalized_actor_roles(membership_roles: &[String], is_super_admin: bool) -> Vec<String> {
+    let mut roles = membership_roles
+        .iter()
+        .filter_map(|role| match role.as_str() {
+            "super_admin" => None,
+            "enterprise_admin" | "team_admin" | "data_admin" | "tenant_owner" | "tenant_admin" => {
+                Some("tenant_admin".to_string())
+            }
+            "user" | "analyst" | "viewer" | "end_user" => Some("end_user".to_string()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    roles.sort();
+    roles.dedup();
+    if is_super_admin {
+        roles.insert(0, "super_admin".to_string());
+    }
+    roles
 }
 
 fn effective_permissions_for_membership(
@@ -429,7 +494,8 @@ fn build_actor_from_fallback(
     role: &str,
     default_kb_ids: Vec<Uuid>,
 ) -> CurrentActor {
-    let roles = vec![role.to_string()];
+    let is_super_admin = role == "super_admin";
+    let roles = normalized_actor_roles(&[role.to_string()], is_super_admin);
     CurrentActor {
         user_id,
         tenant_id,
@@ -437,8 +503,12 @@ fn build_actor_from_fallback(
         name: name.to_string(),
         roles: roles.clone(),
         permissions: derive_permissions(&roles),
-        allowed_kb_ids: default_kb_ids,
-        is_super_admin: role == "super_admin",
+        allowed_kb_ids: if is_super_admin {
+            Vec::new()
+        } else {
+            default_kb_ids
+        },
+        is_super_admin,
     }
 }
 
@@ -580,20 +650,6 @@ pub fn derive_permissions(roles: &[String]) -> Vec<String> {
                         "job.read",
                         "job.write",
                         "audit.read",
-                        "kb.read",
-                        "kb.create",
-                        "kb.write",
-                        "kb.manage",
-                        "document.upload",
-                        "document.delete",
-                        "document.reprocess",
-                        "config.read",
-                        "config.write",
-                        "member.read",
-                        "member.write",
-                        "member.delete",
-                        "chat.ask",
-                        "answer.feedback",
                     ]
                     .map(String::from),
                 );
@@ -677,7 +733,10 @@ pub fn role_matrix() -> serde_json::Value {
 
 fn normalize_role(role: &str) -> String {
     match role {
-        "end_user" => "user".to_string(),
+        "enterprise_admin" | "team_admin" | "data_admin" | "tenant_owner" => {
+            "tenant_admin".to_string()
+        }
+        "user" | "analyst" | "viewer" => "end_user".to_string(),
         other => other.to_string(),
     }
 }
@@ -686,12 +745,7 @@ fn is_documind_admin(roles: &[String]) -> bool {
     roles.iter().any(|r| {
         matches!(
             r.as_str(),
-            "super_admin"
-                | "enterprise_admin"
-                | "tenant_owner"
-                | "tenant_admin"
-                | "team_admin"
-                | "data_admin"
+            "enterprise_admin" | "tenant_owner" | "tenant_admin" | "team_admin" | "data_admin"
         )
     })
 }
@@ -705,7 +759,7 @@ pub fn require_super_admin(actor: &CurrentActor) -> Result<(), AppError> {
 }
 
 pub fn require_tenant_admin(actor: &CurrentActor) -> Result<(), AppError> {
-    if is_documind_admin(&actor.roles) {
+    if !actor.is_super_admin && is_documind_admin(&actor.roles) {
         Ok(())
     } else {
         Err(AppError::forbidden())
@@ -800,6 +854,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         &config.enterprise_admin_password,
     )
     .await?;
+
     upsert_seed_user(
         pool,
         config.super_admin_user_id,
@@ -807,6 +862,17 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         "Anner",
         &config.super_admin_password,
     )
+    .await?;
+    sqlx::query(
+        r#"
+        INSERT INTO platform_admin (user_id, role, status)
+        VALUES ($1, 'super_admin', 'active')
+        ON CONFLICT (user_id)
+        DO UPDATE SET role = 'super_admin', status = 'active', updated_at = NOW()
+        "#,
+    )
+    .bind(config.super_admin_user_id)
+    .execute(pool)
     .await?;
     upsert_seed_user(
         pool,
@@ -821,7 +887,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         pool,
         config.default_tenant_id,
         config.default_user_id,
-        &["enterprise_admin"],
+        &["tenant_admin"],
     )
     .await?;
     upsert_membership(
@@ -835,7 +901,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         pool,
         config.default_tenant_id,
         config.standard_user_id,
-        &["user"],
+        &["end_user"],
     )
     .await?;
 
@@ -857,7 +923,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
     .execute(pool)
     .await?;
 
-    for role in ["super_admin", "enterprise_admin", "tenant_admin"] {
+    for role in ["tenant_admin"] {
         upsert_acl(
             pool,
             config.default_tenant_id,
@@ -867,7 +933,7 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         )
         .await?;
     }
-    for role in ["user", "end_user", "viewer"] {
+    for role in ["end_user"] {
         upsert_acl(pool, config.default_tenant_id, product_kb_id, role, "read").await?;
     }
     Ok(())
@@ -942,4 +1008,44 @@ async fn upsert_acl(
     .execute(pool)
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platform_admin_has_no_tenant_content_permissions() {
+        let permissions = derive_permissions(&["super_admin".to_string()]);
+        assert!(permissions.contains(&"tenant.write".to_string()));
+        assert!(!permissions.contains(&"kb.read".to_string()));
+        assert!(!permissions.contains(&"chat.ask".to_string()));
+        assert!(!permissions.contains(&"member.write".to_string()));
+    }
+
+    #[test]
+    fn tenant_admin_and_end_user_permissions_stay_separate() {
+        let admin = derive_permissions(&["tenant_admin".to_string()]);
+        let user = derive_permissions(&["end_user".to_string()]);
+        assert!(admin.contains(&"document.upload".to_string()));
+        assert!(admin.contains(&"member.write".to_string()));
+        assert!(user.contains(&"chat.ask".to_string()));
+        assert!(!user.contains(&"document.upload".to_string()));
+        assert!(!user.contains(&"member.write".to_string()));
+    }
+
+    #[test]
+    fn legacy_membership_roles_normalize_to_two_tenant_roles() {
+        assert_eq!(
+            normalized_actor_roles(
+                &["enterprise_admin".to_string(), "viewer".to_string()],
+                false
+            ),
+            vec!["end_user".to_string(), "tenant_admin".to_string()]
+        );
+        assert_eq!(
+            normalized_actor_roles(&["super_admin".to_string()], true),
+            vec!["super_admin".to_string()]
+        );
+    }
 }
