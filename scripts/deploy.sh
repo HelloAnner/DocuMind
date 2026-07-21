@@ -102,6 +102,19 @@ es_index_schema_version="$(remote_env_value ES_INDEX_SCHEMA_VERSION)"
 es_index_schema_version="${es_index_schema_version:-2}"
 rerank_api_url="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_URL=' | tail -1 | cut -d= -f2- || true)"
 rerank_api_key="$(printf '%s\n' "$remote_env_content" | grep -E '^RAG_RERANK_API_KEY=' | tail -1 | cut -d= -f2- || true)"
+rerank_provider="$(remote_env_value RAG_RERANK_PROVIDER)"
+rerank_provider="${rerank_provider:-dashscope}"
+rerank_model="$(remote_env_value RAG_RERANK_MODEL)"
+if [[ "$rerank_provider" == "dashscope" && ( -z "$rerank_model" || "$rerank_model" == "bge-reranker-v2-m3" ) ]]; then
+  # Migrate the legacy local-model default to DashScope's hosted rerank model.
+  rerank_model="gte-rerank-v2"
+else
+  rerank_model="${rerank_model:-gte-rerank-v2}"
+fi
+rerank_api_url="${rerank_api_url:-https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}"
+rerank_api_key="${rerank_api_key:-$llm_api_key}"
+agent_reasoning_model="$(remote_env_value AGENT_REASONING_MODEL)"
+agent_reasoning_model="${agent_reasoning_model:-$llm_model}"
 if [[ -f .env ]]; then
   local_llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
   local_llm_api="$(grep -E '^LLM_API=' .env | tail -1 | cut -d= -f2- || true)"
@@ -208,10 +221,10 @@ RAG_BM25_TOP_K=100
 RAG_RRF_TOP_K=20
 RAG_TOP_K=5
 RAG_RERANK_ENABLED=true
-RAG_RERANK_MODEL=bge-reranker-v2-m3
+RAG_RERANK_PROVIDER=$rerank_provider
+RAG_RERANK_MODEL=$rerank_model
 RAG_RERANK_API_URL=$rerank_api_url
 RAG_RERANK_API_KEY=$rerank_api_key
-RAG_RERANK_THRESHOLD=0.3
 RAG_REQUIRE_CITATION=true
 RAG_VERIFY_CLAIMS=true
 RAG_TARGET_CHUNK_TOKENS=800
@@ -226,11 +239,19 @@ LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=1200
 
 AGENT_DEFAULT_TONE=concise_warm
+AGENT_REASONING_MODEL=$agent_reasoning_model
 AGENT_PROACTIVE_FOLLOWUP=true
 AGENT_MAX_FOLLOWUP_SUGGESTIONS=2
 AGENT_ALLOW_ANALYST_MODE=true
 AGENT_REQUIRE_CITATION_FOR_ANALYSIS=true
 AGENT_CLARIFICATION_STYLE=short
+AGENT_MAX_REACT_STEPS=4
+AGENT_MAX_QUERIES_PER_STEP=4
+AGENT_MAX_HISTORY_TURNS=12
+AGENT_MAX_HISTORY_CHARS=24000
+AGENT_MAX_CONTEXT_CHARS=30000
+AGENT_MAX_REPAIR_ATTEMPTS=3
+AGENT_TOTAL_TIMEOUT_SECONDS=240
 ENV
 
 echo "Deploying DocuMind to ssh $DEPLOY_HOST"
@@ -290,6 +311,41 @@ ensure_env_var() {
 }
 
 ensure_env_var DOCUMIND_ENV production
+
+upsert_env_var() {
+  local key="\$1"
+  local value="\$2"
+  local temp_file
+  temp_file="\$(mktemp)"
+  awk -v key="\$key" -v value="\$value" '
+    BEGIN { replaced = 0 }
+    index(\$0, key "=") == 1 {
+      if (!replaced) print key "=" value
+      replaced = 1
+      next
+    }
+    { print }
+    END { if (!replaced) print key "=" value }
+  ' "\$remote_env" > "\$temp_file"
+  cat "\$temp_file" > "\$remote_env"
+  rm -f "\$temp_file"
+}
+
+release_env_value() {
+  grep -E "^\$1=" "\$remote_release/.env.default" | tail -1 | cut -d= -f2-
+}
+
+for required_key in \
+  RAG_RERANK_ENABLED RAG_RERANK_PROVIDER RAG_RERANK_MODEL \
+  RAG_RERANK_API_URL RAG_RERANK_API_KEY AGENT_REASONING_MODEL \
+  AGENT_MAX_REPAIR_ATTEMPTS AGENT_TOTAL_TIMEOUT_SECONDS; do
+  upsert_env_var "\$required_key" "\$(release_env_value "\$required_key")"
+done
+for agent_key in \
+  AGENT_MAX_REACT_STEPS AGENT_MAX_QUERIES_PER_STEP AGENT_MAX_HISTORY_TURNS \
+  AGENT_MAX_HISTORY_CHARS AGENT_MAX_CONTEXT_CHARS; do
+  ensure_env_var "\$agent_key" "\$(release_env_value "\$agent_key")"
+done
 
 chmod +x "\$remote_release/bin/documind"
 remote_sha256="\$(sha256sum "\$remote_release/bin/documind" | awk '{print \$1}')"

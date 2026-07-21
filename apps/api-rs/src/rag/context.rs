@@ -25,7 +25,19 @@ impl Default for SimpleContextAssembler {
 impl ContextAssembler for SimpleContextAssembler {
     async fn assemble(&self, input: ContextInput) -> Result<EvidencePack> {
         let mut lines = vec![];
-        for (i, chunk) in input.chunks.iter().enumerate() {
+        let mut selected = Vec::new();
+        let mut used_chars = 0usize;
+        for chunk in input.chunks {
+            let chunk_chars = chunk.chunk.content.chars().count();
+            if !selected.is_empty()
+                && used_chars.saturating_add(chunk_chars) > input.max_context_chars.max(1)
+            {
+                continue;
+            }
+            used_chars = used_chars.saturating_add(chunk_chars);
+            selected.push(chunk);
+        }
+        for (i, chunk) in selected.iter().enumerate() {
             let index = i + 1;
             let heading = if chunk.chunk.heading_path.is_empty() {
                 String::new()
@@ -53,7 +65,7 @@ impl ContextAssembler for SimpleContextAssembler {
             ));
         }
         Ok(EvidencePack {
-            chunks: input.chunks,
+            chunks: selected,
             context_text: lines.join("\n\n"),
         })
     }

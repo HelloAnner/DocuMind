@@ -1,16 +1,17 @@
 pub mod citation_resolver;
 pub mod generator;
 pub mod kernel;
-pub mod mode;
-pub mod planner;
+mod kernel_support;
 pub mod prompt;
-pub mod rewriter;
+pub mod reasoner;
+mod trace_builder;
 pub mod verifier;
 
-pub use generator::{AnswerGenerator, MockAnswerGenerator};
+#[cfg(test)]
+mod kernel_tests;
+
+pub use generator::AnswerGenerator;
 pub use kernel::{AgentKernel, AgentProgress};
-pub use mode::{ModeSelector, RuleBasedModeSelector};
-pub use planner::{RetrievalPlanner, RuleBasedRetrievalPlanner};
 pub use prompt::{BuiltinPromptRegistry, Prompt, PromptRegistry};
-pub use rewriter::{QueryRewriter, RuleBasedQueryRewriter};
-pub use verifier::{ClaimVerifier, RuleBasedClaimVerifier, VerificationReport};
+pub use reasoner::{AgentReasoner, LlmAgentReasoner};
+pub use verifier::{ClaimVerifier, LlmClaimVerifier, VerificationReport};

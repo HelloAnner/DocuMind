@@ -41,9 +41,18 @@ pub struct RetrievalInput {
     pub tenant_id: Uuid,
     pub effective_kb_ids: Vec<Uuid>,
     pub queries: Vec<String>,
+    #[serde(default)]
+    pub hypothetical_answer: Option<String>,
     pub top_k: usize,
     pub dense_top_k: usize,
     pub bm25_top_k: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RetrievalOutput {
+    pub chunks: Vec<RetrievedChunk>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,4 +66,5 @@ pub struct RerankInput {
 pub struct ContextInput {
     pub chunks: Vec<RerankedChunk>,
     pub original_query: String,
+    pub max_context_chars: usize,
 }

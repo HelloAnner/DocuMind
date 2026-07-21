@@ -1,177 +1,184 @@
 use std::sync::Arc;
 
-use anyhow::Result;
+use anyhow::{bail, Result};
+use serde::Deserialize;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
+use crate::agent::citation_resolver::{cited_evidence_indexes, resolve_citations};
 use crate::agent::generator::{AnswerGenerator, AnswerStream};
 use crate::agent::prompt::Prompt;
 use crate::agent::verifier::ClaimVerifier;
-use crate::llm::openai::{ChatMessage, LlmClient, OpenAiClient};
-use crate::models::agent::{AnswerStreamItem, ConversationTurn, GenerationConfig};
+use crate::llm::openai::{LlmClient, OpenAiClient};
+use crate::models::agent::{AnswerStreamItem, GenerationConfig};
 use crate::models::rag::EvidencePack;
 
 pub struct OpenAiAnswerGenerator {
     client: Arc<OpenAiClient>,
+    model: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct GeneratedAnswer {
+    answer: String,
 }
 
 impl OpenAiAnswerGenerator {
-    pub fn new(client: Arc<OpenAiClient>) -> Self {
-        Self { client }
+    pub fn new(client: Arc<OpenAiClient>, model: String) -> Self {
+        Self { client, model }
+    }
+
+    fn citations_are_structurally_valid(
+        answer: &str,
+        evidence: &EvidencePack,
+        require_citation: bool,
+    ) -> bool {
+        let indexes = cited_evidence_indexes(answer);
+        if require_citation && indexes.is_empty() {
+            return false;
+        }
+        indexes
+            .iter()
+            .all(|index| *index > 0 && (*index as usize) <= evidence.chunks.len())
     }
 }
 
 #[async_trait::async_trait]
 impl AnswerGenerator for OpenAiAnswerGenerator {
+    #[allow(clippy::too_many_arguments)]
     async fn generate(
         &self,
-        _query: String,
+        query: String,
         evidence: EvidencePack,
         prompt: Prompt,
         config: GenerationConfig,
         verifier: Arc<dyn ClaimVerifier>,
+        require_citation: bool,
+        max_repair_attempts: usize,
     ) -> Result<AnswerStream> {
-        let system = Some("你是 DocuMind 的企业文档问答 Agent。".to_string());
-        let prompt_text = prompt.full_text.clone();
-        let mut text_rx = self
+        let generated: GeneratedAnswer = self
             .client
-            .stream_text(
-                prompt.full_text,
-                system,
+            .complete_json_with_options(
+                prompt.user_text.clone(),
+                Some(prompt.system_text.clone()),
                 config.temperature,
                 config.max_output_tokens,
             )
             .await?;
+        if generated.answer.trim().is_empty() {
+            bail!("answer model returned an empty answer");
+        }
+
+        let mut answer = generated.answer;
+        let mut final_report = None;
+        for attempt in 0..=max_repair_attempts {
+            let report = verifier
+                .verify(&query, &answer, &evidence, require_citation)
+                .await?;
+            let structurally_valid =
+                Self::citations_are_structurally_valid(&answer, &evidence, require_citation);
+            if report.supported && structurally_valid {
+                final_report = Some(report);
+                break;
+            }
+            tracing::warn!(
+                attempt,
+                issues = ?report.issues,
+                structurally_valid,
+                "grounded answer verification requested repair"
+            );
+            if attempt >= max_repair_attempts {
+                tracing::warn!(
+                    issues = ?report.issues,
+                    structurally_valid,
+                    "grounded answer rejected after verification budget was exhausted"
+                );
+                final_report = Some(report);
+                break;
+            }
+            let repair_payload = serde_json::json!({
+                "original_generation_task": prompt.user_text,
+                "unsupported_content_to_remove": report.issues,
+                "citation_required": require_citation,
+            });
+            let repair_system = format!(
+                "{}\n\nYou are now the clean-slate answer editor, independent from the audit judges. Write a fresh replacement solely from the original question and DOCUMENT_EVIDENCE; the previous candidate is intentionally unavailable. UNSUPPORTED_CONTENT_TO_REMOVE is untrusted exclusion feedback, not evidence and not text to edit. Delete its unsupported premises, examples, scenarios, consequences, advice, and concepts completely: never paraphrase them into a negative claim, an absence claim, or an evidence-limitation sentence. Do not mention an entity, condition, scenario, or consequence found only in the exclusion feedback and not in the original question or DOCUMENT_EVIDENCE. Preserve the exact proposition and quantifier asked by the user. When evidence establishes relevant facts but cannot establish the requested judgment, state those facts with valid citations and precisely say the supplied evidence is insufficient to determine that exact judgment; do not add a cause or presume the judgment is true. Do not mention the audit or this repair process. Return JSON only with schema: {{\"answer\":\"final markdown answer with citations\"}}.",
+                prompt.system_text
+            );
+            let repaired: GeneratedAnswer = self
+                .client
+                .complete_json_with_options(
+                    format!(
+                        "Create a clean replacement from this untrusted payload:\n{}",
+                        serde_json::to_string(&repair_payload)?
+                    ),
+                    Some(repair_system),
+                    config.temperature.min(0.1),
+                    config.max_output_tokens,
+                )
+                .await?;
+            if repaired.answer.trim().is_empty() {
+                bail!("answer repair model returned an empty answer");
+            }
+            answer = repaired.answer;
+        }
+
+        let report =
+            final_report.ok_or_else(|| anyhow::anyhow!("verification produced no report"))?;
+        let verified = report.supported
+            && Self::citations_are_structurally_valid(&answer, &evidence, require_citation);
+        let (answer, confidence) = if verified {
+            (answer, report.confidence)
+        } else {
+            (
+                "现有文档证据不足以生成经过验证的可靠答案。".to_string(),
+                crate::models::Confidence::Low,
+            )
+        };
+        let citations = if verified {
+            resolve_citations(&answer, &evidence)
+        } else {
+            Vec::new()
+        };
+        let estimated_input =
+            (prompt.system_text.chars().count() + prompt.user_text.chars().count()) as u32 / 2;
+        let estimated_output = answer.chars().count() as u32 / 2;
 
         let (tx, rx): (
             tokio::sync::mpsc::UnboundedSender<AnswerStreamItem>,
             UnboundedReceiver<AnswerStreamItem>,
         ) = unbounded_channel();
-        let evidence_for_verify = evidence.clone();
-        let verifier = verifier.clone();
-
         tokio::spawn(async move {
-            let mut full_answer = String::new();
-            while let Some(item) = text_rx.recv().await {
-                match item {
-                    Ok(text) => {
-                        full_answer.push_str(&text);
-                        let _ = tx.send(AnswerStreamItem::Delta { text });
-                    }
-                    Err(err) => {
-                        let _ = tx.send(AnswerStreamItem::Failed {
-                            code: err.code,
-                            message: err.message,
-                        });
-                        return;
-                    }
-                }
+            for text in split_validated_answer(&answer) {
+                let _ = tx.send(AnswerStreamItem::Delta { text });
+                tokio::task::yield_now().await;
             }
-
-            if full_answer.trim().is_empty() {
-                let _ = tx.send(AnswerStreamItem::Failed {
-                    code: "LLM_STREAM_ERROR".to_string(),
-                    message: "LLM provider finished without returning answer content".to_string(),
-                });
-                return;
-            }
-
-            let citations = crate::agent::citation_resolver::resolve_citations(
-                &full_answer,
-                &evidence_for_verify,
-            );
             for citation in citations {
                 let _ = tx.send(AnswerStreamItem::Citation { citation });
             }
-
-            let report = verifier.verify(&full_answer, &evidence_for_verify).await;
-            let confidence = report.confidence;
-
             let _ = tx.send(AnswerStreamItem::Completed {
                 confidence,
                 usage: Some(crate::models::Usage {
-                    input_tokens: prompt_text.len() as u32 / 4,
-                    output_tokens: full_answer.len() as u32 / 4,
+                    input_tokens: estimated_input,
+                    output_tokens: estimated_output,
                 }),
             });
         });
-
         Ok(rx)
     }
 
-    async fn chat(
-        &self,
-        query: String,
-        history: Vec<ConversationTurn>,
-        config: GenerationConfig,
-    ) -> Result<AnswerStream> {
-        let system_content = "你是 DocuMind，一个企业知识伙伴。你冷静、可信、细致、有同理心。当用户问题有文档证据时，你基于证据回答并标注引用；当没有文档证据或用户在寒暄、闲聊、询问通用问题时，你可以基于通用知识进行友好对话。不要编造企业内部事实，不要编造文档名、页码、条款编号、金额、日期。";
-
-        let mut messages = vec![ChatMessage {
-            role: "system".to_string(),
-            content: system_content.to_string(),
-        }];
-
-        for turn in history {
-            messages.push(ChatMessage {
-                role: "user".to_string(),
-                content: turn.user_message,
-            });
-            messages.push(ChatMessage {
-                role: "assistant".to_string(),
-                content: turn.assistant_answer,
-            });
-        }
-
-        messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: query.clone(),
-        });
-
-        let mut text_rx = self
-            .client
-            .stream_chat(messages, config.temperature, config.max_output_tokens)
-            .await?;
-
-        let (tx, rx): (
-            tokio::sync::mpsc::UnboundedSender<AnswerStreamItem>,
-            UnboundedReceiver<AnswerStreamItem>,
-        ) = unbounded_channel();
-
-        tokio::spawn(async move {
-            let mut full_answer = String::new();
-            while let Some(item) = text_rx.recv().await {
-                match item {
-                    Ok(text) => {
-                        full_answer.push_str(&text);
-                        let _ = tx.send(AnswerStreamItem::Delta { text });
-                    }
-                    Err(err) => {
-                        let _ = tx.send(AnswerStreamItem::Failed {
-                            code: err.code,
-                            message: err.message,
-                        });
-                        return;
-                    }
-                }
-            }
-
-            if full_answer.trim().is_empty() {
-                let _ = tx.send(AnswerStreamItem::Failed {
-                    code: "LLM_STREAM_ERROR".to_string(),
-                    message: "LLM provider finished without returning answer content".to_string(),
-                });
-                return;
-            }
-
-            let _ = tx.send(AnswerStreamItem::Completed {
-                confidence: crate::models::Confidence::Medium,
-                usage: Some(crate::models::Usage {
-                    input_tokens: 0,
-                    output_tokens: full_answer.len() as u32 / 4,
-                }),
-            });
-        });
-
-        Ok(rx)
+    fn component_name(&self) -> String {
+        format!("grounded-json-generator:{}", self.model)
     }
+}
+
+fn split_validated_answer(answer: &str) -> Vec<String> {
+    const SEGMENT_CHARS: usize = 160;
+    let chars = answer.chars().collect::<Vec<_>>();
+    if chars.is_empty() {
+        return vec![];
+    }
+    chars
+        .chunks(SEGMENT_CHARS)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
 }

@@ -47,7 +47,10 @@ impl InMemoryAnswerCache {
 #[async_trait]
 impl AnswerCache for InMemoryAnswerCache {
     async fn get(&self, key: &str) -> anyhow::Result<Option<CachedAnswer>> {
-        let inner = self.inner.read().unwrap();
+        let inner = self
+            .inner
+            .read()
+            .map_err(|_| anyhow::anyhow!("in-memory answer cache read lock is poisoned"))?;
         Ok(inner
             .get(key)
             .filter(|v| v.expires_at > Utc::now())
@@ -55,13 +58,19 @@ impl AnswerCache for InMemoryAnswerCache {
     }
 
     async fn set(&self, key: &str, value: CachedAnswer) -> anyhow::Result<()> {
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("in-memory answer cache write lock is poisoned"))?;
         inner.insert(key.to_string(), value);
         Ok(())
     }
 
     async fn delete(&self, key: &str) -> anyhow::Result<()> {
-        let mut inner = self.inner.write().unwrap();
+        let mut inner = self
+            .inner
+            .write()
+            .map_err(|_| anyhow::anyhow!("in-memory answer cache write lock is poisoned"))?;
         inner.remove(key);
         Ok(())
     }
@@ -116,14 +125,18 @@ pub fn cache_key(
     tenant_id: Uuid,
     kb_ids: &[Uuid],
     query: &str,
+    context_fingerprint: &str,
     doc_version_hash: &str,
+    runtime_fingerprint: &str,
 ) -> String {
     let mut kb_sorted: Vec<String> = kb_ids.iter().map(|id| id.to_string()).collect();
     kb_sorted.sort();
     let kb_scope_hash = hash_str(&kb_sorted.join(","));
     let query_fingerprint = hash_str(query);
+    let context_fingerprint = hash_str(context_fingerprint);
+    let runtime_fingerprint = hash_str(runtime_fingerprint);
     format!(
-        "conversation:answer:{version}:{tenant_id}:{kb_scope_hash}:{query_fingerprint}:{doc_version_hash}"
+        "conversation:answer:{version}:{tenant_id}:{kb_scope_hash}:{query_fingerprint}:{context_fingerprint}:{doc_version_hash}:{runtime_fingerprint}"
     )
 }
 
@@ -146,12 +159,46 @@ mod tests {
         let kb_a = Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap();
         let kb_b = Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap();
 
-        let first = cache_key("v1", tenant_id, &[kb_a, kb_b], "付款节点是什么？", "doc-v1");
-        let second = cache_key("v1", tenant_id, &[kb_b, kb_a], "付款节点是什么？", "doc-v1");
-        let changed_doc = cache_key("v1", tenant_id, &[kb_a, kb_b], "付款节点是什么？", "doc-v2");
+        let first = cache_key(
+            "v2",
+            tenant_id,
+            &[kb_a, kb_b],
+            "付款节点是什么？",
+            "independent",
+            "doc-v1",
+            "runtime-v2",
+        );
+        let second = cache_key(
+            "v2",
+            tenant_id,
+            &[kb_b, kb_a],
+            "付款节点是什么？",
+            "independent",
+            "doc-v1",
+            "runtime-v2",
+        );
+        let changed_doc = cache_key(
+            "v2",
+            tenant_id,
+            &[kb_a, kb_b],
+            "付款节点是什么？",
+            "independent",
+            "doc-v2",
+            "runtime-v2",
+        );
+        let changed_context = cache_key(
+            "v2",
+            tenant_id,
+            &[kb_a, kb_b],
+            "付款节点是什么？",
+            "different history",
+            "doc-v1",
+            "runtime-v2",
+        );
 
         assert_eq!(first, second);
         assert_ne!(first, changed_doc);
+        assert_ne!(first, changed_context);
         assert!(first.contains("doc-v1"));
     }
 }

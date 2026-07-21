@@ -11,8 +11,8 @@ use crate::models::conversation::{
 };
 use crate::models::feedback::Feedback;
 use crate::models::message::ConversationMessage;
-use crate::models::trace::{QueryTrace, RetrievalSource, RetrievalTrace};
-use crate::models::{ConversationStatus, MessageRole, MessageStatus};
+use crate::models::trace::{QueryTrace, RetrievalTrace};
+use crate::models::{MessageRole, MessageStatus};
 
 use super::trait_repo::ConversationRepository;
 
@@ -213,20 +213,23 @@ impl ConversationRepository for SqlxConversationRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| ConversationSession {
-            id: r.try_get("id").unwrap(),
-            tenant_id: r.try_get("tenant_id").unwrap(),
-            user_id: r.try_get("user_id").unwrap(),
-            title: r.try_get("title").unwrap(),
-            kb_ids: opt_uuid_list(r.try_get("kb_ids").ok()),
-            status: r
-                .try_get::<String, _>("status")
-                .unwrap()
-                .parse()
-                .unwrap_or(ConversationStatus::Active),
-            summary: r.try_get("summary").ok(),
-            created_at: r.try_get("created_at").unwrap(),
-            updated_at: r.try_get("updated_at").unwrap(),
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let status_text: String = row.try_get("status")?;
+        let status = status_text
+            .parse()
+            .map_err(|error| anyhow::anyhow!("invalid conversation status: {error}"))?;
+        Ok(Some(ConversationSession {
+            id: row.try_get("id")?,
+            tenant_id: row.try_get("tenant_id")?,
+            user_id: row.try_get("user_id")?,
+            title: row.try_get("title")?,
+            kb_ids: opt_uuid_list(row.try_get("kb_ids").ok()),
+            status,
+            summary: row.try_get("summary")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
         }))
     }
 
@@ -249,6 +252,10 @@ impl ConversationRepository for SqlxConversationRepository {
     }
 
     async fn create_message(&self, message: ConversationMessage) -> anyhow::Result<()> {
+        let prompt_versions = message
+            .prompt_versions
+            .map(serde_json::to_value)
+            .transpose()?;
         sqlx::query(
             "INSERT INTO conversation_messages (
                 id, conversation_id, tenant_id, user_id, role, content, status,
@@ -272,7 +279,7 @@ impl ConversationRepository for SqlxConversationRepository {
         .bind(message.error_code)
         .bind(message.error_message)
         .bind(message.agent_mode.map(|m| m.to_string()))
-        .bind(message.prompt_versions.map(|p| serde_json::to_value(p).unwrap()))
+        .bind(prompt_versions)
         .bind(message.created_at)
         .bind(message.completed_at)
         .execute(&self.pool)
@@ -328,6 +335,10 @@ impl ConversationRepository for SqlxConversationRepository {
     }
 
     async fn update_message(&self, message: ConversationMessage) -> anyhow::Result<()> {
+        let prompt_versions = message
+            .prompt_versions
+            .map(serde_json::to_value)
+            .transpose()?;
         sqlx::query(
             "UPDATE conversation_messages
              SET content = $1, status = $2, parent_message_id = $3, retry_of_message_id = $4,
@@ -346,11 +357,7 @@ impl ConversationRepository for SqlxConversationRepository {
         .bind(message.error_code)
         .bind(message.error_message)
         .bind(message.agent_mode.map(|m| m.to_string()))
-        .bind(
-            message
-                .prompt_versions
-                .map(|p| serde_json::to_value(p).unwrap()),
-        )
+        .bind(prompt_versions)
         .bind(message.created_at)
         .bind(message.completed_at)
         .bind(message.id)
@@ -384,6 +391,7 @@ impl ConversationRepository for SqlxConversationRepository {
     }
 
     async fn save_query_trace(&self, trace: QueryTrace) -> anyhow::Result<()> {
+        let resolved_refs = serde_json::to_value(&trace.resolved_refs)?;
         sqlx::query(
             "INSERT INTO conversation_query_traces (
                 id, message_id, original_query, rewritten_query, keywords,
@@ -396,7 +404,7 @@ impl ConversationRepository for SqlxConversationRepository {
         .bind(trace.rewritten_query)
         .bind(&trace.keywords)
         .bind(trace.hypothetical_answer)
-        .bind(serde_json::to_value(&trace.resolved_refs).unwrap())
+        .bind(resolved_refs)
         .bind(&trace.effective_kb_ids)
         .bind(trace.rewrite_model)
         .bind(trace.created_at)
@@ -416,26 +424,27 @@ impl ConversationRepository for SqlxConversationRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| QueryTrace {
-            id: r.try_get("id").unwrap(),
-            message_id: r.try_get("message_id").unwrap(),
-            original_query: r.try_get("original_query").unwrap(),
-            rewritten_query: r.try_get("rewritten_query").ok(),
-            keywords: opt_string_list(r.try_get("keywords").ok()),
-            hypothetical_answer: r.try_get("hypothetical_answer").ok(),
-            resolved_refs: serde_json::from_value(
-                r.try_get("resolved_refs")
-                    .unwrap_or(serde_json::Value::Array(vec![])),
-            )
-            .unwrap_or_default(),
-            effective_kb_ids: opt_uuid_list(r.try_get("effective_kb_ids").ok()),
-            rewrite_model: r.try_get("rewrite_model").unwrap(),
-            created_at: r.try_get("created_at").unwrap(),
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let resolved_refs_value: serde_json::Value = row.try_get("resolved_refs")?;
+        Ok(Some(QueryTrace {
+            id: row.try_get("id")?,
+            message_id: row.try_get("message_id")?,
+            original_query: row.try_get("original_query")?,
+            rewritten_query: row.try_get("rewritten_query")?,
+            keywords: opt_string_list(row.try_get("keywords").ok()),
+            hypothetical_answer: row.try_get("hypothetical_answer")?,
+            resolved_refs: serde_json::from_value(resolved_refs_value)?,
+            effective_kb_ids: opt_uuid_list(row.try_get("effective_kb_ids").ok()),
+            rewrite_model: row.try_get("rewrite_model")?,
+            created_at: row.try_get("created_at")?,
         }))
     }
 
     async fn save_retrieval_traces(&self, traces: Vec<RetrievalTrace>) -> anyhow::Result<()> {
         for trace in traces {
+            let heading_path = serde_json::to_value(&trace.heading_path)?;
             sqlx::query(
                 "INSERT INTO conversation_retrieval_traces (
                     id, message_id, chunk_id, doc_id, source, rank, score,
@@ -449,7 +458,7 @@ impl ConversationRepository for SqlxConversationRepository {
             .bind(trace.source.to_string())
             .bind(trace.rank)
             .bind(trace.score)
-            .bind(serde_json::to_value(&trace.heading_path).unwrap())
+            .bind(heading_path)
             .bind(&trace.page_range)
             .bind(trace.content_preview)
             .execute(&self.pool)
@@ -472,25 +481,22 @@ impl ConversationRepository for SqlxConversationRepository {
 
         let mut traces = Vec::with_capacity(rows.len());
         for row in rows {
+            let source_text: String = row.try_get("source")?;
+            let source = source_text
+                .parse()
+                .map_err(|error| anyhow::anyhow!("invalid retrieval source: {error}"))?;
+            let heading_path_value: serde_json::Value = row.try_get("heading_path")?;
             traces.push(RetrievalTrace {
-                id: row.try_get("id").unwrap(),
-                message_id: row.try_get("message_id").unwrap(),
-                chunk_id: row.try_get("chunk_id").unwrap(),
-                doc_id: row.try_get("doc_id").unwrap(),
-                source: row
-                    .try_get::<String, _>("source")
-                    .unwrap()
-                    .parse()
-                    .unwrap_or(RetrievalSource::Rerank),
-                rank: row.try_get("rank").unwrap(),
-                score: row.try_get("score").unwrap(),
-                heading_path: serde_json::from_value(
-                    row.try_get("heading_path")
-                        .unwrap_or(serde_json::Value::Array(vec![])),
-                )
-                .unwrap_or_default(),
+                id: row.try_get("id")?,
+                message_id: row.try_get("message_id")?,
+                chunk_id: row.try_get("chunk_id")?,
+                doc_id: row.try_get("doc_id")?,
+                source,
+                rank: row.try_get("rank")?,
+                score: row.try_get("score")?,
+                heading_path: serde_json::from_value(heading_path_value)?,
                 page_range: opt_i32_list(row.try_get("page_range").ok()),
-                content_preview: row.try_get("content_preview").unwrap(),
+                content_preview: row.try_get("content_preview")?,
             });
         }
         Ok(traces)
@@ -498,6 +504,8 @@ impl ConversationRepository for SqlxConversationRepository {
 
     async fn save_citations(&self, citations: Vec<Citation>) -> anyhow::Result<()> {
         for citation in citations {
+            let heading_path = serde_json::to_value(&citation.heading_path)?;
+            let anchor = serde_json::to_value(&citation.anchor)?;
             sqlx::query(
                 "INSERT INTO conversation_citations (
                     id, assistant_message_id, index, chunk_id, doc_id, doc_title,
@@ -511,10 +519,10 @@ impl ConversationRepository for SqlxConversationRepository {
             .bind(citation.doc_id)
             .bind(&citation.doc_title)
             .bind(&citation.page_range)
-            .bind(serde_json::to_value(&citation.heading_path).unwrap())
+            .bind(heading_path)
             .bind(&citation.quote)
             .bind(citation.score)
-            .bind(serde_json::to_value(&citation.anchor).unwrap_or(serde_json::Value::Null))
+            .bind(anchor)
             .bind(
                 citation
                     .anchor
@@ -549,27 +557,21 @@ impl ConversationRepository for SqlxConversationRepository {
 
         let mut citations = Vec::with_capacity(rows.len());
         for row in rows {
+            let heading_path_value: serde_json::Value = row.try_get("heading_path")?;
+            let anchor_value: Option<serde_json::Value> = row.try_get("anchor")?;
             citations.push(Citation {
-                id: row.try_get("id").unwrap(),
-                assistant_message_id: row.try_get("assistant_message_id").unwrap(),
-                index: row.try_get("index").unwrap(),
-                chunk_id: row.try_get("chunk_id").unwrap(),
-                doc_id: row.try_get("doc_id").unwrap(),
-                doc_title: row.try_get("doc_title").unwrap(),
+                id: row.try_get("id")?,
+                assistant_message_id: row.try_get("assistant_message_id")?,
+                index: row.try_get("index")?,
+                chunk_id: row.try_get("chunk_id")?,
+                doc_id: row.try_get("doc_id")?,
+                doc_title: row.try_get("doc_title")?,
                 page_range: opt_i32_list(row.try_get("page_range").ok()),
-                heading_path: serde_json::from_value(
-                    row.try_get("heading_path")
-                        .unwrap_or(serde_json::Value::Array(vec![])),
-                )
-                .unwrap_or_default(),
-                quote: row.try_get("quote").unwrap(),
-                score: row.try_get("score").unwrap(),
-                source_status: row.try_get("source_status").unwrap(),
-                anchor: row
-                    .try_get::<Option<serde_json::Value>, _>("anchor")
-                    .ok()
-                    .flatten()
-                    .and_then(|value| serde_json::from_value(value).ok()),
+                heading_path: serde_json::from_value(heading_path_value)?,
+                quote: row.try_get("quote")?,
+                score: row.try_get("score")?,
+                source_status: row.try_get("source_status")?,
+                anchor: anchor_value.map(serde_json::from_value).transpose()?,
             });
         }
         Ok(citations)
@@ -605,10 +607,11 @@ impl ConversationRepository for SqlxConversationRepository {
         .fetch_optional(&self.pool)
         .await?;
 
-        Ok(row.map(|r| {
-            let value: serde_json::Value = r.try_get("trace").unwrap();
-            serde_json::from_value(value).unwrap()
-        }))
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let value: serde_json::Value = row.try_get("trace")?;
+        Ok(Some(serde_json::from_value(value)?))
     }
 
     async fn doc_version_hash(&self, tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String> {

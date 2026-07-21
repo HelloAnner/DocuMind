@@ -98,6 +98,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     let elasticsearch = check_elasticsearch(
         http_client.as_ref(),
         state.config.elasticsearch_url.as_deref(),
+        state.config.rag.embedding.index_alias.as_str(),
     )
     .await;
     let object_storage = check_object_storage(
@@ -126,7 +127,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
     )
     .await
     .with_field("model", state.config.rag.embedding.model.as_str())
-    .with_field("index", state.config.rag.embedding.index_name.as_str());
+    .with_field("index", state.config.rag.embedding.index_alias.as_str());
     let vector_consistency = match (&state.db_pool, state.config.elasticsearch_url.as_deref()) {
         (Some(pool), Some(es_url)) => crate::rag::vector_pipeline::quick_consistency(
             pool,
@@ -141,6 +142,10 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         .as_ref()
         .map(|snapshot| snapshot.consistent)
         .unwrap_or(false);
+    let reranker = DependencyCheck::ok()
+        .with_field("provider", state.config.rag.rerank.provider.as_str())
+        .with_field("model", state.config.rag.rerank.model.as_str())
+        .with_field("startup_probe", "passed");
     let ok = [
         postgres.ok,
         redis.ok,
@@ -150,6 +155,7 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         real_llm.ok,
         embedding.ok,
         vector_index_consistent,
+        reranker.ok,
     ]
     .into_iter()
     .all(|item| item);
@@ -168,7 +174,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             "rabbitmq": rabbitmq.ok,
             "real_llm": real_llm.ok,
             "embedding": embedding.ok,
-            "vector_index_consistent": vector_index_consistent
+            "vector_index_consistent": vector_index_consistent,
+            "reranker": reranker.ok
         },
         "details": {
             "postgres": postgres.into_json(),
@@ -181,7 +188,8 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
             "vector_index": match vector_consistency {
                 Ok(snapshot) => json!(snapshot),
                 Err(error) => json!({"consistent": false, "error": error})
-            }
+            },
+            "reranker": reranker.into_json()
         }
     }))
 }
@@ -196,6 +204,7 @@ async fn metrics(State(state): State<AppState>) -> Response {
     let elasticsearch = check_elasticsearch(
         http_client.as_ref(),
         state.config.elasticsearch_url.as_deref(),
+        state.config.rag.embedding.index_alias.as_str(),
     )
     .await;
     let object_storage = check_object_storage(
@@ -222,6 +231,10 @@ async fn metrics(State(state): State<AppState>) -> Response {
         "Embedding",
     )
     .await;
+    let reranker = DependencyCheck::ok()
+        .with_field("provider", state.config.rag.rerank.provider.as_str())
+        .with_field("model", state.config.rag.rerank.model.as_str())
+        .with_field("startup_probe", "passed");
 
     let mut out = String::new();
     out.push_str("# HELP documind_up Whether the DocuMind process can render metrics.\n");
@@ -237,6 +250,7 @@ async fn metrics(State(state): State<AppState>) -> Response {
         ("rabbitmq", &rabbitmq),
         ("real_llm", &real_llm),
         ("embedding", &embedding),
+        ("reranker", &reranker),
     ] {
         push_metric(
             &mut out,
@@ -561,12 +575,28 @@ async fn check_redis(client: Option<&redis::Client>) -> DependencyCheck {
 async fn check_elasticsearch(
     http_client: Option<&reqwest::Client>,
     url: Option<&str>,
+    index_name: &str,
 ) -> DependencyCheck {
     let Some(url) = present(url, "ELASTICSEARCH_URL") else {
         return DependencyCheck::failed("ELASTICSEARCH_URL is not configured");
     };
-    let endpoint = format!("{}/_cluster/health", url.trim_end_matches('/'));
-    check_http_get(http_client, &endpoint, "elasticsearch").await
+    let base = url.trim_end_matches('/');
+    let cluster_endpoint = format!("{base}/_cluster/health");
+    let cluster = check_http_get(http_client, &cluster_endpoint, "elasticsearch cluster").await;
+    if !cluster.ok {
+        return cluster.with_field("index", index_name);
+    }
+    let Some(index_name) = present(Some(index_name), "ES_INDEX_CHUNKS") else {
+        return DependencyCheck::failed("ES_INDEX_CHUNKS is not configured");
+    };
+    let mapping_endpoint = format!("{base}/{index_name}/_mapping");
+    check_http_get(
+        http_client,
+        &mapping_endpoint,
+        "elasticsearch retrieval index",
+    )
+    .await
+    .with_field("index", index_name)
 }
 
 async fn check_object_storage(
@@ -742,8 +772,7 @@ async fn config_snapshot(State(state): State<AppState>) -> impl IntoResponse {
         "retrieval": {
             "strategy": "hybrid",
             "topK": cfg.rag.retrieval.effective_top_k,
-            "rerankTopK": cfg.rag.retrieval.rrf_top_k,
-            "threshold": cfg.rag.rerank.min_score
+            "rerankTopK": cfg.rag.retrieval.rrf_top_k
         },
         "llm": {
             "use_real_llm": cfg.rag.generation.use_real_llm,

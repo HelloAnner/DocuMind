@@ -1,23 +1,25 @@
 use std::sync::Arc;
 
-use anyhow::Result;
-use tokio::sync::mpsc::unbounded_channel;
-
+use super::generator::AnswerGenerator;
+use super::kernel_support::{
+    action_name, base_trace, bounded_history, build_run, emit, evidence_observations,
+    merge_evidence, single_text_stream,
+};
+use super::prompt::PromptRegistry;
+use super::reasoner::{
+    AgentReasoner, PreviousAction, QueryUnderstanding, ReactActionKind, ReactStateView,
+};
+use super::trace_builder::{reranked_traces, retrieved_traces};
+use super::verifier::ClaimVerifier;
 use crate::models::agent::{
-    AgentRequest, AgentRun, AgentTrace, AnswerStreamItem, ConversationTurn, PromptVersions,
+    AgentRequest, AgentRun, ConversationTurn, PromptVersions, ReactStepTrace,
 };
 use crate::models::now;
-use crate::models::rag::{ContextInput, EvidencePack, RerankInput, RetrievalInput};
-use crate::models::trace::{PlanMode, RetrievalPlan, RetrievalSource, RetrievalTrace, SubQuery};
-use crate::models::{Confidence, Usage};
-
-use super::generator::{AnswerGenerator, AnswerStream};
-use super::mode::ModeSelector;
-use super::planner::RetrievalPlanner;
-use super::prompt::PromptRegistry;
-use super::rewriter::QueryRewriter;
-use super::verifier::ClaimVerifier;
+use crate::models::rag::{ContextInput, RerankInput, RerankedChunk, RetrievalInput};
+use crate::models::trace::{PlanMode, RetrievalPlan, RetrievalTrace, SubQuery};
+use crate::models::{Confidence, NoAnswerReason};
 use crate::rag::{ContextAssembler, Reranker, Retriever};
+use anyhow::Result;
 
 #[derive(Debug, Clone)]
 pub enum AgentProgress {
@@ -28,19 +30,57 @@ pub enum AgentProgress {
         rewritten_query: String,
         keywords: Vec<String>,
     },
+    ReactStepStarted {
+        step: usize,
+        action: String,
+        decision_summary: String,
+    },
+    ToolCallStarted {
+        tool_call_id: String,
+        name: String,
+        arguments: serde_json::Value,
+    },
+    ToolCallCompleted {
+        tool_call_id: String,
+        name: String,
+        result: serde_json::Value,
+    },
     RetrievalCompleted {
         chunk_count: usize,
+        warnings: Vec<String>,
     },
     RerankCompleted {
         top_chunk_ids: Vec<uuid::Uuid>,
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct PreparedAgentRequest {
+    pub request: AgentRequest,
+    pub understanding: QueryUnderstanding,
+    pub bounded_history: Vec<ConversationTurn>,
+    pub started_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl PreparedAgentRequest {
+    pub fn standalone_query(&self) -> &str {
+        &self.understanding.standalone_query
+    }
+
+    pub fn context_fingerprint_input(&self) -> Result<String> {
+        if !self.understanding.context_dependent {
+            return Ok("context-independent".to_string());
+        }
+        Ok(serde_json::to_string(&serde_json::json!({
+            "memory_summary": self.understanding.memory_summary,
+            "history": self.bounded_history,
+        }))?)
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentKernel {
-    pub mode_selector: Arc<dyn ModeSelector>,
-    pub query_rewriter: Arc<dyn QueryRewriter>,
-    pub retrieval_planner: Arc<dyn RetrievalPlanner>,
+    pub reasoner: Arc<dyn AgentReasoner>,
     pub retriever: Arc<dyn Retriever>,
     pub reranker: Arc<dyn Reranker>,
     pub context_assembler: Arc<dyn ContextAssembler>,
@@ -52,9 +92,7 @@ pub struct AgentKernel {
 impl AgentKernel {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        mode_selector: Arc<dyn ModeSelector>,
-        query_rewriter: Arc<dyn QueryRewriter>,
-        retrieval_planner: Arc<dyn RetrievalPlanner>,
+        reasoner: Arc<dyn AgentReasoner>,
         retriever: Arc<dyn Retriever>,
         reranker: Arc<dyn Reranker>,
         context_assembler: Arc<dyn ContextAssembler>,
@@ -63,9 +101,7 @@ impl AgentKernel {
         claim_verifier: Arc<dyn ClaimVerifier>,
     ) -> Self {
         Self {
-            mode_selector,
-            query_rewriter,
-            retrieval_planner,
+            reasoner,
             retriever,
             reranker,
             context_assembler,
@@ -75,342 +111,381 @@ impl AgentKernel {
         }
     }
 
-    pub async fn run(&self, req: AgentRequest) -> Result<AgentRun> {
-        self.run_with_progress(req, None).await
+    pub async fn prepare(&self, request: AgentRequest) -> Result<PreparedAgentRequest> {
+        let started_at = now();
+        let bounded_history = bounded_history(
+            &request.history,
+            request.options.runtime.max_history_turns,
+            request.options.runtime.max_history_chars,
+        );
+        let understanding = self
+            .reasoner
+            .understand(
+                &request.original_query,
+                &bounded_history,
+                request.options.allow_analyst_mode,
+            )
+            .await?;
+        Ok(PreparedAgentRequest {
+            request,
+            understanding,
+            bounded_history,
+            started_at,
+        })
     }
 
-    pub async fn run_with_progress(
+    pub async fn run(&self, request: AgentRequest) -> Result<AgentRun> {
+        let prepared = self.prepare(request).await?;
+        self.run_prepared(prepared, None).await
+    }
+
+    pub async fn run_prepared(
         &self,
-        req: AgentRequest,
+        prepared: PreparedAgentRequest,
         progress: Option<tokio::sync::mpsc::UnboundedSender<AgentProgress>>,
     ) -> Result<AgentRun> {
-        let mut mode = match req.options.mode {
-            Some(m) => m,
-            None => {
-                self.mode_selector
-                    .select(&req.original_query, &req.history)
-                    .await?
-            }
-        };
-
-        emit_progress(
+        let request = &prepared.request;
+        emit(
             &progress,
             AgentProgress::StatusUpdated {
-                status: "rewriting",
+                status: "understanding",
             },
         );
-        let rewrite = self
-            .query_rewriter
-            .rewrite(&req.original_query, &req.history, &req.effective_kb_ids)
-            .await?;
-        if mode == crate::models::agent::AgentMode::Clarifier && !rewrite.needs_clarification {
-            mode = crate::models::agent::AgentMode::Answerer;
-        }
-        emit_progress(
+        emit(
             &progress,
             AgentProgress::RewriteCompleted {
-                rewritten_query: rewrite.rewritten_query.clone(),
-                keywords: rewrite.keywords.clone(),
+                rewritten_query: prepared.understanding.standalone_query.clone(),
+                keywords: prepared.understanding.keywords.clone(),
             },
         );
 
-        let mut plan = RetrievalPlan {
-            mode: PlanMode::Single,
-            queries: vec![SubQuery {
-                query: rewrite.rewritten_query.clone(),
-                reason: "default single query".to_string(),
-            }],
-        };
-
-        let reranked: Vec<crate::models::rag::RerankedChunk>;
-        let evidence: EvidencePack;
-        let mut retrieval_traces: Vec<RetrievalTrace> = vec![];
-
-        let answer_stream: AnswerStream;
-        let mode_reason: String;
+        let mut trace = base_trace(&prepared, self);
+        let mut evidence = Vec::<RerankedChunk>::new();
+        let mut previous_actions = Vec::<PreviousAction>::new();
+        let mut react_steps = Vec::<ReactStepTrace>::new();
+        let mut retrieval_traces = Vec::<RetrievalTrace>::new();
+        let mut plan = RetrievalPlan::default();
+        let mut answer_stream = None;
         let mut no_answer_reason = None;
-        let mut prompt_versions = PromptVersions {
-            persona: "persona-v1".to_string(),
-            guardrail: "grounded-guardrail-v1".to_string(),
-            mode: format!("mode-{mode}-v1"),
-            task: "grounded-task-v1".to_string(),
-        };
 
-        if rewrite.needs_clarification {
-            mode_reason = "pronoun unclear or scope ambiguous".to_string();
-            no_answer_reason = Some(NoAnswerReason::NeedsClarification);
-            let q = rewrite
-                .clarification_question
-                .clone()
-                .unwrap_or_else(|| "能再具体说明一下吗？".to_string());
-            answer_stream =
-                single_text_stream(q, Confidence::Low, Some(NoAnswerReason::NeedsClarification));
-        } else {
-            plan = self
-                .retrieval_planner
-                .plan(&req.original_query, &rewrite)
-                .await?;
-
-            let queries: Vec<String> = plan.queries.iter().map(|q| q.query.clone()).collect();
-            emit_progress(
-                &progress,
-                AgentProgress::StatusUpdated {
-                    status: "retrieving",
-                },
-            );
-            let retrieved = self
-                .retriever
-                .retrieve(RetrievalInput {
-                    tenant_id: req.tenant_id,
-                    effective_kb_ids: req.effective_kb_ids.clone(),
-                    queries,
-                    top_k: req.options.retrieval.rrf_top_k.max(1),
-                    dense_top_k: req.options.retrieval.dense_top_k.max(1),
-                    bm25_top_k: req.options.retrieval.bm25_top_k.max(1),
-                })
-                .await?;
-            emit_progress(
-                &progress,
-                AgentProgress::RetrievalCompleted {
-                    chunk_count: retrieved.len(),
-                },
-            );
-            retrieval_traces.extend(build_retrieved_traces(req.user_message_id, &retrieved));
-
-            emit_progress(
-                &progress,
-                AgentProgress::StatusUpdated {
-                    status: "reranking",
-                },
-            );
-            reranked = if req.options.retrieval.rerank_enabled {
-                self.reranker
-                    .rerank(RerankInput {
-                        query: rewrite.rewritten_query.clone(),
-                        chunks: retrieved,
-                        top_k: req.options.retrieval.rerank_top_k.max(1),
-                    })
-                    .await?
-            } else {
-                retrieved
-                    .into_iter()
-                    .take(req.options.retrieval.rerank_top_k.max(1))
-                    .enumerate()
-                    .map(|(index, chunk)| crate::models::rag::RerankedChunk {
-                        score: chunk.score,
-                        rank: index as i32 + 1,
-                        chunk,
-                    })
-                    .collect()
+        for step in 1..=request.options.runtime.max_react_steps.max(1) {
+            let observations = evidence_observations(&evidence);
+            let state = ReactStateView {
+                original_query: &request.original_query,
+                standalone_query: &prepared.understanding.standalone_query,
+                mode: prepared.understanding.mode,
+                response_strategy: &prepared.understanding.response_strategy,
+                understanding_needs_clarification: prepared.understanding.needs_clarification,
+                proposed_clarification_question: prepared
+                    .understanding
+                    .clarification_question
+                    .as_deref(),
+                evidence: &observations,
+                previous_actions: &previous_actions,
+                current_step: step,
+                remaining_steps: request.options.runtime.max_react_steps.saturating_sub(step),
+                max_queries_per_step: request.options.runtime.max_queries_per_step,
+                hyde_enabled: request.options.runtime.hyde_enabled,
             };
-            emit_progress(
+            let decision = self.reasoner.decide(&state).await?;
+            let action_name = action_name(&decision.action).to_string();
+            emit(
                 &progress,
-                AgentProgress::RerankCompleted {
-                    top_chunk_ids: reranked.iter().map(|item| item.chunk.chunk_id).collect(),
+                AgentProgress::ReactStepStarted {
+                    step,
+                    action: action_name.clone(),
+                    decision_summary: decision.decision_summary.clone(),
                 },
             );
-            retrieval_traces.extend(build_rerank_traces(req.user_message_id, &reranked));
+            let step_started = now();
 
-            let threshold = req.options.retrieval.rerank_min_score;
-            let filtered_reranked: Vec<_> = reranked
-                .iter()
-                .filter(|item| item.score >= threshold)
-                .cloned()
-                .collect();
-
-            if filtered_reranked.is_empty() {
-                mode_reason = "no evidence: no relevant chunks above threshold".to_string();
-                no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
-                answer_stream = single_text_stream(
-                    "文档中未找到与该问题直接相关的信息。".to_string(),
-                    Confidence::Low,
-                    Some(NoAnswerReason::NoRelevantChunks),
-                );
-            } else {
-                mode_reason = format!("selected mode {mode} based on query intent");
-                evidence = self
-                    .context_assembler
-                    .assemble(ContextInput {
-                        chunks: filtered_reranked,
-                        original_query: req.original_query.clone(),
-                    })
-                    .await?;
-
-                let history_text = format_history(&req.history);
-                let prompt = self
-                    .prompt_registry
-                    .compose(
-                        mode,
-                        &req.original_query,
-                        Some(&rewrite.rewritten_query),
-                        &history_text,
-                        &evidence,
-                        &req.options,
-                    )
-                    .await?;
-                prompt_versions = PromptVersions {
-                    persona: prompt.persona_version.clone(),
-                    guardrail: prompt.guardrail_version.clone(),
-                    mode: prompt.mode_version.clone(),
-                    task: prompt.task_version.clone(),
-                };
-
-                emit_progress(
-                    &progress,
-                    AgentProgress::StatusUpdated {
-                        status: "generating",
-                    },
-                );
-                answer_stream = self
-                    .answer_generator
-                    .generate(
-                        req.original_query.clone(),
-                        evidence.clone(),
-                        prompt,
-                        req.options.generation.clone(),
-                        self.claim_verifier.clone(),
-                    )
-                    .await?;
+            match decision.action {
+                ReactActionKind::Search => {
+                    let search = decision
+                        .search
+                        .ok_or_else(|| anyhow::anyhow!("search decision has no parameters"))?;
+                    let tool_call_id = format!("knowledge_search_{step}");
+                    emit(
+                        &progress,
+                        AgentProgress::ToolCallStarted {
+                            tool_call_id: tool_call_id.clone(),
+                            name: "knowledge_search".to_string(),
+                            arguments: serde_json::json!({
+                                "queries": search.queries,
+                                "rerank_query": search.rerank_query,
+                                "uses_hyde": search.hypothetical_answer.is_some()
+                                    && request.options.runtime.hyde_enabled,
+                            }),
+                        },
+                    );
+                    emit(
+                        &progress,
+                        AgentProgress::StatusUpdated {
+                            status: "retrieving",
+                        },
+                    );
+                    let retrieval = self
+                        .retriever
+                        .retrieve(RetrievalInput {
+                            tenant_id: request.tenant_id,
+                            effective_kb_ids: request.effective_kb_ids.clone(),
+                            queries: search.queries.clone(),
+                            hypothetical_answer: request
+                                .options
+                                .runtime
+                                .hyde_enabled
+                                .then_some(search.hypothetical_answer.clone())
+                                .flatten(),
+                            top_k: request.options.retrieval.rrf_top_k.max(1),
+                            dense_top_k: request.options.retrieval.dense_top_k.max(1),
+                            bm25_top_k: request.options.retrieval.bm25_top_k.max(1),
+                        })
+                        .await?;
+                    let retrieval_warnings = retrieval.warnings;
+                    let retrieved = retrieval.chunks;
+                    retrieval_traces.extend(retrieved_traces(request.user_message_id, &retrieved));
+                    emit(
+                        &progress,
+                        AgentProgress::RetrievalCompleted {
+                            chunk_count: retrieved.len(),
+                            warnings: retrieval_warnings.clone(),
+                        },
+                    );
+                    emit(
+                        &progress,
+                        AgentProgress::StatusUpdated {
+                            status: "reranking",
+                        },
+                    );
+                    let reranked = self
+                        .reranker
+                        .rerank(RerankInput {
+                            query: search.rerank_query.clone(),
+                            chunks: retrieved,
+                            top_k: request.options.retrieval.rerank_top_k.max(1),
+                        })
+                        .await?;
+                    retrieval_traces.extend(reranked_traces(request.user_message_id, &reranked));
+                    emit(
+                        &progress,
+                        AgentProgress::RerankCompleted {
+                            top_chunk_ids: reranked
+                                .iter()
+                                .map(|item| item.chunk.chunk_id)
+                                .collect(),
+                        },
+                    );
+                    let accepted = reranked;
+                    let accepted_ids = accepted
+                        .iter()
+                        .map(|item| item.chunk.chunk_id)
+                        .collect::<Vec<_>>();
+                    let retrieved_ids = retrieval_traces
+                        .iter()
+                        .rev()
+                        .take(request.options.retrieval.rrf_top_k.max(1))
+                        .map(|item| item.chunk_id)
+                        .collect::<Vec<_>>();
+                    merge_evidence(&mut evidence, accepted);
+                    let result_summary = format!(
+                        "{} top-ranked evidence chunks were supplied for semantic coverage review",
+                        accepted_ids.len()
+                    );
+                    emit(
+                        &progress,
+                        AgentProgress::ToolCallCompleted {
+                            tool_call_id,
+                            name: "knowledge_search".to_string(),
+                            result: serde_json::json!({
+                                "accepted_chunk_count": accepted_ids.len(),
+                                "accepted_chunk_ids": accepted_ids,
+                                "accumulated_evidence_count": evidence.len(),
+                                "warnings": retrieval_warnings,
+                            }),
+                        },
+                    );
+                    for query in &search.queries {
+                        plan.queries.push(SubQuery {
+                            query: query.clone(),
+                            reason: decision.decision_summary.clone(),
+                        });
+                    }
+                    plan.mode = if plan.queries.len() > 1 {
+                        PlanMode::Multi
+                    } else {
+                        PlanMode::Single
+                    };
+                    previous_actions.push(PreviousAction {
+                        step,
+                        action: action_name.clone(),
+                        queries: search.queries.clone(),
+                        result_summary,
+                    });
+                    react_steps.push(ReactStepTrace {
+                        step,
+                        action: action_name,
+                        decision_summary: decision.decision_summary,
+                        queries: search.queries,
+                        rerank_query: Some(search.rerank_query),
+                        hypothetical_answer: search.hypothetical_answer,
+                        retrieved_chunk_ids: retrieved_ids,
+                        accepted_chunk_ids: accepted_ids,
+                        warnings: retrieval_warnings,
+                        started_at: step_started,
+                        completed_at: now(),
+                    });
+                }
+                ReactActionKind::Finish if !evidence.is_empty() => {
+                    let answer_focus = decision
+                        .answer_focus
+                        .ok_or_else(|| anyhow::anyhow!("finish decision has no answer focus"))?;
+                    let selected_evidence =
+                        select_evidence(&evidence, &decision.selected_evidence_ids)?;
+                    react_steps.push(ReactStepTrace {
+                        step,
+                        action: action_name,
+                        decision_summary: decision.decision_summary,
+                        queries: vec![],
+                        rerank_query: None,
+                        hypothetical_answer: None,
+                        retrieved_chunk_ids: vec![],
+                        accepted_chunk_ids: selected_evidence
+                            .iter()
+                            .map(|item| item.chunk.chunk_id)
+                            .collect(),
+                        warnings: vec![],
+                        started_at: step_started,
+                        completed_at: now(),
+                    });
+                    let assembled = self
+                        .context_assembler
+                        .assemble(ContextInput {
+                            chunks: selected_evidence,
+                            original_query: request.original_query.clone(),
+                            max_context_chars: request.options.runtime.max_context_chars,
+                        })
+                        .await?;
+                    let prompt = self
+                        .prompt_registry
+                        .compose(
+                            prepared.understanding.mode,
+                            &request.original_query,
+                            &prepared.understanding.standalone_query,
+                            &answer_focus,
+                            &assembled,
+                            &request.options,
+                        )
+                        .await?;
+                    trace.prompt_versions = PromptVersions {
+                        persona: prompt.persona_version.clone(),
+                        guardrail: prompt.guardrail_version.clone(),
+                        mode: prompt.mode_version.clone(),
+                        task: prompt.task_version.clone(),
+                    };
+                    emit(
+                        &progress,
+                        AgentProgress::StatusUpdated {
+                            status: "generating",
+                        },
+                    );
+                    answer_stream = Some(
+                        self.answer_generator
+                            .generate(
+                                prepared.understanding.standalone_query.clone(),
+                                assembled,
+                                prompt,
+                                request.options.generation.clone(),
+                                self.claim_verifier.clone(),
+                                request.options.require_citation,
+                                request.options.runtime.max_repair_attempts,
+                            )
+                            .await?,
+                    );
+                    trace.stop_reason = "evidence_sufficient".to_string();
+                    break;
+                }
+                ReactActionKind::Finish => {
+                    let result_summary =
+                        "finish rejected because no document evidence was observed";
+                    previous_actions.push(PreviousAction {
+                        step,
+                        action: action_name.clone(),
+                        queries: vec![],
+                        result_summary: result_summary.to_string(),
+                    });
+                    react_steps.push(ReactStepTrace {
+                        step,
+                        action: action_name,
+                        decision_summary: decision.decision_summary,
+                        queries: vec![],
+                        rerank_query: None,
+                        hypothetical_answer: None,
+                        retrieved_chunk_ids: vec![],
+                        accepted_chunk_ids: vec![],
+                        warnings: vec![result_summary.to_string()],
+                        started_at: step_started,
+                        completed_at: now(),
+                    });
+                }
+                ReactActionKind::Clarify => {
+                    let question = decision.clarification_question.ok_or_else(|| {
+                        anyhow::anyhow!("clarify decision has no clarification question")
+                    })?;
+                    react_steps.push(ReactStepTrace {
+                        step,
+                        action: action_name,
+                        decision_summary: decision.decision_summary,
+                        queries: vec![],
+                        rerank_query: None,
+                        hypothetical_answer: None,
+                        retrieved_chunk_ids: vec![],
+                        accepted_chunk_ids: vec![],
+                        warnings: vec![],
+                        started_at: step_started,
+                        completed_at: now(),
+                    });
+                    answer_stream = Some(single_text_stream(question, Confidence::Low));
+                    no_answer_reason = Some(NoAnswerReason::NeedsClarification);
+                    trace.stop_reason = "clarification_required".to_string();
+                    break;
+                }
             }
         }
 
-        let trace = AgentTrace {
-            mode,
-            mode_reason,
-            rewritten_query: Some(rewrite.rewritten_query.clone()),
-            keywords: rewrite.keywords.clone(),
-            resolved_refs: rewrite.resolved_refs.clone(),
-            retrieval_plan: plan.clone(),
-            prompt_versions,
-            model: req.options.generation.model.clone(),
-            usage: Some(Usage {
-                input_tokens: 0,
-                output_tokens: 0,
-            }),
-            started_at: now(),
-        };
-
-        Ok(AgentRun {
-            assistant_message_id: req.assistant_message_id,
-            mode,
-            rewritten_query: Some(rewrite.rewritten_query),
-            retrieval_plan: plan,
+        if answer_stream.is_none() {
+            trace.stop_reason = "react_budget_exhausted_without_sufficient_evidence".to_string();
+            no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
+            answer_stream = Some(single_text_stream(
+                "在本次检索预算内，没有找到足以可靠回答该问题的文档证据。".to_string(),
+                Confidence::Low,
+            ));
+        }
+        trace.react_steps = react_steps;
+        trace.retrieval_plan = plan.clone();
+        let answer_stream = answer_stream
+            .ok_or_else(|| anyhow::anyhow!("agent completed without an answer stream"))?;
+        Ok(build_run(
+            &prepared,
+            trace,
+            plan,
             retrieval_traces,
             answer_stream,
-            trace,
             no_answer_reason,
-        })
+        ))
     }
 }
 
-fn emit_progress(
-    progress: &Option<tokio::sync::mpsc::UnboundedSender<AgentProgress>>,
-    event: AgentProgress,
-) {
-    if let Some(tx) = progress {
-        let _ = tx.send(event);
-    }
-}
-
-fn build_retrieved_traces(
-    message_id: uuid::Uuid,
-    chunks: &[crate::models::rag::RetrievedChunk],
-) -> Vec<RetrievalTrace> {
-    chunks
+fn select_evidence(
+    evidence: &[RerankedChunk],
+    selected_ids: &[usize],
+) -> Result<Vec<RerankedChunk>> {
+    let selected = selected_ids
         .iter()
-        .enumerate()
-        .map(|(index, item)| RetrievalTrace {
-            id: uuid::Uuid::new_v4(),
-            message_id,
-            chunk_id: item.chunk_id,
-            doc_id: item.doc_id,
-            source: item.source,
-            rank: index as i32 + 1,
-            score: item.score,
-            heading_path: item.heading_path.clone(),
-            page_range: item.page_range.clone(),
-            content_preview: content_preview(&item.content),
-        })
-        .collect()
-}
-
-fn build_rerank_traces(
-    message_id: uuid::Uuid,
-    reranked: &[crate::models::rag::RerankedChunk],
-) -> Vec<RetrievalTrace> {
-    reranked
-        .iter()
-        .enumerate()
-        .map(|(index, item)| RetrievalTrace {
-            id: uuid::Uuid::new_v4(),
-            message_id,
-            chunk_id: item.chunk.chunk_id,
-            doc_id: item.chunk.doc_id,
-            source: RetrievalSource::Rerank,
-            rank: index as i32 + 1,
-            score: item.score,
-            heading_path: item.chunk.heading_path.clone(),
-            page_range: item.chunk.page_range.clone(),
-            content_preview: content_preview(&item.chunk.content),
-        })
-        .collect()
-}
-
-fn content_preview(content: &str) -> String {
-    const MAX_CHARS: usize = 500;
-    let mut preview: String = content.chars().take(MAX_CHARS).collect();
-    if content.chars().count() > MAX_CHARS {
-        preview.push_str("...");
+        .filter_map(|id| id.checked_sub(1).and_then(|index| evidence.get(index)))
+        .cloned()
+        .collect::<Vec<_>>();
+    if selected.is_empty() {
+        anyhow::bail!("finish action selected no valid document evidence");
     }
-    preview
+    Ok(selected)
 }
-
-fn single_text_stream(
-    text: String,
-    confidence: Confidence,
-    _reason: Option<NoAnswerReason>,
-) -> AnswerStream {
-    let (tx, rx) = unbounded_channel();
-    tokio::spawn(async move {
-        for segment in split_text(&text) {
-            let _ = tx.send(AnswerStreamItem::Delta { text: segment });
-        }
-        let _ = tx.send(AnswerStreamItem::Completed {
-            confidence,
-            usage: Some(Usage {
-                input_tokens: 0,
-                output_tokens: text.len() as u32,
-            }),
-        });
-    });
-    rx
-}
-
-fn split_text(text: &str) -> Vec<String> {
-    let mut segments = vec![];
-    let mut current = String::new();
-    for ch in text.chars() {
-        current.push(ch);
-        if ch == '。' || ch == '；' || ch == '？' || ch == '！' {
-            segments.push(current.clone());
-            current.clear();
-        }
-    }
-    if !current.is_empty() {
-        segments.push(current);
-    }
-    if segments.is_empty() {
-        segments.push(text.to_string());
-    }
-    segments
-}
-
-fn format_history(history: &[ConversationTurn]) -> String {
-    history
-        .iter()
-        .map(|t| format!("用户：{}\n助手：{}", t.user_message, t.assistant_answer))
-        .collect::<Vec<_>>()
-        .join("\n\n")
-}
-
-use crate::models::NoAnswerReason;

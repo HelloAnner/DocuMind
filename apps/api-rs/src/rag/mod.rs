@@ -11,5 +11,5 @@ pub mod vector_store;
 
 pub use context::{ContextAssembler, SimpleContextAssembler};
 pub use embedding::EmbeddingClientConfig;
-pub use reranker::{HttpReranker, MockReranker, Reranker};
-pub use retriever::{EsRetriever, MockRetriever, PgRetriever, Retriever};
+pub use reranker::{HttpReranker, RerankProvider, Reranker};
+pub use retriever::{EsRetriever, Retriever};

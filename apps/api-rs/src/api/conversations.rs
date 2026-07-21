@@ -18,8 +18,8 @@ use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
 use crate::auth::ActorExtractor;
 use crate::error::AppError;
 use crate::models::agent::{
-    AgentOptions, AgentRequest, AnswerStreamItem, CitationOutput, ConversationTurn,
-    RetrievalRuntimeConfig,
+    AgentOptions, AgentRequest, AgentRuntimeConfig, AnswerStreamItem, CitationOutput,
+    ConversationTurn, RetrievalRuntimeConfig, RuntimeComponents,
 };
 use crate::models::citation::Citation;
 use crate::models::conversation::{
@@ -30,7 +30,7 @@ use crate::models::message::{
     ConversationMessage, MessageListResponse, MessageResponse, RetryMessageRequest,
     SendMessageRequest,
 };
-use crate::models::trace::{QueryTrace, RetrievalSource, RetrievalTrace};
+use crate::models::trace::{QueryTrace, ResolvedRef, RetrievalSource, RetrievalTrace};
 use crate::models::{now, ActorScope, Confidence, MessageRole, MessageStatus, NoAnswerReason};
 use crate::repositories::cache_key;
 use crate::repositories::{AnswerCache, CachedAnswer, ConversationRepository};
@@ -197,6 +197,7 @@ enum SseEvent {
     RetrievalCompleted {
         message_id: Uuid,
         chunk_count: usize,
+        warnings: Vec<String>,
     },
     RerankCompleted {
         message_id: Uuid,
@@ -262,9 +263,11 @@ impl SseEvent {
             SseEvent::RetrievalCompleted {
                 message_id,
                 chunk_count,
+                warnings,
             } => json!({
                 "message_id": message_id,
                 "chunk_count": chunk_count,
+                "warnings": warnings,
             }),
             SseEvent::RerankCompleted {
                 message_id,
@@ -398,7 +401,7 @@ async fn send_message(
     let config = state.config.clone();
     let db_pool = state.db_pool.clone();
     let protocol = SseProtocol::from_headers(&headers);
-    let mut runtime_events = RuntimeEventFactory::new(
+    let mut runtime_event_factory = RuntimeEventFactory::new(
         actor.tenant_id,
         actor.user_id,
         session.id,
@@ -408,11 +411,12 @@ async fn send_message(
     send_execution_started(
         &tx2,
         protocol,
-        &mut runtime_events,
+        &mut runtime_event_factory,
         user_message.id,
         assistant_message_id,
         &content,
     );
+    let runtime_events = Arc::new(Mutex::new(runtime_event_factory));
 
     tokio::spawn(async move {
         if let Err(e) = run_agent_pipeline(
@@ -455,9 +459,75 @@ async fn run_agent_pipeline(
     effective_kb_ids: Vec<Uuid>,
     tx: tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
     protocol: SseProtocol,
-    runtime_events: RuntimeEventFactory,
+    runtime_events: Arc<Mutex<RuntimeEventFactory>>,
 ) -> Result<(), AppError> {
-    let runtime_events = Arc::new(Mutex::new(runtime_events));
+    let timeout_seconds = config.agent.total_timeout_seconds.max(1);
+    let tenant_id = actor.tenant_id;
+    let pipeline = run_agent_pipeline_inner(
+        repo.clone(),
+        cache,
+        kernel,
+        config,
+        db_pool,
+        actor,
+        conversation_id,
+        user_message_id,
+        assistant_message_id,
+        original_query,
+        effective_kb_ids,
+        tx.clone(),
+        protocol,
+        runtime_events.clone(),
+    );
+    match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), pipeline).await {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => {
+            error!(error = ?err, "agent pipeline returned an error");
+            fail_assistant_message(
+                &repo,
+                tenant_id,
+                assistant_message_id,
+                "PIPELINE_ERROR".to_string(),
+                "Agent pipeline failed; retry this message".to_string(),
+                &tx,
+                protocol,
+                &runtime_events,
+            )
+            .await
+        }
+        Err(_) => {
+            fail_assistant_message(
+                &repo,
+                tenant_id,
+                assistant_message_id,
+                "PIPELINE_TIMEOUT".to_string(),
+                format!("Agent execution exceeded {timeout_seconds} seconds"),
+                &tx,
+                protocol,
+                &runtime_events,
+            )
+            .await
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn run_agent_pipeline_inner(
+    repo: Arc<dyn ConversationRepository>,
+    cache: Arc<dyn AnswerCache>,
+    kernel: AgentKernel,
+    config: crate::config::AppConfig,
+    db_pool: Option<sqlx::PgPool>,
+    actor: ActorScope,
+    conversation_id: Uuid,
+    user_message_id: Uuid,
+    assistant_message_id: Uuid,
+    original_query: String,
+    effective_kb_ids: Vec<Uuid>,
+    tx: tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: Arc<Mutex<RuntimeEventFactory>>,
+) -> Result<(), AppError> {
     // Build history from previous completed QA pairs.
     let history = build_history(
         db_pool.as_ref(),
@@ -467,20 +537,42 @@ async fn run_agent_pipeline(
         user_message_id,
     )
     .await?;
+    let agent_req = AgentRequest {
+        tenant_id: actor.tenant_id,
+        user_id: actor.user_id,
+        conversation_id,
+        user_message_id,
+        assistant_message_id,
+        original_query: original_query.clone(),
+        effective_kb_ids: effective_kb_ids.clone(),
+        history,
+        options: agent_options_from_config(&config),
+    };
+    let prepared = kernel.prepare(agent_req).await?;
+    let context_fingerprint = prepared.context_fingerprint_input()?;
     let doc_version_hash = repo
         .doc_version_hash(actor.tenant_id, &effective_kb_ids)
         .await?;
+    let runtime_fingerprint = agent_runtime_fingerprint(&config);
 
     let cache_key = cache_key(
-        "v1",
+        "v2",
         actor.tenant_id,
         &effective_kb_ids,
-        &original_query,
+        prepared.standalone_query(),
+        &context_fingerprint,
         &doc_version_hash,
+        &runtime_fingerprint,
     );
-    let answer_cache_enabled = should_cache(&original_query);
+    let answer_cache_enabled = !prepared.understanding.time_sensitive;
     let cached_answer = if answer_cache_enabled {
-        let cached = cache.get(&cache_key).await?;
+        let cached = match cache.get(&cache_key).await {
+            Ok(value) => value,
+            Err(err) => {
+                error!("answer cache read failed; continuing without cache: {err}");
+                None
+            }
+        };
         match cached {
             Some(cached)
                 if cached_answer_valid(&repo, actor.tenant_id, &effective_kb_ids, &cached)
@@ -489,7 +581,9 @@ async fn run_agent_pipeline(
                 Some(cached)
             }
             Some(_) => {
-                cache.delete(&cache_key).await?;
+                if let Err(err) = cache.delete(&cache_key).await {
+                    error!("invalid answer cache entry could not be deleted: {err}");
+                }
                 None
             }
             None => None,
@@ -506,24 +600,44 @@ async fn run_agent_pipeline(
     let mut pipeline_retrieval_traces: Vec<RetrievalTrace> = vec![];
 
     if let Some(cached) = cached_answer {
-        mode = crate::models::agent::AgentMode::Answerer;
-        rewritten_query = Some(original_query.clone());
+        mode = prepared.understanding.mode;
+        rewritten_query = Some(prepared.standalone_query().to_string());
         trace = crate::models::agent::AgentTrace {
             mode,
-            mode_reason: "cache hit".to_string(),
+            mode_reason: "context-safe semantic cache hit".to_string(),
             rewritten_query: rewritten_query.clone(),
-            keywords: vec![original_query.clone()],
-            resolved_refs: vec![],
+            keywords: prepared.understanding.keywords.clone(),
+            resolved_refs: prepared
+                .understanding
+                .resolved_references
+                .iter()
+                .map(|reference| ResolvedRef {
+                    text: reference.text.clone(),
+                    resolved_to: reference.resolved_to.clone(),
+                    source_message_id: None,
+                    evidence_message_id: None,
+                })
+                .collect(),
             retrieval_plan: crate::models::trace::RetrievalPlan::default(),
             prompt_versions: crate::models::agent::PromptVersions {
-                persona: "persona-v1".to_string(),
-                guardrail: "grounded-guardrail-v1".to_string(),
-                mode: "mode-answerer-v1".to_string(),
-                task: "grounded-task-v1".to_string(),
+                persona: "persona-v3".to_string(),
+                guardrail: "grounded-untrusted-evidence-v19".to_string(),
+                mode: format!("mode-{}-llm-v19", mode),
+                task: "react-grounded-answer-v19".to_string(),
             },
             model: config.rag.generation.model.clone(),
             usage: None,
             started_at: now(),
+            memory_summary: prepared.understanding.memory_summary.clone(),
+            react_steps: vec![],
+            stop_reason: "cache_hit".to_string(),
+            runtime_components: RuntimeComponents {
+                reasoner: kernel.reasoner.component_name(),
+                retriever: kernel.retriever.component_name(),
+                reranker: kernel.reranker.component_name(),
+                verifier: kernel.claim_verifier.component_name(),
+            },
+            cache_key: Some(cache_key.clone()),
         };
         let (tx2, rx2) = unbounded_channel();
         tokio::spawn(async move {
@@ -559,18 +673,7 @@ async fn run_agent_pipeline(
             }
         });
 
-        let agent_req = AgentRequest {
-            tenant_id: actor.tenant_id,
-            user_id: actor.user_id,
-            conversation_id,
-            user_message_id,
-            assistant_message_id,
-            original_query: original_query.clone(),
-            effective_kb_ids: effective_kb_ids.clone(),
-            history: history.clone(),
-            options: agent_options_from_config(&config),
-        };
-        let run = match kernel.run_with_progress(agent_req, Some(progress_tx)).await {
+        let run = match kernel.run_prepared(prepared, Some(progress_tx)).await {
             Ok(run) => run,
             Err(err) => {
                 let message = err.to_string();
@@ -687,10 +790,13 @@ async fn run_agent_pipeline(
         original_query: original_query.clone(),
         rewritten_query: rewritten_query.clone(),
         keywords: trace.keywords.clone(),
-        hypothetical_answer: None,
+        hypothetical_answer: trace
+            .react_steps
+            .iter()
+            .find_map(|step| step.hypothetical_answer.clone()),
         resolved_refs: trace.resolved_refs.clone(),
         effective_kb_ids: effective_kb_ids.clone(),
-        rewrite_model: config.rag.rewrite.model.clone(),
+        rewrite_model: config.agent.reasoning_model.clone(),
         created_at: now(),
     };
     repo.save_query_trace(query_trace).await?;
@@ -699,6 +805,7 @@ async fn run_agent_pipeline(
     if let Some(u) = usage.clone() {
         trace.usage = Some(u);
     }
+    trace.cache_key = answer_cache_enabled.then_some(cache_key.clone());
 
     // Save agent trace
     repo.save_agent_trace(assistant_message_id, trace.clone())
@@ -747,7 +854,9 @@ async fn run_agent_pipeline(
             created_at: now(),
             expires_at: now() + chrono::Duration::hours(24),
         };
-        cache.set(&cache_key, cached).await?;
+        if let Err(err) = cache.set(&cache_key, cached).await {
+            error!("answer cache write failed after successful response: {err}");
+        }
     }
 
     send_answer_completed(
@@ -765,25 +874,34 @@ async fn run_agent_pipeline(
     Ok(())
 }
 
-fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> SseEvent {
+fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> Option<SseEvent> {
     match progress {
-        AgentProgress::StatusUpdated { status } => SseEvent::StatusUpdated { message_id, status },
+        AgentProgress::StatusUpdated { status } => {
+            Some(SseEvent::StatusUpdated { message_id, status })
+        }
         AgentProgress::RewriteCompleted {
             rewritten_query,
             keywords,
-        } => SseEvent::RewriteCompleted {
+        } => Some(SseEvent::RewriteCompleted {
             message_id,
             rewritten_query,
             keywords,
-        },
-        AgentProgress::RetrievalCompleted { chunk_count } => SseEvent::RetrievalCompleted {
+        }),
+        AgentProgress::RetrievalCompleted {
+            chunk_count,
+            warnings,
+        } => Some(SseEvent::RetrievalCompleted {
             message_id,
             chunk_count,
-        },
-        AgentProgress::RerankCompleted { top_chunk_ids } => SseEvent::RerankCompleted {
+            warnings,
+        }),
+        AgentProgress::RerankCompleted { top_chunk_ids } => Some(SseEvent::RerankCompleted {
             message_id,
             top_chunk_ids,
-        },
+        }),
+        AgentProgress::ReactStepStarted { .. }
+        | AgentProgress::ToolCallStarted { .. }
+        | AgentProgress::ToolCallCompleted { .. } => None,
     }
 }
 
@@ -820,6 +938,9 @@ async fn fail_assistant_message(
         .get_message(tenant_id, assistant_message_id)
         .await?
         .ok_or_else(AppError::message_not_found)?;
+    if msg.status != MessageStatus::Answering {
+        return Ok(());
+    }
     msg.status = MessageStatus::Failed;
     msg.error_code = Some(code);
     msg.error_message = Some(message);
@@ -912,90 +1033,92 @@ fn send_progress_event(
     progress: AgentProgress,
 ) {
     if protocol == SseProtocol::Legacy {
-        let event = progress_to_sse_event(message_id, progress);
-        send_legacy_event(tx, event);
+        if let Some(event) = progress_to_sse_event(message_id, progress) {
+            send_legacy_event(tx, event);
+        }
         return;
     }
 
     match progress {
-        AgentProgress::StatusUpdated { status } => {
-            let (tool_call_id, name, display) = atom_step_for_status(status);
-            send_runtime_step_event(
-                tx,
-                runtime_events,
-                "tool.call.started",
-                &tool_call_id,
-                &name,
-                json!({
-                    "tool_call_id": tool_call_id,
-                    "name": name,
-                    "arguments": { "stage": status },
-                    "display_name": display,
-                }),
-            );
-        }
+        AgentProgress::StatusUpdated { status } => send_runtime_event(
+            tx,
+            runtime_events,
+            "response.stage",
+            json!({ "stage": status }),
+        ),
         AgentProgress::RewriteCompleted {
             rewritten_query,
             keywords,
+        } => send_runtime_event(
+            tx,
+            runtime_events,
+            "agent.query_understood",
+            json!({
+                "standalone_query": rewritten_query,
+                "keywords": keywords,
+            }),
+        ),
+        AgentProgress::ReactStepStarted {
+            step,
+            action,
+            decision_summary,
+        } => send_runtime_event(
+            tx,
+            runtime_events,
+            "agent.step.started",
+            json!({
+                "step": step,
+                "action": action,
+                "decision_summary": decision_summary,
+            }),
+        ),
+        AgentProgress::ToolCallStarted {
+            tool_call_id,
+            name,
+            arguments,
+        } => send_runtime_step_event(
+            tx,
+            runtime_events,
+            "tool.call.started",
+            &tool_call_id,
+            &name,
+            json!({
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "arguments": arguments,
+            }),
+        ),
+        AgentProgress::ToolCallCompleted {
+            tool_call_id,
+            name,
+            result,
         } => send_runtime_step_event(
             tx,
             runtime_events,
             "tool.call.result",
-            "query_rewrite",
-            "query_rewrite",
+            &tool_call_id,
+            &name,
             json!({
-                "tool_call_id": "query_rewrite",
-                "name": "query_rewrite",
+                "tool_call_id": tool_call_id,
+                "name": name,
                 "status": "succeeded",
-                "result": rewritten_query,
-                "display": {
-                    "component": "DocuMindStageCard",
-                    "data": {
-                        "label": "查询改写",
-                        "keywords": keywords,
-                    }
-                }
+                "result": result,
             }),
         ),
-        AgentProgress::RetrievalCompleted { chunk_count } => send_runtime_step_event(
+        AgentProgress::RetrievalCompleted {
+            chunk_count,
+            warnings,
+        } => send_runtime_event(
             tx,
             runtime_events,
-            "tool.call.result",
-            "hybrid_retrieval",
-            "hybrid_retrieval",
-            json!({
-                "tool_call_id": "hybrid_retrieval",
-                "name": "hybrid_retrieval",
-                "status": "succeeded",
-                "result": format!("retrieved {chunk_count} chunks"),
-                "display": {
-                    "component": "DocuMindStageCard",
-                    "data": {
-                        "label": "混合检索",
-                        "chunk_count": chunk_count,
-                    }
-                }
-            }),
+            "retrieval.completed",
+            json!({ "chunk_count": chunk_count, "warnings": warnings }),
         ),
-        AgentProgress::RerankCompleted { top_chunk_ids } => send_runtime_step_event(
+        AgentProgress::RerankCompleted { top_chunk_ids } => send_runtime_event(
             tx,
             runtime_events,
-            "tool.call.result",
-            "rerank",
-            "rerank",
-            json!({
-                "tool_call_id": "rerank",
-                "name": "rerank",
-                "status": "succeeded",
-                "result": "rerank completed",
-                "display": {
-                    "component": "DocuMindStageCard",
-                    "data": {
-                        "label": "重排序",
-                        "top_chunk_ids": top_chunk_ids,
-                    }
-                }
-            }),
+            "rerank.completed",
+            json!({ "top_chunk_ids": top_chunk_ids }),
         ),
     }
 }
@@ -1140,33 +1263,6 @@ fn send_execution_cancelled(
     }
 }
 
-fn atom_step_for_status(status: &str) -> (String, String, &'static str) {
-    match status {
-        "rewriting" => (
-            "query_rewrite".to_string(),
-            "query_rewrite".to_string(),
-            "查询改写",
-        ),
-        "retrieving" => (
-            "hybrid_retrieval".to_string(),
-            "hybrid_retrieval".to_string(),
-            "混合检索",
-        ),
-        "reranking" => ("rerank".to_string(), "rerank".to_string(), "重排序"),
-        "generating" => (
-            "answer_generation".to_string(),
-            "answer_generation".to_string(),
-            "生成答案",
-        ),
-        _ => (status.to_string(), status.to_string(), "执行步骤"),
-    }
-}
-
-fn should_cache(query: &str) -> bool {
-    let forbidden = ["最新", "今天", "刚刚", "现在"];
-    !forbidden.iter().any(|w| query.contains(w))
-}
-
 async fn cached_answer_valid(
     repo: &Arc<dyn ConversationRepository>,
     tenant_id: Uuid,
@@ -1201,9 +1297,35 @@ fn agent_options_from_config(config: &crate::config::AppConfig) -> AgentOptions 
             rrf_top_k: config.rag.retrieval.rrf_top_k,
             rerank_top_k: config.rag.retrieval.effective_top_k,
             rerank_enabled: config.rag.rerank.enabled,
-            rerank_min_score: config.rag.rerank.min_score,
+        },
+        runtime: AgentRuntimeConfig {
+            hyde_enabled: config.rag.rewrite.hyde_enabled,
+            max_react_steps: config.agent.max_react_steps,
+            max_queries_per_step: config.agent.max_queries_per_step,
+            max_history_turns: config.agent.max_history_turns,
+            max_history_chars: config.agent.max_history_chars,
+            max_context_chars: config.agent.max_context_chars,
+            max_repair_attempts: config.agent.max_repair_attempts,
         },
     }
+}
+
+fn agent_runtime_fingerprint(config: &crate::config::AppConfig) -> String {
+    json!({
+        "agent_contract": "llm-react-v3",
+        "reasoning_model": config.agent.reasoning_model,
+        "generation_model": config.rag.generation.model,
+        "embedding_model": config.rag.embedding.model,
+        "rerank_provider": config.rag.rerank.provider,
+        "rerank_model": config.rag.rerank.model,
+        "hyde_enabled": config.rag.rewrite.hyde_enabled,
+        "max_react_steps": config.agent.max_react_steps,
+        "max_queries_per_step": config.agent.max_queries_per_step,
+        "max_context_chars": config.agent.max_context_chars,
+        "require_citation": config.rag.citation.require_citation,
+        "verify_claims": config.rag.citation.verify_claims,
+    })
+    .to_string()
 }
 
 fn citation_retrieval_traces(
@@ -1436,7 +1558,7 @@ async fn retry_message(
     let (tx, rx) = unbounded_channel::<Result<Event, Infallible>>();
     let tx2 = tx.clone();
     let protocol = SseProtocol::from_headers(&headers);
-    let mut runtime_events = RuntimeEventFactory::new(
+    let mut runtime_event_factory = RuntimeEventFactory::new(
         actor.tenant_id,
         actor.user_id,
         session.id,
@@ -1445,11 +1567,12 @@ async fn retry_message(
     send_execution_started(
         &tx2,
         protocol,
-        &mut runtime_events,
+        &mut runtime_event_factory,
         parent_id,
         assistant_message_id,
         &user_message.content,
     );
+    let runtime_events = Arc::new(Mutex::new(runtime_event_factory));
 
     let repo = state.repository.clone();
     let cache = state.cache.clone();
@@ -1515,30 +1638,13 @@ async fn submit_feedback(
     };
     state.repository.save_feedback(feedback.clone()).await?;
 
-    // Negative feedback invalidates the cache key for this answer's query scope.
+    // Negative feedback invalidates the exact context- and runtime-aware cache entry.
     if feedback.rating == crate::models::feedback::Rating::Down {
-        if let Some(parent_id) = message.parent_message_id {
-            if let Ok(Some(parent)) = state
-                .repository
-                .get_message(actor.tenant_id, parent_id)
-                .await
-            {
-                let kb_scope = match state.repository.get_query_trace(parent_id).await {
-                    Ok(Some(trace)) if !trace.effective_kb_ids.is_empty() => trace.effective_kb_ids,
-                    _ => session.kb_ids.clone(),
-                };
-                let doc_version_hash = state
-                    .repository
-                    .doc_version_hash(actor.tenant_id, &kb_scope)
-                    .await?;
-                let cache_key = cache_key(
-                    "v1",
-                    actor.tenant_id,
-                    &kb_scope,
-                    &parent.content,
-                    &doc_version_hash,
-                );
-                let _ = state.cache.delete(&cache_key).await;
+        if let Some(trace) = state.repository.get_agent_trace(message_id).await? {
+            if let Some(cache_key) = trace.cache_key {
+                if let Err(err) = state.cache.delete(&cache_key).await {
+                    error!("negative-feedback cache invalidation failed: {err}");
+                }
             }
         }
     }

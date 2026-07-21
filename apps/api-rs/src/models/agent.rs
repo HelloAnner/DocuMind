@@ -88,6 +88,8 @@ pub struct AgentOptions {
     pub generation: GenerationConfig,
     #[serde(default)]
     pub retrieval: RetrievalRuntimeConfig,
+    #[serde(default)]
+    pub runtime: AgentRuntimeConfig,
 }
 
 fn default_tone() -> String {
@@ -111,6 +113,58 @@ impl Default for AgentOptions {
             require_citation: true,
             generation: GenerationConfig::default(),
             retrieval: RetrievalRuntimeConfig::default(),
+            runtime: AgentRuntimeConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentRuntimeConfig {
+    #[serde(default = "default_true")]
+    pub hyde_enabled: bool,
+    #[serde(default = "default_max_react_steps")]
+    pub max_react_steps: usize,
+    #[serde(default = "default_max_queries_per_step")]
+    pub max_queries_per_step: usize,
+    #[serde(default = "default_max_history_turns")]
+    pub max_history_turns: usize,
+    #[serde(default = "default_max_history_chars")]
+    pub max_history_chars: usize,
+    #[serde(default = "default_max_context_chars")]
+    pub max_context_chars: usize,
+    #[serde(default = "default_max_repair_attempts")]
+    pub max_repair_attempts: usize,
+}
+
+fn default_max_react_steps() -> usize {
+    4
+}
+fn default_max_queries_per_step() -> usize {
+    4
+}
+fn default_max_history_turns() -> usize {
+    12
+}
+fn default_max_history_chars() -> usize {
+    24_000
+}
+fn default_max_context_chars() -> usize {
+    30_000
+}
+fn default_max_repair_attempts() -> usize {
+    3
+}
+
+impl Default for AgentRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            hyde_enabled: true,
+            max_react_steps: default_max_react_steps(),
+            max_queries_per_step: default_max_queries_per_step(),
+            max_history_turns: default_max_history_turns(),
+            max_history_chars: default_max_history_chars(),
+            max_context_chars: default_max_context_chars(),
+            max_repair_attempts: default_max_repair_attempts(),
         }
     }
 }
@@ -157,8 +211,6 @@ pub struct RetrievalRuntimeConfig {
     pub rerank_top_k: usize,
     #[serde(default = "default_true")]
     pub rerank_enabled: bool,
-    #[serde(default = "default_rerank_min_score")]
-    pub rerank_min_score: f64,
 }
 
 fn default_dense_top_k() -> usize {
@@ -173,10 +225,6 @@ fn default_rrf_top_k() -> usize {
 fn default_rerank_top_k() -> usize {
     5
 }
-fn default_rerank_min_score() -> f64 {
-    0.3
-}
-
 impl Default for RetrievalRuntimeConfig {
     fn default() -> Self {
         Self {
@@ -185,7 +233,6 @@ impl Default for RetrievalRuntimeConfig {
             rrf_top_k: default_rrf_top_k(),
             rerank_top_k: default_rerank_top_k(),
             rerank_enabled: true,
-            rerank_min_score: default_rerank_min_score(),
         }
     }
 }
@@ -251,6 +298,49 @@ pub struct AgentTrace {
     pub model: String,
     pub usage: Option<Usage>,
     pub started_at: DateTime<Utc>,
+    #[serde(default)]
+    pub memory_summary: String,
+    #[serde(default)]
+    pub react_steps: Vec<ReactStepTrace>,
+    #[serde(default)]
+    pub stop_reason: String,
+    #[serde(default)]
+    pub runtime_components: RuntimeComponents,
+    #[serde(default)]
+    pub cache_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RuntimeComponents {
+    #[serde(default)]
+    pub reasoner: String,
+    #[serde(default)]
+    pub retriever: String,
+    #[serde(default)]
+    pub reranker: String,
+    #[serde(default)]
+    pub verifier: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactStepTrace {
+    pub step: usize,
+    pub action: String,
+    pub decision_summary: String,
+    #[serde(default)]
+    pub queries: Vec<String>,
+    #[serde(default)]
+    pub rerank_query: Option<String>,
+    #[serde(default)]
+    pub hypothetical_answer: Option<String>,
+    #[serde(default)]
+    pub retrieved_chunk_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub accepted_chunk_ids: Vec<Uuid>,
+    #[serde(default)]
+    pub warnings: Vec<String>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

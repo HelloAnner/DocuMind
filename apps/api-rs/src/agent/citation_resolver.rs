@@ -11,25 +11,17 @@ const MAX_CITATIONS: usize = 6;
 
 pub fn resolve_citations(answer: &str, evidence: &EvidencePack) -> Vec<CitationOutput> {
     let cited_indexes = cited_evidence_indexes(answer);
+    if cited_indexes.is_empty() {
+        return vec![];
+    }
     let mut selected = Vec::new();
 
     for (evidence_index, chunk) in evidence.chunks.iter().enumerate() {
         let one_based = evidence_index as i32 + 1;
-        if !cited_indexes.is_empty() && !cited_indexes.contains(&one_based) {
+        if !cited_indexes.contains(&one_based) {
             continue;
         }
         selected.push((one_based, chunk));
-    }
-
-    if selected.is_empty() && cited_indexes.is_empty() {
-        selected.extend(
-            evidence
-                .chunks
-                .iter()
-                .take(3)
-                .enumerate()
-                .map(|(index, chunk)| (index as i32 + 1, chunk)),
-        );
     }
 
     let mut by_key: HashMap<String, CitationOutput> = HashMap::new();
@@ -72,7 +64,7 @@ pub fn resolve_citations(answer: &str, evidence: &EvidencePack) -> Vec<CitationO
         .collect()
 }
 
-fn cited_evidence_indexes(answer: &str) -> BTreeSet<i32> {
+pub fn cited_evidence_indexes(answer: &str) -> BTreeSet<i32> {
     let mut indexes = BTreeSet::new();
     let mut chars = answer.chars().peekable();
 
@@ -80,23 +72,20 @@ fn cited_evidence_indexes(answer: &str) -> BTreeSet<i32> {
         if ch != '[' {
             continue;
         }
-        let mut digits = String::new();
+        let mut marker = String::new();
         while let Some(next) = chars.peek().copied() {
-            if next.is_ascii_digit() {
-                digits.push(next);
-                chars.next();
-            } else {
+            chars.next();
+            if next == ']' {
                 break;
             }
+            marker.push(next);
         }
-        if digits.is_empty() {
-            continue;
-        }
-        if chars.next() != Some(']') {
-            continue;
-        }
-        if let Ok(index) = digits.parse::<i32>() {
-            indexes.insert(index);
+        for part in marker.split(',') {
+            if let Ok(index) = part.trim().parse::<i32>() {
+                if index > 0 {
+                    indexes.insert(index);
+                }
+            }
         }
     }
 
@@ -239,5 +228,63 @@ impl RetrievedChunkExt for crate::models::rag::RetrievedChunk {
             .get("source_type")
             .and_then(|value| value.as_str())
             .unwrap_or("paragraph")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::rag::RetrievedChunk;
+    use crate::models::trace::RetrievalSource;
+
+    #[test]
+    fn parses_adjacent_and_grouped_citation_markers() {
+        assert_eq!(
+            cited_evidence_indexes("结论 [1, 2][3]"),
+            BTreeSet::from([1, 2, 3])
+        );
+    }
+
+    #[test]
+    fn answer_without_markers_does_not_receive_automatic_citations() {
+        let evidence = EvidencePack {
+            chunks: vec![evidence_chunk()],
+            context_text: "evidence".to_string(),
+        };
+        assert!(resolve_citations("没有引用标记的答案", &evidence).is_empty());
+    }
+
+    #[test]
+    fn out_of_range_markers_do_not_map_to_another_chunk() {
+        let evidence = EvidencePack {
+            chunks: vec![evidence_chunk()],
+            context_text: "evidence".to_string(),
+        };
+        assert!(resolve_citations("错误引用 [2]", &evidence).is_empty());
+    }
+
+    fn evidence_chunk() -> RerankedChunk {
+        RerankedChunk {
+            chunk: RetrievedChunk {
+                chunk_id: Uuid::new_v4(),
+                doc_id: Uuid::new_v4(),
+                doc_title: "测试文档".to_string(),
+                file_type: "docx".to_string(),
+                content: "可核验的文档事实".to_string(),
+                heading_path: vec![],
+                page_range: vec![1],
+                block_ids: vec![],
+                table_ids: vec![],
+                anchor_ids: vec![],
+                primary_anchor_id: None,
+                anchor_quality: "page_only".to_string(),
+                primary_anchor: None,
+                metadata: serde_json::json!({}),
+                score: 0.9,
+                source: RetrievalSource::Rrf,
+            },
+            score: 0.9,
+            rank: 1,
+        }
     }
 }

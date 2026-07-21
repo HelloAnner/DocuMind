@@ -96,6 +96,16 @@ pub trait LlmClient: Send + Sync {
     where
         T: serde::de::DeserializeOwned;
 
+    async fn complete_json_with_options<T>(
+        &self,
+        prompt: String,
+        system: Option<String>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned;
+
     async fn stream_text(
         &self,
         prompt: String,
@@ -135,6 +145,50 @@ impl OpenAiClient {
     fn auth_header(&self) -> String {
         format!("Bearer {}", self.config.api_key)
     }
+
+    async fn request_json<T>(
+        &self,
+        prompt: String,
+        system: Option<String>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let mut messages = vec![];
+        if let Some(system) = system {
+            messages.push(ChatMessage {
+                role: "system".to_string(),
+                content: system,
+            });
+        }
+        messages.push(ChatMessage {
+            role: "user".to_string(),
+            content: prompt,
+        });
+        let request = ChatCompletionRequest {
+            model: self.config.model.clone(),
+            messages,
+            temperature,
+            max_tokens,
+            stream: false,
+        };
+        let response = self
+            .http
+            .post(self.chat_url())
+            .header("Authorization", self.auth_header())
+            .header("Content-Type", "application/json")
+            .json(&request)
+            .send()
+            .await?
+            .error_for_status()?;
+        let payload: Value = response.json().await?;
+        let content = payload["choices"][0]["message"]["content"]
+            .as_str()
+            .ok_or_else(|| anyhow!("missing content in completion response"))?;
+        parse_json_completion(content)
+    }
 }
 
 #[async_trait]
@@ -143,44 +197,21 @@ impl LlmClient for OpenAiClient {
     where
         T: serde::de::DeserializeOwned,
     {
-        let mut messages = vec![];
-        if let Some(s) = system {
-            messages.push(ChatMessage {
-                role: "system".to_string(),
-                content: s,
-            });
-        }
-        messages.push(ChatMessage {
-            role: "user".to_string(),
-            content: prompt,
-        });
+        self.request_json(prompt, system, 0.2, 2048).await
+    }
 
-        let req = ChatCompletionRequest {
-            model: self.config.model.clone(),
-            messages,
-            temperature: 0.2,
-            max_tokens: 2048,
-            stream: false,
-        };
-
-        let resp = self
-            .http
-            .post(self.chat_url())
-            .header("Authorization", self.auth_header())
-            .header("Content-Type", "application/json")
-            .json(&req)
-            .send()
-            .await?
-            .error_for_status()?;
-
-        let json: Value = resp.json().await?;
-        let content = json["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| anyhow!("missing content in completion response"))?;
-
-        // Some providers wrap JSON in markdown fences; strip them.
-        let cleaned = strip_json_fences(content);
-        Ok(serde_json::from_str(&cleaned)?)
+    async fn complete_json_with_options<T>(
+        &self,
+        prompt: String,
+        system: Option<String>,
+        temperature: f64,
+        max_tokens: u32,
+    ) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        self.request_json(prompt, system, temperature, max_tokens)
+            .await
     }
 
     async fn stream_text(
@@ -389,6 +420,64 @@ fn strip_json_fences(text: &str) -> String {
     trimmed.to_string()
 }
 
+fn parse_json_completion<T>(text: &str) -> Result<T>
+where
+    T: serde::de::DeserializeOwned,
+{
+    let stripped = strip_json_fences(text);
+    match serde_json::from_str(&stripped) {
+        Ok(value) => Ok(value),
+        Err(original_error) => {
+            let repaired = escape_control_characters_in_json_strings(&stripped);
+            serde_json::from_str(&repaired).map_err(|repaired_error| {
+                anyhow!(
+                    "invalid JSON completion: {original_error}; control-character repair also failed: {repaired_error}"
+                )
+            })
+        }
+    }
+}
+
+fn escape_control_characters_in_json_strings(text: &str) -> String {
+    let mut output = String::with_capacity(text.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for character in text.chars() {
+        if !in_string {
+            output.push(character);
+            if character == '"' {
+                in_string = true;
+            }
+            continue;
+        }
+        if escaped {
+            output.push(character);
+            escaped = false;
+            continue;
+        }
+        match character {
+            '\\' => {
+                output.push(character);
+                escaped = true;
+            }
+            '"' => {
+                output.push(character);
+                in_string = false;
+            }
+            '\n' => output.push_str("\\n"),
+            '\r' => output.push_str("\\r"),
+            '\t' => output.push_str("\\t"),
+            '\u{0008}' => output.push_str("\\b"),
+            '\u{000C}' => output.push_str("\\f"),
+            control if control <= '\u{001F}' => {
+                output.push_str(&format!("\\u{:04X}", control as u32));
+            }
+            _ => output.push(character),
+        }
+    }
+    output
+}
+
 use futures::StreamExt;
 
 #[cfg(test)]
@@ -399,6 +488,20 @@ mod tests {
     fn strips_json_fences() {
         let raw = "```json\n{\"a\":1}\n```";
         assert_eq!(super::strip_json_fences(raw), "{\"a\":1}");
+    }
+
+    #[test]
+    fn repairs_unescaped_control_characters_inside_json_strings() {
+        let raw = "{\"answer\":\"第一行\n第二行\t内容\"}";
+        let value: Value = parse_json_completion(raw).expect("completion should be repaired");
+        assert_eq!(value["answer"], "第一行\n第二行\t内容");
+    }
+
+    #[test]
+    fn preserves_pretty_json_whitespace_outside_strings() {
+        let raw = "{\n  \"answer\": \"内容\"\n}";
+        let value: Value = parse_json_completion(raw).expect("pretty JSON should parse");
+        assert_eq!(value["answer"], "内容");
     }
 
     #[test]

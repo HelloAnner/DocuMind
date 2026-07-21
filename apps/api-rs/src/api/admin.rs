@@ -245,9 +245,9 @@ async fn runtime_config(
             "rrf_top_k": cfg.rag.retrieval.rrf_top_k,
             "effective_top_k": cfg.rag.retrieval.effective_top_k,
             "rerank_enabled": cfg.rag.rerank.enabled,
+            "rerank_provider": cfg.rag.rerank.provider,
             "rerank_model": cfg.rag.rerank.model,
-            "rerank_api_configured": cfg.rag.rerank.api_url.as_ref().is_some_and(|url| !url.trim().is_empty()),
-            "rerank_min_score": cfg.rag.rerank.min_score
+            "rerank_api_configured": cfg.rag.rerank.api_url.as_ref().is_some_and(|url| !url.trim().is_empty())
         },
         "llm": {
             "provider": llm_provider,
@@ -260,6 +260,17 @@ async fn runtime_config(
             "streaming_enabled": cfg.rag.generation.use_real_llm,
             "rewrite_enabled": cfg.rag.rewrite.enabled,
             "rewrite_model": cfg.rag.rewrite.model
+        },
+        "agent": {
+            "runtime": "llm_react",
+            "reasoning_model": cfg.agent.reasoning_model,
+            "max_react_steps": cfg.agent.max_react_steps,
+            "max_queries_per_step": cfg.agent.max_queries_per_step,
+            "max_history_turns": cfg.agent.max_history_turns,
+            "max_history_chars": cfg.agent.max_history_chars,
+            "max_context_chars": cfg.agent.max_context_chars,
+            "max_repair_attempts": cfg.agent.max_repair_attempts,
+            "total_timeout_seconds": cfg.agent.total_timeout_seconds
         }
     })))
 }

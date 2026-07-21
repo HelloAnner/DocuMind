@@ -95,10 +95,10 @@ pub struct RetrievalConfig {
 #[derive(Debug, Clone)]
 pub struct RerankConfig {
     pub enabled: bool,
+    pub provider: String,
     pub model: String,
     pub api_url: Option<String>,
     pub api_key: Option<String>,
-    pub min_score: f64,
 }
 
 #[derive(Debug, Clone)]
@@ -134,12 +134,20 @@ pub struct CitationConfig {
 
 #[derive(Debug, Clone)]
 pub struct AgentConfig {
+    pub reasoning_model: String,
     pub default_tone: String,
     pub proactive_followup: bool,
     pub max_followup_suggestions: usize,
     pub allow_analyst_mode: bool,
     pub require_citation_for_analysis: bool,
     pub clarification_style: String,
+    pub max_react_steps: usize,
+    pub max_queries_per_step: usize,
+    pub max_history_turns: usize,
+    pub max_history_chars: usize,
+    pub max_context_chars: usize,
+    pub max_repair_attempts: usize,
+    pub total_timeout_seconds: u64,
 }
 
 pub fn load_config() -> Result<AppConfig> {
@@ -277,18 +285,14 @@ pub fn load_config() -> Result<AppConfig> {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(true),
-            model: env::var("RAG_RERANK_MODEL")
-                .unwrap_or_else(|_| "bge-reranker-v2-m3".to_string()),
+            provider: env::var("RAG_RERANK_PROVIDER").unwrap_or_else(|_| "dashscope".to_string()),
+            model: env::var("RAG_RERANK_MODEL").unwrap_or_else(|_| "gte-rerank-v2".to_string()),
             api_url: env::var("RAG_RERANK_API_URL")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
             api_key: env::var("RAG_RERANK_API_KEY")
                 .ok()
                 .filter(|v| !v.trim().is_empty()),
-            min_score: env::var("RAG_RERANK_THRESHOLD")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.3),
         },
         embedding: EmbeddingConfig {
             model: env::var("EMBED_MODEL")
@@ -363,6 +367,8 @@ pub fn load_config() -> Result<AppConfig> {
     };
 
     let agent = AgentConfig {
+        reasoning_model: env::var("AGENT_REASONING_MODEL")
+            .unwrap_or_else(|_| rag.generation.model.clone()),
         default_tone: env::var("AGENT_DEFAULT_TONE").unwrap_or_else(|_| "concise_warm".to_string()),
         proactive_followup: env::var("AGENT_PROACTIVE_FOLLOWUP")
             .ok()
@@ -382,6 +388,16 @@ pub fn load_config() -> Result<AppConfig> {
             .unwrap_or(true),
         clarification_style: env::var("AGENT_CLARIFICATION_STYLE")
             .unwrap_or_else(|_| "short".to_string()),
+        max_react_steps: env_usize("AGENT_MAX_REACT_STEPS", 4).clamp(2, 8),
+        max_queries_per_step: env_usize("AGENT_MAX_QUERIES_PER_STEP", 4).clamp(1, 8),
+        max_history_turns: env_usize("AGENT_MAX_HISTORY_TURNS", 12).clamp(1, 50),
+        max_history_chars: env_usize("AGENT_MAX_HISTORY_CHARS", 24_000).clamp(2_000, 100_000),
+        max_context_chars: env_usize("AGENT_MAX_CONTEXT_CHARS", 30_000).clamp(4_000, 120_000),
+        max_repair_attempts: env_usize("AGENT_MAX_REPAIR_ATTEMPTS", 3).clamp(0, 5),
+        total_timeout_seconds: env::var("AGENT_TOTAL_TIMEOUT_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(240),
     };
 
     let config = AppConfig {
@@ -500,6 +516,18 @@ impl AppConfig {
         {
             missing.push("EMBED_API_KEY");
         }
+        if !self.rag.rewrite.enabled {
+            missing.push("RAG_REWRITE_ENABLED=true");
+        }
+        if !self.rag.rerank.enabled {
+            missing.push("RAG_RERANK_ENABLED=true");
+        }
+        if self.rag.rerank.api_url.as_deref().is_none_or(str::is_empty) {
+            missing.push("RAG_RERANK_API_URL");
+        }
+        if self.rag.rerank.api_key.as_deref().is_none_or(str::is_empty) {
+            missing.push("RAG_RERANK_API_KEY");
+        }
         if self.jwt_secret.trim().len() < 32 || self.jwt_secret == "documind-dev-secret-change-me" {
             missing.push("JWT_SECRET>=32");
         }
@@ -519,6 +547,13 @@ fn env_bool(key: &str, default: bool) -> bool {
     env::var(key)
         .ok()
         .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(default)
+}
+
+fn env_usize(key: &str, default: usize) -> usize {
+    env::var(key)
+        .ok()
+        .and_then(|value| value.parse().ok())
         .unwrap_or(default)
 }
 
