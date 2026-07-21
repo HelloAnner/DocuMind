@@ -85,6 +85,33 @@ pub async fn reconcile_legacy_embeddings(pool: &PgPool) -> Result<()> {
     Ok(())
 }
 
+pub async fn mark_current_embeddings_indexed(
+    pool: &PgPool,
+    model: &str,
+    physical_index: &str,
+) -> Result<u64> {
+    let result = sqlx::query(
+        "UPDATE chunk_embeddings e
+         SET index_status = 'indexed',
+             index_name = $1,
+             indexed_at = COALESCE(indexed_at, NOW()),
+             error_message = NULL
+         FROM chunks c
+         JOIN documents d
+           ON d.id = c.doc_id AND d.latest_parse_job_id = c.parse_job_id
+         WHERE e.chunk_id = c.id
+           AND e.embedding_model = $2
+           AND e.status = 'completed'
+           AND e.embedding_values IS NOT NULL
+           AND d.parse_status = 'indexed'",
+    )
+    .bind(physical_index)
+    .bind(model)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 pub async fn mark_document_embedding(
     pool: &PgPool,
     scope: EmbeddingScope,

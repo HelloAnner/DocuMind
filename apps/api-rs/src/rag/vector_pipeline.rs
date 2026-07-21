@@ -434,7 +434,12 @@ async fn verify_index_contents(
 
 async fn ensure_consistency(pool: &PgPool, config: &EmbeddingConfig, es_url: &str) -> Result<()> {
     let snapshot = consistency(pool, config, es_url).await?;
-    if !snapshot.consistent && !has_open_rebuild(pool, &config.index_alias).await? {
+    if snapshot.consistent {
+        if let Some(index) = snapshot.physical_index.as_deref() {
+            vector_store::mark_current_embeddings_indexed(pool, &config.model, index).await?;
+            vector_jobs::refresh_active_version_counts(pool, index, snapshot.actual_chunks).await?;
+        }
+    } else if !has_open_rebuild(pool, &config.index_alias).await? {
         warn!(
             expected = snapshot.expected_chunks,
             actual = snapshot.actual_chunks,
@@ -474,12 +479,8 @@ async fn has_open_rebuild(pool: &PgPool, alias: &str) -> Result<bool> {
 }
 
 fn desired_index(config: &EmbeddingConfig) -> String {
-    physical_index_name(
-        &config.index_name,
-        &config.model,
-        config.dimension,
-        config.index_schema_version,
-    )
+    let version = config.index_schema_version;
+    physical_index_name(&config.index_name, &config.model, config.dimension, version)
 }
 
 fn indexer(
