@@ -1,0 +1,32 @@
+{
+  "name": "DocuMind 真实多轮对话烟测",
+  "conversation": {
+    "title": "CLI 多轮烟测",
+    "kb_ids": [
+      "00000000-0000-0000-0000-000000000010"
+    ]
+  },
+  "turns": [
+    {
+      "content": "现在请根据产品文档说明 AgentCore 发布后的上线速度，以及 BrowserAct 用户增长情况。",
+      "expect": {
+        "status": "completed",
+        "confidence": ["high", "medium", "low"],
+        "citations_min": 1,
+        "retrievals_min": 1,
+        "react_rounds_min": 4,
+        "max_duration_ms": 180000
+      }
+    },
+    {
+      "content": "现在请结合上一轮回答，继续说明 BrowserAct 的工作流规模与可用性目标。",
+      "expect": {
+        "status": "completed",
+        "citations_min": 1,
+        "retrievals_min": 1,
+        "react_rounds_min": 4,
+        "max_duration_ms": 180000
+      }
+    }
+  ]
+}

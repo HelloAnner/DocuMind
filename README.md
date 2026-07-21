@@ -18,6 +18,16 @@ cp .env.example .env
 cargo run
 ```
 
+后端与问答效果的真实环境测试使用 TypeScript + Bun 编写的 [`cli/`](cli/README.md)：
+
+```bash
+cd cli
+bun install
+bun run verify
+bun link
+documind init
+```
+
 ## 文档
 
 - [产品定位与需求](docs/prd.md)
