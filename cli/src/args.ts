@@ -8,6 +8,7 @@ export interface ParsedArgs {
 }
 
 const BOOLEAN_OPTIONS = new Set([
+  "accessible",
   "continue",
   "events",
   "force",
@@ -22,6 +23,7 @@ const BOOLEAN_OPTIONS = new Set([
   "stream",
   "traces",
   "version",
+  "wait",
 ]);
 
 const SHORT_OPTIONS: Record<string, string> = {
@@ -36,7 +38,7 @@ const SHORT_OPTIONS: Record<string, string> = {
   V: "version",
 };
 
-const REPEATABLE_OPTIONS = new Set(["kb"]);
+const REPEATABLE_OPTIONS = new Set(["doc", "kb", "tag"]);
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];

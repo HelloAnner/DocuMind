@@ -10,12 +10,22 @@ import type {
   AdminDocumentDetail,
   CliConfig,
   ConversationSummary,
+  DeleteDocumentResponse,
+  DeleteKnowledgeBaseResponse,
+  DownloadedDocument,
+  ExcludeFromSearchResponse,
   Identity,
   KnowledgeBase,
+  KnowledgeBaseUpsert,
   LoginResponse,
   MessageListResponse,
   MessageTraceResponse,
+  ReplaceDocumentFileResponse,
+  ReprocessDocumentResponse,
+  RetryDocumentsResponse,
+  SendToOcrResponse,
   SessionState,
+  UploadDocumentResponse,
   VectorIndexSummary,
 } from "./types.ts";
 
@@ -26,6 +36,7 @@ export class ApiClient {
   constructor(
     readonly config: CliConfig,
     readonly configPath: string,
+    private readonly fetcher: typeof fetch = fetch,
   ) {
     this.baseUrl = buildBaseUrl(config);
   }
@@ -102,6 +113,30 @@ export class ApiClient {
     return this.requestJson("/api/knowledge-bases");
   }
 
+  async listAdminKnowledgeBases(): Promise<KnowledgeBase[]> {
+    return this.requestJson("/api/admin/knowledge-bases");
+  }
+
+  async createKnowledgeBase(input: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+    return this.requestJson("/api/admin/knowledge-bases", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async updateKnowledgeBase(id: string, input: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+    return this.requestJson(`/api/admin/knowledge-bases/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteKnowledgeBase(id: string): Promise<DeleteKnowledgeBaseResponse> {
+    return this.requestJson(`/api/admin/knowledge-bases/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
   async listConversations(limit = 20, cursor?: string): Promise<{
     items: ConversationSummary[];
     next_cursor?: string;
@@ -162,6 +197,91 @@ export class ApiClient {
     return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}`);
   }
 
+  async uploadDocument(
+    kbId: string,
+    file: Blob,
+    fileName: string,
+  ): Promise<UploadDocumentResponse> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    return this.requestJson(
+      `/api/knowledge-bases/${encodeURIComponent(kbId)}/documents`,
+      { method: "POST", body: form },
+    );
+  }
+
+  async retryDocument(id: string): Promise<AdminDocument> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    });
+  }
+
+  async retryDocuments(ids: string[]): Promise<RetryDocumentsResponse> {
+    return this.requestJson("/api/admin/documents/retry", {
+      method: "POST",
+      body: JSON.stringify({ doc_ids: ids }),
+    });
+  }
+
+  async forceIndexDocument(id: string): Promise<ReprocessDocumentResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/force-index`, {
+      method: "POST",
+    });
+  }
+
+  async excludeDocumentFromSearch(id: string): Promise<ExcludeFromSearchResponse> {
+    return this.requestJson(
+      `/api/admin/documents/${encodeURIComponent(id)}/exclude-from-search`,
+      { method: "POST" },
+    );
+  }
+
+  async replaceDocumentFile(
+    id: string,
+    file: Blob,
+    fileName: string,
+  ): Promise<ReplaceDocumentFileResponse> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    return this.requestJson(
+      `/api/admin/documents/${encodeURIComponent(id)}/replace-file`,
+      { method: "POST", body: form },
+    );
+  }
+
+  async sendDocumentToOcr(id: string): Promise<SendToOcrResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/send-to-ocr`, {
+      method: "POST",
+    });
+  }
+
+  async moveDocument(id: string, kbId: string): Promise<AdminDocument> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ kb_id: kbId }),
+    });
+  }
+
+  async deleteDocument(id: string): Promise<DeleteDocumentResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async downloadDocument(id: string): Promise<DownloadedDocument> {
+    const response = await this.request(
+      `/api/admin/documents/${encodeURIComponent(id)}/original`,
+      { headers: { Accept: "application/octet-stream" } },
+    );
+    const contentType = response.headers.get("content-type");
+    const contentDisposition = response.headers.get("content-disposition");
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      ...(contentType ? { content_type: contentType } : {}),
+      ...(contentDisposition ? { content_disposition: contentDisposition } : {}),
+    };
+  }
+
   async listVectorIndexes(): Promise<VectorIndexSummary[]> {
     return this.requestJson("/api/system/vector-indexes");
   }
@@ -179,7 +299,7 @@ export class ApiClient {
 
   async sse(path: string, body: unknown, retryAuthentication = true): Promise<Response> {
     const token = await this.accessToken();
-    const response = await fetch(this.url(path), {
+    const response = await this.fetcher(this.url(path), {
       method: "POST",
       headers: {
         Accept: "text/event-stream",
@@ -207,26 +327,9 @@ export class ApiClient {
     authenticated = true,
     retryAuthentication = true,
   ): Promise<T> {
-    const headers = new Headers(init.headers);
-    headers.set("Accept", "application/json");
-    if (init.body !== undefined && !headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
-    if (authenticated) headers.set("Authorization", `Bearer ${await this.accessToken()}`);
+    const response = await this.request(path, init, authenticated, retryAuthentication);
     const method = init.method ?? "GET";
     const url = this.url(path);
-    const response = await fetch(url, {
-      ...init,
-      headers,
-      signal: init.signal ?? AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
-    });
-    if (authenticated && retryAuthentication && response.status === 401) {
-      await this.login(true);
-      return this.requestJson<T>(path, init, authenticated, false);
-    }
-    if (!response.ok) {
-      throw new ApiError(method, url, response.status, await responseBody(response));
-    }
     if (response.status === 204) return undefined as T;
     const text = await response.text();
     if (!text) return undefined as T;
@@ -235,6 +338,39 @@ export class ApiClient {
     } catch {
       throw new CliError(`API ${method} ${url} 返回了非 JSON 内容`, 1, text.slice(0, 500));
     }
+  }
+
+  private async request(
+    path: string,
+    init: RequestInit = {},
+    authenticated = true,
+    retryAuthentication = true,
+  ): Promise<Response> {
+    const headers = new Headers(init.headers);
+    headers.set("Accept", headers.get("Accept") ?? "application/json");
+    if (
+      init.body !== undefined &&
+      !(init.body instanceof FormData) &&
+      !headers.has("Content-Type")
+    ) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (authenticated) headers.set("Authorization", `Bearer ${await this.accessToken()}`);
+    const method = init.method ?? "GET";
+    const url = this.url(path);
+    const response = await this.fetcher(url, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
+    });
+    if (authenticated && retryAuthentication && response.status === 401) {
+      await this.login(true);
+      return this.request(path, init, authenticated, false);
+    }
+    if (!response.ok) {
+      throw new ApiError(method, url, response.status, await responseBody(response));
+    }
+    return response;
   }
 
   private url(path: string): string {

@@ -81,6 +81,18 @@ export interface KnowledgeBase {
   updated_at: string;
 }
 
+export interface KnowledgeBaseUpsert {
+  name: string;
+  description?: string;
+  status?: string;
+  tags?: string[];
+}
+
+export interface DeleteKnowledgeBaseResponse {
+  kb_id: string;
+  status: string;
+}
+
 export interface ConversationSummary {
   conversation_id: string;
   title: string;
@@ -342,6 +354,68 @@ export interface AdminDocumentDetail {
   cleaned_blocks: JsonObject[];
   chunks: DocumentChunk[];
   tables: JsonObject[];
+}
+
+export interface UploadDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  title: string;
+  file_type: string;
+  parse_status: string;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  storage_key: string;
+}
+
+export interface DeleteDocumentResponse {
+  document_id: string;
+  status: string;
+}
+
+export interface ReprocessDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  reused_existing_parse: boolean;
+}
+
+export interface ExcludeFromSearchResponse {
+  document_id: string;
+  status: string;
+  es_deleted_chunks: number;
+}
+
+export interface ReplaceDocumentFileResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  title: string;
+  file_type: string;
+  file_sha256: string;
+  storage_key: string;
+}
+
+export interface SendToOcrResponse {
+  document_id: string;
+  ocr_job_id: string;
+  parse_status: string;
+  ocr_status: string;
+}
+
+export interface RetryDocumentsResponse {
+  retried: number;
+}
+
+export interface DownloadedDocument {
+  bytes: Uint8Array;
+  content_type?: string;
+  content_disposition?: string;
 }
 
 export interface VectorIndexSummary {

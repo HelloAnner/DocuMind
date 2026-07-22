@@ -14,6 +14,14 @@ export function printHelp(path: string[]): void {
     process.stdout.write(RUN_HELP);
     return;
   }
+  if (topic === "kb") {
+    process.stdout.write(KB_HELP);
+    return;
+  }
+  if (topic === "documents" || topic === "document") {
+    process.stdout.write(DOCUMENTS_HELP);
+    return;
+  }
   process.stdout.write(HELP);
 }
 
@@ -32,15 +40,15 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  conversations list|create|show|messages|delete\n` +
   `  traces show <会话ID> <消息ID>\n\n` +
   `知识与向量\n` +
-  `  kb list                      查看当前租户可访问知识库\n` +
-  `  documents list|show|chunks   查看 PostgreSQL 中的文档与切片\n` +
+  `  kb list|show|create|update|delete\n` +
+  `  documents <subcommand>       文档上传、解析、下载与完整管理\n` +
   `  vector indexes|audit|count|list|search|get\n\n` +
   `全局选项\n` +
   `  --config <path>              指定 TOML 配置\n` +
   `  --json, -j                   机器可读 JSON 输出\n` +
   `  --help, -h                   查看帮助\n` +
   `  --version, -V                查看版本\n\n` +
-  `运行 documind help chat|run|vector 查看详细帮助。\n`;
+  `运行 documind help chat|run|kb|documents|vector 查看详细帮助。\n`;
 
 const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --conversation, -c <id>      在指定会话继续多轮对话\n` +
@@ -77,3 +85,42 @@ const RUN_HELP = `用法: documind run <scenario.json|-> [--json] [--output repo
   `    {"content": "刚才提到的期限呢？", "expect": {"retrievals_min": 1}}\n` +
   `  ]\n` +
   `}\n`;
+
+const KB_HELP = `用法: documind kb <subcommand> [options]\n\n` +
+  `  list                         列出租户全部知识库（需要管理权限）\n` +
+  `  list --accessible            列出当前用户可访问的知识库\n` +
+  `  show <kb-id>                 查看知识库\n` +
+  `  create --name NAME           创建知识库\n` +
+  `  update <kb-id> [options]     更新知识库，未指定字段保持不变\n` +
+  `  delete <kb-id> --force       删除知识库及其文档和解析数据\n\n` +
+  `写入选项:\n` +
+  `  --name NAME                  名称\n` +
+  `  --description TEXT           描述；使用 --description= 可清空\n` +
+  `  --status active|disabled|archived\n` +
+  `  --tag TAG                    标签，可重复或使用逗号分隔\n` +
+  `  --tags TAG[,TAG]             标签列表\n`;
+
+const DOCUMENTS_HELP = `用法: documind documents <subcommand> [options]\n\n` +
+  `查询与内容:\n` +
+  `  list [--kb ID] [--status S] [--query Q] [--limit N]\n` +
+  `  show <doc-id>                文档、解析任务和各内容区段摘要\n` +
+  `  preview|blocks|cleaned-blocks|chunks|tables <doc-id>\n\n` +
+  `文件与知识库管理:\n` +
+  `  upload <file> --kb ID        上传文件到当前租户的指定知识库\n` +
+  `  download <doc-id> [--output PATH] [--force]\n` +
+  `  move <doc-id> --kb ID        移动到目标知识库\n` +
+  `  replace <doc-id> <file>      替换原件并重新解析\n` +
+  `  delete <doc-id> --force      删除原件、解析数据和检索索引\n\n` +
+  `解析与索引管理:\n` +
+  `  retry <doc-id>               重新解析单个文档\n` +
+  `  retry-batch <id...>          批量重新解析（最多 50 个）\n` +
+  `  force-index <doc-id>         确认低置信结果并强制索引\n` +
+  `  exclude <doc-id> --force     保留文件但排除检索\n` +
+  `  ocr <doc-id>                 将低置信 PDF 送入 OCR\n` +
+  `  wait <doc-id>                等待文档达到目标状态\n\n` +
+  `异步等待选项（upload/retry/replace/ocr/wait）:\n` +
+  `  --wait                       操作后等待（默认目标 indexed）\n` +
+  `  --until STATUS               目标状态\n` +
+  `  --timeout SECONDS            最长等待时间，默认 300\n` +
+  `  --interval SECONDS           轮询间隔，默认 1\n` +
+  `所有管理操作自动限定为当前登录租户，并由服务端校验权限。\n`;

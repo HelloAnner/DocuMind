@@ -9,6 +9,7 @@ import {
   stringOption,
 } from "./args.ts";
 import { ChatService } from "./chat.ts";
+import { documentCommand, knowledgeBaseCommand } from "./admin_commands.ts";
 import {
   configPath,
   initializeConfig,
@@ -20,10 +21,8 @@ import { printHelp } from "./help.ts";
 import {
   LiveChatRenderer,
   printChatReport,
-  printDocuments,
   printIdentity,
   printJson,
-  printKnowledgeBases,
   printScenarioReport,
   printTable,
   printVectorHit,
@@ -171,18 +170,6 @@ async function doctorCheck(
   } catch (error) {
     checks.push({ name, ok: false, error: error instanceof Error ? error.message : String(error) });
   }
-}
-
-async function knowledgeBaseCommand(
-  args: ParsedArgs,
-  api: ApiClient,
-  json: boolean,
-): Promise<number> {
-  const subcommand = args.positionals[1] ?? "list";
-  if (subcommand !== "list") throw new CliError(`未知 kb 子命令: ${subcommand}`, 2);
-  const items = await api.listKnowledgeBases();
-  if (json) printJson(items); else printKnowledgeBases(items);
-  return 0;
 }
 
 async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
@@ -406,40 +393,6 @@ async function traceCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pr
   if (json) printJson(trace);
   else printJson(trace);
   return 0;
-}
-
-async function documentCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
-  const subcommand = args.positionals[1] ?? "list";
-  if (subcommand === "list") {
-    const kbId = stringOption(args, "kb");
-    const status = stringOption(args, "status");
-    const query = stringOption(args, "query");
-    const items = await api.listDocuments({
-      ...(kbId ? { kbId } : {}),
-      ...(status ? { status } : {}),
-      ...(query ? { query } : {}),
-      limit: numberOption(args, "limit", 100, { min: 1, max: 200 }),
-    });
-    if (json) printJson(items); else printDocuments(items);
-    return 0;
-  }
-  if (subcommand === "show" || subcommand === "chunks") {
-    const id = args.positionals[2];
-    if (!id) throw new CliError(`${subcommand} 需要文档 ID`, 2);
-    const detail = await api.getDocument(id);
-    if (json) printJson(detail);
-    else {
-      printDocuments([detail.document]);
-      process.stdout.write(`\nChunks (${detail.chunks.length})\n`);
-      for (const chunk of detail.chunks) {
-        process.stdout.write(
-          `#${chunk.chunk_index} ${chunk.chunk_id} ${chunk.source_type} tokens=${chunk.token_count}\n${chunk.content}\n\n`,
-        );
-      }
-    }
-    return 0;
-  }
-  throw new CliError(`未知 documents 子命令: ${subcommand}`, 2);
 }
 
 async function vectorCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {

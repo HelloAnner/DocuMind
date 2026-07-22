@@ -98,18 +98,70 @@ documind run examples/conversation-scenario.json --json --output result.json
 
 断言失败时命令退出码为 `2`，适合放进后端回归流程。
 
-## 会话、trace 和文档
+## 会话与 trace
 
 ```bash
 documind kb list
 documind conversations list
 documind conversations show <conversation-id> --json
 documind traces show <conversation-id> <assistant-message-id> --json
-documind documents list --kb <kb-id>
-documind documents chunks <document-id>
 ```
 
 `conversations show` 会读取数据库持久化后的消息，并为每一条 assistant 消息读取 trace。
+
+## 知识库管理
+
+CLI 覆盖管理页面的知识库能力。所有管理请求都自动限定为当前登录租户，权限由服务端校验。
+
+```bash
+# 租户全部知识库；普通用户可用 --accessible 查询自身授权范围
+documind kb list
+documind kb list --accessible
+documind kb show <kb-id> --json
+
+# 创建、更新、删除
+documind kb create --name '采购制度' --description '采购与付款制度' --tag 采购 --tag 财务
+documind kb update <kb-id> --status archived
+documind kb delete <kb-id> --force
+```
+
+`kb update` 会先读取当前知识库，未指定的字段保持不变；`--description=` 可以清空描述。删除会级联删除知识库中的文档与解析数据，因此必须显式传入 `--force`。
+
+## 文档与文件管理
+
+```bash
+# 查询页面中的全部详情区段
+documind documents list --kb <kb-id> --status failed --query 合同
+documind documents show <document-id> --json
+documind documents preview <document-id>
+documind documents blocks <document-id> --json
+documind documents cleaned-blocks <document-id> --json
+documind documents chunks <document-id>
+documind documents tables <document-id> --json
+
+# 上传、下载、移动、替换和删除
+documind documents upload ./contract.pdf --kb <kb-id>
+documind documents download <document-id> --output ./contract.pdf
+documind documents move <document-id> --kb <target-kb-id>
+documind documents replace <document-id> ./contract-v2.pdf
+documind documents delete <document-id> --force
+
+# 解析、索引和 OCR 管理
+documind documents retry <document-id>
+documind documents retry-batch <document-id-1> <document-id-2>
+documind documents force-index <document-id>
+documind documents exclude <document-id> --force
+documind documents ocr <document-id>
+```
+
+上传文件限制与页面一致：支持 PDF、DOCX、PPTX、TXT、Markdown，单文件不超过 100MB。上传、重试、替换和 OCR 都可以追加 `--wait`，等待文档达到默认的 `indexed` 状态：
+
+```bash
+documind documents upload ./contract.pdf --kb <kb-id> --wait --timeout 300 --json
+documind documents wait <document-id> --until indexed --timeout 300 --interval 1
+```
+
+遇到 `parse_failed`、`embedding_failed`、`parse_low_confidence` 或 `excluded_from_search` 时，等待命令会立即以非零状态退出并报告最终文档；这使上传和解析可直接作为自动化闭环测试步骤。
 
 ## 向量库诊断
 
