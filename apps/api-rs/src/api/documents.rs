@@ -1207,6 +1207,32 @@ async fn delete_document_from_search_index(
         .map_err(AppError::from)
 }
 
+async fn update_document_search_kb(
+    state: &AppState,
+    doc: &DocumentRecord,
+    kb_id: Uuid,
+) -> Result<u64, AppError> {
+    if doc.parse_status != "indexed" {
+        return Ok(0);
+    }
+    let elasticsearch_url = state.config.elasticsearch_url.clone().ok_or_else(|| {
+        AppError::bad_request(
+            "ELASTICSEARCH_REQUIRED",
+            "移动已索引文档需要可用的 Elasticsearch 配置",
+        )
+    })?;
+    let indexer = ElasticsearchChunkIndexer::new(ElasticsearchConfig {
+        base_url: elasticsearch_url,
+        index_name: state.config.rag.embedding.index_alias.clone(),
+        alias_name: state.config.rag.embedding.index_alias.clone(),
+        timeout_seconds: 120,
+    })?;
+    indexer
+        .update_document_kb(doc.tenant_id, doc.id, kb_id)
+        .await
+        .map_err(AppError::from)
+}
+
 async fn list_documents(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
@@ -1316,16 +1342,33 @@ async fn move_document(
     Json(req): Json<MoveDocumentRequest>,
 ) -> Result<Json<DocumentSummary>, AppError> {
     require_permission(&actor, "document.upload")?;
-    if !actor.allowed_kb_ids.contains(&req.kb_id) && !actor.has_permission("kb.manage") {
-        return Err(AppError::kb_scope_denied());
-    }
     let pool = state.db_pool.as_ref().ok_or_else(|| {
         AppError::bad_request(
             "DATABASE_REQUIRED",
             "文档移动需要启用 PostgreSQL 数据库连接",
         )
     })?;
+    let doc = fetch_document(pool, actor.tenant_id, doc_id).await?;
+    require_kb_permission(&actor, doc.kb_id, "write")?;
+    if !actor.allowed_kb_ids.contains(&req.kb_id) && !actor.has_permission("kb.manage") {
+        return Err(AppError::kb_scope_denied());
+    }
+    if doc.kb_id == req.kb_id {
+        return Ok(Json(
+            fetch_document_summary(pool, actor.tenant_id, doc_id).await?,
+        ));
+    }
+    if !can_move_document(&doc.parse_status) {
+        return Err(AppError::InvalidState {
+            code: "MOVE_DOCUMENT_NOT_ALLOWED".to_string(),
+            message: "文档正在处理，达到稳定状态后才能移动".to_string(),
+        });
+    }
+
     let mut tx = pool.begin().await?;
+    sqlx::query("SET CONSTRAINTS fk_chunks_tenant_document, fk_embeddings_tenant_chunk DEFERRED")
+        .execute(&mut *tx)
+        .await?;
     let updated = sqlx::query(
         r#"
         UPDATE documents
@@ -1345,16 +1388,84 @@ async fn move_document(
             message: "文档或目标知识库不存在".to_string(),
         });
     }
-    sqlx::query("UPDATE chunks SET kb_id = $2 WHERE doc_id = $1")
-        .bind(doc_id)
-        .bind(req.kb_id)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
+    let related_rows = move_document_relations(&mut tx, actor.tenant_id, doc_id, req.kb_id).await?;
+    let es_updated = update_document_search_kb(&state, &doc, req.kb_id).await?;
+    if doc.parse_status == "indexed" && es_updated != doc.chunk_count.max(0) as u64 {
+        let _ = update_document_search_kb(&state, &doc, doc.kb_id).await;
+        return Err(AppError::Internal(anyhow::anyhow!(
+            "moving document {} updated {} Elasticsearch chunks, expected {}",
+            doc_id,
+            es_updated,
+            doc.chunk_count
+        )));
+    }
+    if let Err(error) = tx.commit().await {
+        if es_updated > 0 {
+            let _ = update_document_search_kb(&state, &doc, doc.kb_id).await;
+        }
+        return Err(error.into());
+    }
+
+    record_audit_event(
+        &state,
+        Some(&actor),
+        "document.move",
+        Some("document"),
+        Some(&doc_id.to_string()),
+        json!({
+            "from_kb_id": doc.kb_id,
+            "to_kb_id": req.kb_id,
+            "related_rows": related_rows,
+            "es_updated_chunks": es_updated,
+        }),
+    )
+    .await?;
 
     Ok(Json(
         fetch_document_summary(pool, actor.tenant_id, doc_id).await?,
     ))
+}
+
+fn can_move_document(parse_status: &str) -> bool {
+    matches!(
+        parse_status,
+        "parsed"
+            | "cleaned"
+            | "indexed"
+            | "parse_low_confidence"
+            | "parse_failed"
+            | "embedding_failed"
+            | "excluded_from_search"
+    )
+}
+
+async fn move_document_relations(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    doc_id: Uuid,
+    kb_id: Uuid,
+) -> Result<u64, AppError> {
+    const TABLES: [&str; 7] = [
+        "document_parse_jobs",
+        "document_blocks",
+        "cleaned_blocks",
+        "document_tables",
+        "document_table_cells",
+        "chunks",
+        "chunk_embeddings",
+    ];
+    let mut updated = 0;
+    for table in TABLES {
+        let query = format!("UPDATE {table} SET kb_id = $3 WHERE tenant_id = $1 AND doc_id = $2");
+        updated += sqlx::query(&query)
+            .bind(tenant_id)
+            .bind(doc_id)
+            .bind(kb_id)
+            .execute(&mut **tx)
+            .await?
+            .rows_affected();
+    }
+    Ok(updated)
 }
 
 async fn download_original(
@@ -3976,6 +4087,30 @@ mod tests {
     use zip::ZipWriter;
 
     use super::*;
+
+    #[test]
+    fn only_stable_documents_can_move_between_knowledge_bases() {
+        for status in [
+            "parsed",
+            "cleaned",
+            "indexed",
+            "parse_low_confidence",
+            "parse_failed",
+            "embedding_failed",
+            "excluded_from_search",
+        ] {
+            assert!(
+                can_move_document(status),
+                "status should be movable: {status}"
+            );
+        }
+        for status in ["uploaded", "parsing", "chunked", "embedding", "ocr_pending"] {
+            assert!(
+                !can_move_document(status),
+                "status should not be movable: {status}"
+            );
+        }
+    }
 
     #[test]
     fn parses_docx_paragraphs_and_tables() {

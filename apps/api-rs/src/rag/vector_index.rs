@@ -258,6 +258,31 @@ impl ElasticsearchChunkIndexer {
             .ok_or_else(|| anyhow!("elasticsearch delete response is missing deleted"))
     }
 
+    pub async fn update_document_kb(
+        &self,
+        tenant_id: Uuid,
+        doc_id: Uuid,
+        kb_id: Uuid,
+    ) -> Result<u64> {
+        let resp = self
+            .http
+            .post(format!(
+                "{}/_update_by_query?conflicts=proceed&refresh=true",
+                self.index_url()
+            ))
+            .json(&document_kb_update_body(tenant_id, doc_id, kb_id))
+            .send()
+            .await?;
+        if resp.status().as_u16() == 404 {
+            return Ok(0);
+        }
+        let payload: Value = resp.error_for_status()?.json().await?;
+        payload
+            .get("updated")
+            .and_then(Value::as_u64)
+            .ok_or_else(|| anyhow!("elasticsearch update response is missing updated"))
+    }
+
     pub async fn refresh(&self) -> Result<()> {
         self.http
             .post(format!("{}/_refresh", self.index_url()))
@@ -419,5 +444,50 @@ impl ElasticsearchChunkIndexer {
 
     fn index_url(&self) -> String {
         format!("{}/{}", self.base_url(), self.config.index_name)
+    }
+}
+
+fn document_kb_update_body(tenant_id: Uuid, doc_id: Uuid, kb_id: Uuid) -> Value {
+    json!({
+        "query": {
+            "bool": {
+                "filter": [
+                    {"term": {"tenant_id": tenant_id}},
+                    {"term": {"doc_id": doc_id}}
+                ]
+            }
+        },
+        "script": {
+            "lang": "painless",
+            "source": "ctx._source.kb_id = params.kb_id",
+            "params": {"kb_id": kb_id}
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::document_kb_update_body;
+    use uuid::Uuid;
+
+    #[test]
+    fn document_kb_update_is_scoped_to_tenant_and_document() {
+        let tenant_id = Uuid::new_v4();
+        let doc_id = Uuid::new_v4();
+        let kb_id = Uuid::new_v4();
+        let body = document_kb_update_body(tenant_id, doc_id, kb_id);
+
+        assert_eq!(
+            body.pointer("/query/bool/filter/0/term/tenant_id"),
+            Some(&serde_json::json!(tenant_id))
+        );
+        assert_eq!(
+            body.pointer("/query/bool/filter/1/term/doc_id"),
+            Some(&serde_json::json!(doc_id))
+        );
+        assert_eq!(
+            body.pointer("/script/params/kb_id"),
+            Some(&serde_json::json!(kb_id))
+        );
     }
 }
