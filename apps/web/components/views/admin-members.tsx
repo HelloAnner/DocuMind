@@ -14,6 +14,7 @@ import {
   type AdminMember,
   type TenantInvitation,
 } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -112,7 +113,7 @@ export function AdminMembers() {
       });
       const url = absoluteUrl(invitation.invite_url ?? "");
       setLatestInviteUrl(url);
-      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      await copyToClipboard(url);
       await reload();
       setInviteEmail("");
       setInviteName("");
@@ -178,7 +179,7 @@ export function AdminMembers() {
       const next = await resendTenantInvitation(invitation.id);
       const url = absoluteUrl(next.invite_url ?? "");
       setLatestInviteUrl(url);
-      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      await copyToClipboard(url);
       await reload();
       setMessage("邀请链接已刷新并复制，有效期重新计算为 7 天");
     } catch (error) {
@@ -205,12 +206,10 @@ export function AdminMembers() {
 
   const copyInvite = async (invitation: TenantInvitation) => {
     if (!invitation.invite_url) return;
-    try {
-      await navigator.clipboard.writeText(absoluteUrl(invitation.invite_url));
+    const ok = await copyToClipboard(absoluteUrl(invitation.invite_url));
+    if (ok) {
       setCopiedId(invitation.id);
       setTimeout(() => setCopiedId((current) => (current === invitation.id ? null : current)), 1500);
-    } catch {
-      // ignore
     }
   };
 
@@ -375,7 +374,7 @@ export function AdminMembers() {
               <div className={styles.inviteResult}>
                 <span>新邀请链接</span>
                 <code>{latestInviteUrl}</code>
-                <button onClick={() => navigator.clipboard?.writeText(latestInviteUrl)} type="button">
+                <button onClick={() => copyToClipboard(latestInviteUrl)} type="button">
                   <Copy size={14} /> 复制链接
                 </button>
               </div>

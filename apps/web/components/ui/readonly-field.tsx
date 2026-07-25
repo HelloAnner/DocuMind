@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { copyToClipboard } from "@/lib/clipboard";
 import { IconButton } from "./icon-button";
 
 interface ReadonlyFieldProps {
@@ -16,12 +17,10 @@ export function ReadonlyField({ label, value, code, copyable }: ReadonlyFieldPro
 
   const copy = async () => {
     if (typeof value !== "string" || !value) return;
-    try {
-      await navigator.clipboard.writeText(value);
+    const ok = await copyToClipboard(value);
+    if (ok) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // ignore
     }
   };
 

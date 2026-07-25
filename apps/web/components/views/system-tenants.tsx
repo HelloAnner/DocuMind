@@ -10,6 +10,7 @@ import {
   updateSystemTenant,
   type SystemTenant,
 } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -126,7 +127,7 @@ export function SystemTenants() {
       });
       const url = absoluteUrl(result.invitation.invite_url);
       setInviteUrl(url);
-      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      await copyToClipboard(url);
       await reload();
       setMessage("租户已创建，初始管理员邀请链接已复制。接受邀请后租户会自动启用。");
       setForm(initialForm);
@@ -184,7 +185,7 @@ export function SystemTenants() {
     try {
       const invitation = await resendSystemTenantInvitation(tenant.id, days);
       const url = absoluteUrl(invitation.invite_url);
-      await navigator.clipboard?.writeText(url).catch(() => undefined);
+      await copyToClipboard(url);
       await reload();
       setMessage(`已为 ${invitation.email} 生成新邀请链接并复制，有效期 ${days} 天`);
     } catch (error) {
@@ -195,12 +196,10 @@ export function SystemTenants() {
   };
 
   const copyAccessUrl = async (slug: string) => {
-    try {
-      await navigator.clipboard.writeText(tenantAccessUrl(slug));
+    const ok = await copyToClipboard(tenantAccessUrl(slug));
+    if (ok) {
       setCopiedSlug(slug);
       setTimeout(() => setCopiedSlug((current) => (current === slug ? null : current)), 1500);
-    } catch {
-      // ignore
     }
   };
 
@@ -361,7 +360,7 @@ export function SystemTenants() {
               <div className={styles.inviteResult}>
                 <span>一次性邀请链接</span>
                 <code>{inviteUrl}</code>
-                <button onClick={() => navigator.clipboard?.writeText(inviteUrl)} type="button">
+                <button onClick={() => copyToClipboard(inviteUrl)} type="button">
                   <Copy size={14} /> 再次复制
                 </button>
               </div>
