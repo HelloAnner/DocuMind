@@ -270,7 +270,7 @@ export function TenantPermissions() {
                     icon={<Trash2 size={13} />}
                     onClick={() => revoke(a.id).catch(console.error)}
                     disabled={saving}
-                    style={{ height: 28, padding: "0 8px", fontSize: 12, color: "var(--color-error)" }}
+                    style={{ height: 28, padding: "0 8px", color: "var(--color-error)" }}
                   >
                     撤销
                   </Button>

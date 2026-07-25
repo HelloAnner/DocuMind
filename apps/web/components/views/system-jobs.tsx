@@ -42,7 +42,7 @@ export function SystemJobs() {
               <div className="dm-bar" style={{ width: 120 }}>
                 <span className={j.status === "running" ? "warning" : "success"} style={{ width: `${j.progress}%` }} />
               </div>
-              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{new Date(j.created_at).toLocaleString()}</span>
+              <span style={{ color: "var(--text-muted)" }}>{new Date(j.created_at).toLocaleString()}</span>
             </div>
           ))}
         </Panel>

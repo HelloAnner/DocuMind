@@ -42,8 +42,8 @@ export function SystemModels() {
                 <small>sk-······{m.api_key_tail}</small>
               </div>
               <Badge tone={m.status === "healthy" ? "success" : "warning"}>{m.status}</Badge>
-              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{m.throughput}</span>
-              <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{m.latency}</span>
+              <span style={{ color: "var(--text-muted)" }}>{m.throughput}</span>
+              <span style={{ color: "var(--text-muted)" }}>{m.latency}</span>
               <div className="dm-row-actions">
                 <Badge tone="neutral">env</Badge>
               </div>

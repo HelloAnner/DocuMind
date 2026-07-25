@@ -52,7 +52,7 @@ export function SystemOverview() {
                   <small>{m.model}</small>
                 </div>
                 <Badge tone={m.status === "configured" ? "success" : "warning"}>{m.status}</Badge>
-                <span style={{ color: "var(--text-muted)", fontSize: 13 }}>runtime config</span>
+                <span style={{ color: "var(--text-muted)" }}>runtime config</span>
               </div>
             ))}
             {data && data.models.length === 0 ? <div className="dm-empty-state">暂无模型配置</div> : null}
@@ -61,7 +61,7 @@ export function SystemOverview() {
           <Panel title="待关注">
             {(data?.alerts ?? []).map((a) => (
               <div className="dm-system-row" key={a.message} style={{ gridTemplateColumns: "1fr" }}>
-                <span style={{ color: "var(--text-secondary)", fontSize: 13 }}>{a.message}</span>
+                <span style={{ color: "var(--text-secondary)" }}>{a.message}</span>
               </div>
             ))}
             {data && data.alerts.length === 0 ? <div className="dm-empty-state">暂无告警</div> : null}

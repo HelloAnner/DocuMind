@@ -89,7 +89,7 @@ export function AdminOverview() {
             <Panel title="待关注">
               {(data?.alerts ?? []).map((item) => (
                 <div className="dm-document-row" key={item.message} style={{ gridTemplateColumns: "1fr", cursor: "default" }}>
-                  <span style={{ color: "var(--text-primary)", fontSize: 13, fontWeight: 500 }}>{item.message}</span>
+                  <span style={{ color: "var(--text-primary)", fontWeight: 500 }}>{item.message}</span>
                 </div>
               ))}
               {data && data.alerts.length === 0 ? <div className="dm-empty-state">暂无告警</div> : null}
