@@ -26,7 +26,7 @@ export function SystemJobs() {
     <>
       <Topbar title="任务队列" />
       <div className="dm-admin-content">
-        <Panel title="Jobs">
+        <Panel title="任务列表">
           <div className="dm-table-head dm-job-row">
             <span>租户</span>
             <span>类型</span>

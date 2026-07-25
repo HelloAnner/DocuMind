@@ -49,7 +49,7 @@ export function SystemVectorIndexes() {
           <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 个索引</span>
         </div>
 
-        <Panel title="Indexes">
+        <Panel title="索引列表">
           <div className="dm-table-head dm-vector-index-row">
             <span>名称</span>
             <span>租户</span>

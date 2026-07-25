@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Copy, MoreHorizontal, Plus, Search, X } from "lucide-react";
+import { Building2, Check, Copy, Link2, MoreHorizontal, Plus, X } from "lucide-react";
 import {
   createSystemTenant,
   listSystemTenants,
@@ -10,6 +10,14 @@ import {
   updateSystemTenant,
   type SystemTenant,
 } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
+import { Panel } from "@/components/ui/panel";
+import { SearchInput } from "@/components/ui/search-input";
+import { Segmented } from "@/components/ui/segmented";
+import { StatCard } from "@/components/ui/stat-card";
+import { Topbar } from "@/components/ui/topbar";
 import styles from "./system-tenants.module.css";
 
 const statusLabel: Record<SystemTenant["status"], string> = {
@@ -20,11 +28,34 @@ const statusLabel: Record<SystemTenant["status"], string> = {
   deletion_pending: "待删除",
 };
 
+const statusTone = (status: SystemTenant["status"]) => {
+  switch (status) {
+    case "active":
+      return "success";
+    case "pending":
+    case "suspended":
+      return "warning";
+    case "deletion_pending":
+      return "danger";
+    default:
+      return "neutral";
+  }
+};
+
 const planLabel: Record<SystemTenant["plan"], string> = {
   trial: "试用版",
   team: "团队版",
   enterprise: "企业版",
 };
+
+const statusOptions: { value: SystemTenant["status"] | "all"; label: string }[] = [
+  { value: "all", label: "全部" },
+  { value: "active", label: "运行中" },
+  { value: "pending", label: "待加入" },
+  { value: "suspended", label: "已停用" },
+  { value: "archived", label: "已归档" },
+  { value: "deletion_pending", label: "待删除" },
+];
 
 const initialForm = {
   name: "",
@@ -35,15 +66,30 @@ const initialForm = {
   expires_in_days: 7,
 };
 
+function basePath() {
+  if (typeof window === "undefined") return "";
+  return window.location.pathname.startsWith("/documind") ? "/documind" : "";
+}
+
+function absoluteUrl(path: string) {
+  if (typeof window === "undefined") return path;
+  return `${window.location.origin}${basePath()}${path}`;
+}
+
+function tenantAccessUrl(slug: string) {
+  return absoluteUrl(`/login?tenant=${encodeURIComponent(slug)}`);
+}
+
 export function SystemTenants() {
   const [tenants, setTenants] = useState<SystemTenant[]>([]);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState("all");
+  const [status, setStatus] = useState<SystemTenant["status"] | "all">("all");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [inviteUrl, setInviteUrl] = useState("");
+  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
   const reload = async () => setTenants(await listSystemTenants());
 
@@ -55,18 +101,18 @@ export function SystemTenants() {
     const keyword = query.trim().toLowerCase();
     return tenants.filter((tenant) => {
       const matchesStatus = status === "all" || tenant.status === status;
-      const matchesQuery = !keyword || [tenant.name, tenant.slug, tenant.plan]
-        .join(" ")
-        .toLowerCase()
-        .includes(keyword);
+      const matchesQuery =
+        !keyword ||
+        [tenant.name, tenant.slug, tenant.plan].join(" ").toLowerCase().includes(keyword);
       return matchesStatus && matchesQuery;
     });
   }, [query, status, tenants]);
 
-  const absoluteInviteUrl = (url: string) => {
-    if (typeof window === "undefined") return url;
-    const prefix = window.location.pathname.startsWith("/documind") ? "/documind" : "";
-    return `${window.location.origin}${prefix}${url}`;
+  const metrics = {
+    total: tenants.length,
+    active: tenants.filter((t) => t.status === "active").length,
+    members: tenants.reduce((sum, t) => sum + t.member_count, 0),
+    pendingInvitations: tenants.reduce((sum, t) => sum + t.pending_invitation_count, 0),
   };
 
   const createTenant = async () => {
@@ -78,7 +124,7 @@ export function SystemTenants() {
         slug: form.slug || undefined,
         admin_name: form.admin_name || undefined,
       });
-      const url = absoluteInviteUrl(result.invitation.invite_url);
+      const url = absoluteUrl(result.invitation.invite_url);
       setInviteUrl(url);
       await navigator.clipboard?.writeText(url).catch(() => undefined);
       await reload();
@@ -137,7 +183,7 @@ export function SystemTenants() {
     setMessage("");
     try {
       const invitation = await resendSystemTenantInvitation(tenant.id, days);
-      const url = absoluteInviteUrl(invitation.invite_url);
+      const url = absoluteUrl(invitation.invite_url);
       await navigator.clipboard?.writeText(url).catch(() => undefined);
       await reload();
       setMessage(`已为 ${invitation.email} 生成新邀请链接并复制，有效期 ${days} 天`);
@@ -148,91 +194,192 @@ export function SystemTenants() {
     }
   };
 
+  const copyAccessUrl = async (slug: string) => {
+    try {
+      await navigator.clipboard.writeText(tenantAccessUrl(slug));
+      setCopiedSlug(slug);
+      setTimeout(() => setCopiedSlug((current) => (current === slug ? null : current)), 1500);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
-    <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <span className={styles.eyebrow}>PLATFORM GOVERNANCE</span>
-          <h1>租户管理</h1>
-          <p>管理租户生命周期和初始管理员邀请；平台管理员不进入租户知识库。</p>
-        </div>
-        <button className={styles.primary} onClick={() => { setDrawerOpen(true); setInviteUrl(""); }} type="button">
-          <Plus size={16} /> 新建租户
-        </button>
-      </header>
+    <>
+      <Topbar title="租户管理" subtitle="管理租户生命周期和初始管理员邀请">
+        <Button icon={<Plus size={14} />} onClick={() => { setDrawerOpen(true); setInviteUrl(""); }}>
+          新建租户
+        </Button>
+      </Topbar>
 
-      <section className={styles.metrics}>
-        <div><strong>{tenants.length}</strong><span>全部租户</span></div>
-        <div><strong>{tenants.filter((item) => item.status === "active").length}</strong><span>运行中</span></div>
-        <div><strong>{tenants.reduce((sum, item) => sum + item.member_count, 0)}</strong><span>有效成员</span></div>
-        <div><strong>{tenants.reduce((sum, item) => sum + item.pending_invitation_count, 0)}</strong><span>待接受邀请</span></div>
-      </section>
-
-      <section className={styles.card}>
-        <div className={styles.toolbar}>
-          <label className={styles.search}>
-            <Search size={15} />
-            <input onChange={(event) => setQuery(event.target.value)} placeholder="搜索名称或租户标识" value={query} />
-          </label>
-          <div className={styles.filters}>
-            {["all", "active", "pending", "suspended", "archived", "deletion_pending"].map((value) => (
-              <button className={status === value ? styles.activeFilter : ""} key={value} onClick={() => setStatus(value)} type="button">
-                {value === "all" ? "全部" : statusLabel[value as SystemTenant["status"]]}
-              </button>
-            ))}
-          </div>
+      <div className="dm-admin-content">
+        <div className="dm-stat-row">
+          <StatCard label="全部租户" value={String(metrics.total)} hint="平台实例" />
+          <StatCard label="运行中" value={String(metrics.active)} hint="可登录" />
+          <StatCard label="有效成员" value={metrics.members.toLocaleString()} hint="跨租户汇总" />
+          <StatCard label="待接受邀请" value={String(metrics.pendingInvitations)} hint="初始管理员" />
         </div>
-        {message ? <div className={styles.notice}>{message}</div> : null}
-        <div className={styles.table}>
-          <div className={`${styles.row} ${styles.tableHead}`}>
-            <span>租户</span><span>状态</span><span>成员 / 管理员</span><span>内容规模</span><span>套餐</span><span>操作</span>
+
+        {message ? <div className="dm-inline-error" style={{ marginTop: 16 }}>{message}</div> : null}
+
+        <div className="dm-filter-bar" style={{ marginTop: 24 }}>
+          <SearchInput
+            placeholder="搜索名称或租户标识"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+          />
+          <div style={{ flex: 1 }} />
+          <Segmented
+            options={statusOptions}
+            value={status}
+            onChange={(value) => setStatus(value)}
+          />
+        </div>
+
+        <Panel title="租户列表" action={<span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 个</span>}>
+          <div className="dm-table-head dm-tenant-row">
+            <span>租户</span>
+            <span>状态</span>
+            <span>成员 / 管理员</span>
+            <span>内容规模</span>
+            <span>套餐</span>
+            <span>访问入口</span>
+            <span>操作</span>
           </div>
           {filtered.map((tenant) => (
-            <div className={styles.row} key={tenant.id}>
-              <div className={styles.tenantCell}>
-                <span className={styles.tenantIcon}><Building2 size={16} /></span>
-                <span><strong>{tenant.name}</strong><small>{tenant.slug} · 更新于 {new Date(tenant.updated_at).toLocaleDateString()}</small></span>
+            <div className="dm-table-row dm-tenant-row" key={tenant.id}>
+              <div className="dm-user-cell">
+                <span className="dm-avatar">
+                  <Building2 size={14} />
+                </span>
+                <span>
+                  <strong>{tenant.name}</strong>
+                  <small>{tenant.slug} · 更新于 {new Date(tenant.updated_at).toLocaleDateString()}</small>
+                </span>
               </div>
-              <span className={`${styles.status} ${styles[tenant.status]}`}>{statusLabel[tenant.status]}</span>
-              <span><strong>{tenant.member_count}</strong><small>{tenant.active_admin_count} 位管理员 · {tenant.pending_invitation_count} 个邀请</small></span>
-              <span><strong>{tenant.doc_count.toLocaleString()} 文档</strong><small>{tenant.kb_count} 个知识库</small></span>
+              <Badge tone={statusTone(tenant.status)}>{statusLabel[tenant.status]}</Badge>
+              <span>
+                {tenant.member_count} 位成员
+                <small>{tenant.active_admin_count} 位管理员 · {tenant.pending_invitation_count} 个邀请</small>
+              </span>
+              <span>
+                {tenant.doc_count.toLocaleString()} 文档
+                <small>{tenant.kb_count} 个知识库</small>
+              </span>
               <span>{planLabel[tenant.plan]}</span>
-              <div className={styles.actions}>
-                {tenant.status === "pending" ? <button disabled={busy === tenant.id} onClick={() => resendInvitation(tenant)} type="button">重发邀请</button> : null}
-                {tenant.status === "active" ? <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "suspended")} type="button">停用</button> : null}
-                {tenant.status === "suspended" || tenant.status === "archived" ? <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "active")} type="button">启用</button> : null}
-                {tenant.status !== "archived" && tenant.status !== "deletion_pending" ? <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "archived")} type="button">归档</button> : null}
-                {tenant.status !== "deletion_pending" ? <button className={styles.danger} disabled={busy === tenant.id} onClick={() => deleteTenant(tenant)} type="button">删除</button> : <MoreHorizontal size={16} />}
+              <div className="dm-row-actions" style={{ justifyContent: "flex-start" }}>
+                <IconButton
+                  aria-label="复制租户访问链接"
+                  onClick={() => copyAccessUrl(tenant.slug)}
+                  title={tenantAccessUrl(tenant.slug)}
+                >
+                  {copiedSlug === tenant.slug ? <Check size={14} /> : <Link2 size={14} />}
+                </IconButton>
+              </div>
+              <div className="dm-row-actions">
+                {tenant.status === "pending" ? (
+                  <button disabled={busy === tenant.id} onClick={() => resendInvitation(tenant)} type="button">
+                    重发邀请
+                  </button>
+                ) : null}
+                {tenant.status === "active" ? (
+                  <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "suspended")} type="button">
+                    停用
+                  </button>
+                ) : null}
+                {tenant.status === "suspended" || tenant.status === "archived" ? (
+                  <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "active")} type="button">
+                    启用
+                  </button>
+                ) : null}
+                {tenant.status !== "archived" && tenant.status !== "deletion_pending" ? (
+                  <button disabled={busy === tenant.id} onClick={() => changeStatus(tenant, "archived")} type="button">
+                    归档
+                  </button>
+                ) : null}
+                {tenant.status !== "deletion_pending" ? (
+                  <button className="danger" disabled={busy === tenant.id} onClick={() => deleteTenant(tenant)} type="button">
+                    删除
+                  </button>
+                ) : (
+                  <MoreHorizontal size={16} />
+                )}
               </div>
             </div>
           ))}
-          {filtered.length === 0 ? <div className={styles.empty}>没有匹配的租户</div> : null}
-        </div>
-      </section>
+          {filtered.length === 0 ? <div className="dm-empty-state">没有匹配的租户</div> : null}
+        </Panel>
+      </div>
 
       {drawerOpen ? (
         <div className={styles.overlay} onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawerOpen(false); }}>
           <aside className={styles.drawer}>
             <div className={styles.drawerHeader}>
-              <div><span>NEW TENANT</span><h2>创建租户并邀请管理员</h2></div>
+              <div>
+                <span>新建租户</span>
+                <h2>创建租户并邀请管理员</h2>
+              </div>
               <button aria-label="关闭" onClick={() => setDrawerOpen(false)} type="button"><X size={18} /></button>
             </div>
             <p className={styles.drawerIntro}>租户先以“待管理员加入”状态创建。初始管理员接受邀请后，租户才正式启用。</p>
-            <label className={styles.field}><span>租户名称 *</span><input autoFocus onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：Northwind Research" value={form.name} /></label>
-            <label className={styles.field}><span>租户标识 Slug</span><input onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="留空时由名称生成" value={form.slug} /></label>
-            <label className={styles.field}><span>套餐</span><select onChange={(event) => setForm({ ...form, plan: event.target.value as SystemTenant["plan"] })} value={form.plan}><option value="trial">试用版</option><option value="team">团队版</option><option value="enterprise">企业版</option></select></label>
+            <label className={styles.field}>
+              <span>租户名称 *</span>
+              <input autoFocus onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="例如：Northwind Research" value={form.name} />
+            </label>
+            <label className={styles.field}>
+              <span>租户标识 Slug</span>
+              <input onChange={(event) => setForm({ ...form, slug: event.target.value })} placeholder="留空时由名称生成" value={form.slug} />
+            </label>
+            <label className={styles.field}>
+              <span>套餐</span>
+              <select onChange={(event) => setForm({ ...form, plan: event.target.value as SystemTenant["plan"] })} value={form.plan}>
+                <option value="trial">试用版</option>
+                <option value="team">团队版</option>
+                <option value="enterprise">企业版</option>
+              </select>
+            </label>
             <div className={styles.separator}><span>初始租户管理员</span></div>
-            <label className={styles.field}><span>管理员邮箱 *</span><input onChange={(event) => setForm({ ...form, admin_email: event.target.value })} placeholder="admin@company.com" type="email" value={form.admin_email} /></label>
-            <label className={styles.field}><span>管理员姓名</span><input onChange={(event) => setForm({ ...form, admin_name: event.target.value })} placeholder="可选" value={form.admin_name} /></label>
-            <label className={styles.field}><span>邀请有效期</span><select onChange={(event) => setForm({ ...form, expires_in_days: Number(event.target.value) })} value={form.expires_in_days}><option value={1}>1 天</option><option value={3}>3 天</option><option value={7}>7 天</option><option value={14}>14 天</option><option value={30}>30 天</option></select></label>
-            {inviteUrl ? <div className={styles.inviteResult}><span>一次性邀请链接</span><code>{inviteUrl}</code><button onClick={() => navigator.clipboard?.writeText(inviteUrl)} type="button"><Copy size={14} /> 再次复制</button></div> : null}
+            <label className={styles.field}>
+              <span>管理员邮箱 *</span>
+              <input onChange={(event) => setForm({ ...form, admin_email: event.target.value })} placeholder="admin@company.com" type="email" value={form.admin_email} />
+            </label>
+            <label className={styles.field}>
+              <span>管理员姓名</span>
+              <input onChange={(event) => setForm({ ...form, admin_name: event.target.value })} placeholder="可选" value={form.admin_name} />
+            </label>
+            <label className={styles.field}>
+              <span>邀请有效期</span>
+              <select onChange={(event) => setForm({ ...form, expires_in_days: Number(event.target.value) })} value={form.expires_in_days}>
+                <option value={1}>1 天</option>
+                <option value={3}>3 天</option>
+                <option value={7}>7 天</option>
+                <option value={14}>14 天</option>
+                <option value={30}>30 天</option>
+              </select>
+            </label>
+            {inviteUrl ? (
+              <div className={styles.inviteResult}>
+                <span>一次性邀请链接</span>
+                <code>{inviteUrl}</code>
+                <button onClick={() => navigator.clipboard?.writeText(inviteUrl)} type="button">
+                  <Copy size={14} /> 再次复制
+                </button>
+              </div>
+            ) : null}
             <div className={styles.drawerActions}>
               <button onClick={() => setDrawerOpen(false)} type="button">取消</button>
-              <button className={styles.primary} disabled={busy === "create" || !form.name.trim() || !form.admin_email.trim()} onClick={createTenant} type="button">{busy === "create" ? "创建中…" : "创建并生成邀请"}</button>
+              <button
+                className={styles.primary}
+                disabled={busy === "create" || !form.name.trim() || !form.admin_email.trim()}
+                onClick={createTenant}
+                type="button"
+              >
+                {busy === "create" ? "创建中…" : "创建并生成邀请"}
+              </button>
             </div>
           </aside>
         </div>
       ) : null}
-    </div>
+    </>
   );
 }

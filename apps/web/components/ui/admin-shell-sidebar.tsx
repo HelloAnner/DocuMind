@@ -110,12 +110,10 @@ export function AdminShellSidebar() {
         ))}
       </nav>
 
-      {!isPlatform ? (
-        <Link className="dm-return-row" href="/chat">
-          <ArrowLeft size={15} />
-          <span>返回知识问答</span>
-        </Link>
-      ) : null}
+      <Link className="dm-return-row" href="/chat">
+        <ArrowLeft size={15} />
+        <span>返回知识问答</span>
+      </Link>
       <UserAccountMenu />
     </aside>
   );

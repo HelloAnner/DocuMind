@@ -48,7 +48,7 @@ export function SystemUsers() {
           <div style={{ flex: 1 }} />
           <span style={{ color: "var(--text-muted)", fontSize: 12 }}>共 {filtered.length} 位用户</span>
         </div>
-        <Panel title="Users" action={<Badge tone="neutral">只读</Badge>}>
+        <Panel title="用户列表" action={<Badge tone="neutral">只读</Badge>}>
           <div className="dm-table-head dm-system-user-row">
             <span>邮箱</span>
             <span>状态</span>

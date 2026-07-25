@@ -1,8 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ReadonlyField } from "@/components/ui/readonly-field";
 import { Topbar } from "@/components/ui/topbar";
 import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
@@ -43,15 +43,9 @@ export function ConfigSearch() {
           {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
           {!config && !error ? <div className="dm-empty-state">加载检索配置中...</div> : null}
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="dm-config-stack">
             {fields.map((field) => (
-              <div className="dm-field-row" key={field.label}>
-                <span>{field.label}</span>
-                <div className="dm-field-suffix">
-                  <input readOnly value={field.value} />
-                  {field.suffix && <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{field.suffix}</span>}
-                </div>
-              </div>
+              <ReadonlyField key={field.label} label={field.label} value={`${field.value} ${field.suffix}`} />
             ))}
           </div>
 
@@ -73,12 +67,10 @@ export function ConfigSearch() {
 
           <div className="dm-config-section">
             <div className="dm-config-section-title">重排序模型</div>
-            <button className="dm-field-row" disabled type="button" style={{ width: "100%", cursor: "default" }}>
-              <span>
-                {search?.rerank_model ?? ""} ({search?.rerank_api_configured ? "HTTP 服务" : "词法回退"})
-              </span>
-              <ChevronRight size={16} style={{ color: "var(--text-muted)" }} />
-            </button>
+            <ReadonlyField
+              label={search?.rerank_model ?? "—"}
+              value={search?.rerank_api_configured ? "HTTP 服务" : "词法回退"}
+            />
           </div>
         </div>
       </div>

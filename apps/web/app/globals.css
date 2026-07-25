@@ -2355,6 +2355,52 @@ a {
   margin: 0;
 }
 
+/* Readonly field */
+
+.dm-readonly-field {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  min-height: 48px;
+  padding: 0 14px;
+}
+
+.dm-readonly-field-label {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.dm-readonly-field-value {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  font-size: 13px;
+  font-weight: 500;
+  gap: 10px;
+  min-width: 0;
+}
+
+.dm-readonly-field-value code {
+  background: var(--bg-tertiary);
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  padding: 5px 9px;
+}
+
+.dm-readonly-field-value .dm-icon-button {
+  color: var(--text-muted);
+}
+
+.dm-readonly-field-value .dm-icon-button:hover {
+  color: var(--text-primary);
+}
+
 /* Config */
 
 .dm-config-content {
@@ -2884,6 +2930,38 @@ a {
   align-items: center;
   display: flex;
   gap: 8px;
+  justify-content: flex-end;
+}
+
+.dm-row-actions button {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  height: 28px;
+  padding: 0 10px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.dm-row-actions button:hover {
+  background: var(--hover-bg);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.dm-row-actions button.danger:hover {
+  color: var(--color-error);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.dm-row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
 }
 
 .dm-tenant-row,
@@ -2899,7 +2977,68 @@ a {
 }
 
 .dm-tenant-row {
-  grid-template-columns: minmax(0, 1.2fr) 90px 70px 80px 100px 110px 100px;
+  grid-template-columns: minmax(0, 1.25fr) 90px 110px 120px 90px 120px 120px;
+}
+
+.dm-tenant-row > span {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-tenant-row .dm-badge {
+  justify-self: start;
+}
+
+.dm-tenant-row small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.dm-member-row,
+.dm-invite-row {
+  align-items: center;
+  border-bottom: 1px solid var(--border-faint);
+  display: grid;
+  gap: 12px;
+  min-height: 50px;
+  padding: 8px 0;
+}
+
+.dm-member-row {
+  grid-template-columns: minmax(0, 1.3fr) 130px minmax(0, 1fr) 130px 90px 130px;
+}
+
+.dm-invite-row {
+  grid-template-columns: minmax(0, 1.25fr) 110px 110px 160px 90px 130px;
+}
+
+.dm-member-row > span,
+.dm-invite-row > span {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-member-row .dm-badge,
+.dm-invite-row .dm-badge {
+  justify-self: start;
+}
+
+.dm-member-row small,
+.dm-invite-row small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 11px;
+  margin-top: 2px;
 }
 
 .dm-system-user-row {

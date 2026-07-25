@@ -30,7 +30,7 @@ export function SystemModels() {
         <Badge tone="neutral">只读配置</Badge>
       </Topbar>
       <div className="dm-admin-content">
-        <Panel title="Providers">
+        <Panel title="模型服务提供商">
           {models.map((m) => (
             <div className="dm-model-row" key={m.id}>
               <div className="dm-model-name">

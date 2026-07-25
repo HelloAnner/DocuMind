@@ -3,13 +3,20 @@
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
+import { ReadonlyField } from "@/components/ui/readonly-field";
 import { Topbar } from "@/components/ui/topbar";
 import { getSystemSettings, type SystemSettingsSnapshot } from "@/lib/api";
 
-const yesNo = (value: boolean) => (value ? "是" : "否");
+function ConfiguredBadge({ configured }: { configured: boolean }) {
+  return (
+    <Badge tone={configured ? "success" : "warning"}>
+      {configured ? "已配置" : "未配置"}
+    </Badge>
+  );
+}
 
-function tone(value: boolean) {
-  return value ? "success" : "warning";
+function AuthBadge({ enabled }: { enabled: boolean }) {
+  return <Badge tone={enabled ? "success" : "warning"}>{enabled ? "是" : "否"}</Badge>;
 }
 
 export function SystemSettings() {
@@ -24,9 +31,10 @@ export function SystemSettings() {
 
   return (
     <>
-      <Topbar title="系统设置">
-        <Badge tone="neutral">只读配置</Badge>
+      <Topbar title="系统设置" subtitle="只读运行配置，变更需更新服务器环境并重新部署">
+        <Badge tone="neutral">只读</Badge>
       </Topbar>
+
       <div className="dm-admin-content">
         <div className="dm-config-content">
           <p>系统设置来自远端运行环境，修改需要更新服务器配置并重新部署。</p>
@@ -37,113 +45,83 @@ export function SystemSettings() {
             <>
               <Panel title="运行入口">
                 <div className="dm-config-stack">
-                  <div className="dm-field-row">
-                    <span>运行环境</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.environment} />
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>监听地址</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={`${settings.service.host}:${settings.service.port}`} />
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>访问前缀</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.service.base_path} />
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>健康检查</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.service.health_path} />
-                    </div>
-                  </div>
+                  <ReadonlyField label="运行环境" value={settings.environment} />
+                  <ReadonlyField
+                    label="监听地址"
+                    value={`${settings.service.host}:${settings.service.port}`}
+                    code
+                    copyable
+                  />
+                  <ReadonlyField label="访问前缀" value={settings.service.base_path} code copyable />
+                  <ReadonlyField label="健康检查" value={settings.service.health_path} code />
                 </div>
               </Panel>
 
               <Panel title="认证">
                 <div className="dm-config-stack">
-                  <div className="dm-field-row">
-                    <span>登录模式</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.auth.login_mode} />
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>会话有效期</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.auth.token_expire_hours} />
-                      <span style={{ color: "var(--text-muted)", fontSize: 13 }}>小时</span>
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>本地登录</span>
-                    <Badge tone={tone(settings.auth.local_login_enabled)}>{yesNo(settings.auth.local_login_enabled)}</Badge>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>门户登录</span>
-                    <Badge tone={tone(settings.auth.portal_login_enabled)}>{yesNo(settings.auth.portal_login_enabled)}</Badge>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>门户换票接口</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly style={{ minWidth: 280 }} value={settings.auth.portal_exchange_endpoint} />
-                    </div>
-                  </div>
+                  <ReadonlyField label="登录模式" value={settings.auth.login_mode} />
+                  <ReadonlyField label="会话有效期" value={`${settings.auth.token_expire_hours} 小时`} />
+                  <ReadonlyField
+                    label="本地登录"
+                    value={<AuthBadge enabled={settings.auth.local_login_enabled} />}
+                  />
+                  <ReadonlyField
+                    label="门户登录"
+                    value={<AuthBadge enabled={settings.auth.portal_login_enabled} />}
+                  />
+                  <ReadonlyField
+                    label="门户换票接口"
+                    value={settings.auth.portal_exchange_endpoint}
+                    code
+                    copyable
+                  />
                 </div>
               </Panel>
 
               <Panel title="基础组件">
                 <div className="dm-config-stack">
-                  {[
-                    ["PostgreSQL", settings.storage.database_configured],
-                    ["Redis", settings.storage.redis_configured],
-                    ["RabbitMQ", settings.storage.rabbitmq_configured],
-                    ["Elasticsearch", settings.storage.elasticsearch_configured],
-                    ["对象存储 endpoint", settings.storage.object_storage_endpoint_configured],
-                  ].map(([label, configured]) => (
-                    <div className="dm-field-row" key={label as string}>
-                      <span>{label as string}</span>
-                      <Badge tone={tone(Boolean(configured))}>{Boolean(configured) ? "已配置" : "未配置"}</Badge>
-                    </div>
-                  ))}
-                  <div className="dm-field-row">
-                    <span>对象存储</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={`${settings.storage.object_storage_provider}/${settings.storage.object_storage_bucket}`} />
-                    </div>
-                  </div>
-                  <div className="dm-field-row">
-                    <span>Presign 有效期</span>
-                    <div className="dm-field-suffix">
-                      <input readOnly value={settings.storage.object_storage_presign_expire_seconds} />
-                      <span style={{ color: "var(--text-muted)", fontSize: 13 }}>秒</span>
-                    </div>
-                  </div>
+                  <ReadonlyField
+                    label="PostgreSQL"
+                    value={<ConfiguredBadge configured={settings.storage.database_configured} />}
+                  />
+                  <ReadonlyField
+                    label="Redis"
+                    value={<ConfiguredBadge configured={settings.storage.redis_configured} />}
+                  />
+                  <ReadonlyField
+                    label="RabbitMQ"
+                    value={<ConfiguredBadge configured={settings.storage.rabbitmq_configured} />}
+                  />
+                  <ReadonlyField
+                    label="Elasticsearch"
+                    value={<ConfiguredBadge configured={settings.storage.elasticsearch_configured} />}
+                  />
+                  <ReadonlyField
+                    label="对象存储 endpoint"
+                    value={<ConfiguredBadge configured={settings.storage.object_storage_endpoint_configured} />}
+                  />
+                  <ReadonlyField
+                    label="对象存储"
+                    value={`${settings.storage.object_storage_provider} / ${settings.storage.object_storage_bucket}`}
+                    code
+                    copyable
+                  />
+                  <ReadonlyField
+                    label="Presign 有效期"
+                    value={`${settings.storage.object_storage_presign_expire_seconds} 秒`}
+                  />
                 </div>
               </Panel>
 
               <Panel title="部署路径">
                 <div className="dm-config-stack">
-                  {[
-                    ["主机别名", settings.deployment.host_alias],
-                    ["部署根目录", settings.deployment.root],
-                    ["当前版本", settings.deployment.current],
-                    ["版本目录", settings.deployment.releases],
-                    ["共享目录", settings.deployment.shared],
-                    [".env", settings.deployment.env_file],
-                    ["日志文件", settings.deployment.log_file],
-                  ].map(([label, value]) => (
-                    <div className="dm-field-row" key={label}>
-                      <span>{label}</span>
-                      <div className="dm-field-suffix">
-                        <input readOnly style={{ minWidth: 340 }} value={value} />
-                      </div>
-                    </div>
-                  ))}
+                  <ReadonlyField label="主机别名" value={settings.deployment.host_alias} />
+                  <ReadonlyField label="部署根目录" value={settings.deployment.root} code copyable />
+                  <ReadonlyField label="当前版本" value={settings.deployment.current} code copyable />
+                  <ReadonlyField label="版本目录" value={settings.deployment.releases} code copyable />
+                  <ReadonlyField label="共享目录" value={settings.deployment.shared} code copyable />
+                  <ReadonlyField label=".env" value={settings.deployment.env_file} code copyable />
+                  <ReadonlyField label="日志文件" value={settings.deployment.log_file} code copyable />
                   <p className="dm-form-note">
                     容器：{settings.deployment.containers.join(" / ")}
                   </p>

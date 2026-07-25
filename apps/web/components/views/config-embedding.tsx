@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { ReadonlyField } from "@/components/ui/readonly-field";
 import { Topbar } from "@/components/ui/topbar";
 import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
@@ -53,24 +54,9 @@ export function ConfigEmbedding() {
 
           <div className="dm-config-section">
             <div className="dm-config-section-title">运行参数</div>
-            <div className="dm-field-row">
-              <span>批处理大小</span>
-              <div className="dm-field-suffix">
-                <input readOnly value={embedding?.batch_size ?? ""} />
-              </div>
-            </div>
-            <div className="dm-field-row">
-              <span>索引名称</span>
-              <div className="dm-field-suffix">
-                <input readOnly style={{ minWidth: 180 }} value={embedding?.index_name ?? ""} />
-              </div>
-            </div>
-            <div className="dm-field-row">
-              <span>查询别名</span>
-              <div className="dm-field-suffix">
-                <input readOnly style={{ minWidth: 180 }} value={embedding?.index_alias ?? ""} />
-              </div>
-            </div>
+            <ReadonlyField label="批处理大小" value={String(embedding?.batch_size ?? "")} />
+            <ReadonlyField label="索引名称" value={embedding?.index_name ?? ""} code />
+            <ReadonlyField label="查询别名" value={embedding?.index_alias ?? ""} code />
           </div>
         </div>
       </div>

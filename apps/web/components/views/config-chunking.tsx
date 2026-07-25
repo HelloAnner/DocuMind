@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { ReadonlyField } from "@/components/ui/readonly-field";
 import { Topbar } from "@/components/ui/topbar";
 import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
@@ -68,15 +69,9 @@ export function ConfigChunking() {
             ))}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="dm-config-stack">
             {parameters.map((param) => (
-              <div className="dm-field-row" key={param.label}>
-                <span>{param.label}</span>
-                <div className="dm-field-suffix">
-                  <input readOnly value={param.value} />
-                  <span style={{ color: "var(--text-muted)", fontSize: 13 }}>{param.suffix}</span>
-                </div>
-              </div>
+              <ReadonlyField key={param.label} label={param.label} value={`${param.value} ${param.suffix}`} />
             ))}
           </div>
 

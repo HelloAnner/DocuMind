@@ -7,8 +7,8 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 10px;
-  color: #26332e;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
   cursor: pointer;
   display: grid;
   gap: 9px;
@@ -20,14 +20,14 @@
 
 .trigger:hover,
 .trigger[aria-expanded="true"] {
-  background: rgba(31, 95, 74, 0.08);
+  background: var(--hover-bg);
 }
 
 .avatar {
   align-items: center;
-  background: #1f5f4a;
-  border-radius: 9px;
-  color: #fff;
+  background: var(--text-primary);
+  border-radius: var(--radius-sm);
+  color: var(--bg-primary);
   display: flex;
   font-size: 12px;
   font-weight: 700;
@@ -56,22 +56,23 @@
 }
 
 .identity strong {
+  color: var(--text-primary);
   font-size: 12px;
   font-weight: 650;
 }
 
 .identity span {
-  color: #7a817e;
+  color: var(--text-muted);
   font-size: 10px;
   margin-top: 2px;
 }
 
 .menu {
-  background: #fff;
-  border: 1px solid #dedfd9;
-  border-radius: 12px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
   bottom: calc(100% - 4px);
-  box-shadow: 0 16px 38px rgba(25, 39, 33, 0.14);
+  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.1);
   left: 12px;
   overflow: hidden;
   padding: 6px;
@@ -85,8 +86,8 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 8px;
-  color: #28332f;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
   cursor: pointer;
   display: flex;
   font: inherit;
@@ -99,15 +100,16 @@
 
 .menu a:hover,
 .menu button:hover {
-  background: #f2f4f1;
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 .menu .danger {
-  color: #a33b35;
+  color: var(--color-error);
 }
 
 .divider {
-  background: #e8e9e5;
+  background: var(--border-muted);
   height: 1px;
   margin: 5px 3px;
 }

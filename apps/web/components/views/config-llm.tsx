@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { ReadonlyField } from "@/components/ui/readonly-field";
 import { Topbar } from "@/components/ui/topbar";
 import { getAdminRuntimeConfig, type AdminRuntimeConfig } from "@/lib/api";
 
@@ -47,31 +48,17 @@ export function ConfigLlm() {
             ))}
           </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <div className="dm-field-row">
-              <span>API 地址</span>
-              <div className="dm-field-suffix">
-                <input readOnly style={{ minWidth: 320 }} value={llm?.base_url ?? ""} />
-              </div>
-            </div>
-            <div className="dm-field-row">
-              <span>API Key</span>
-              <div className="dm-field-suffix">
-                <input readOnly value={llm?.api_key_configured ? "已配置" : "未配置"} />
-              </div>
-            </div>
-            <div className="dm-field-row">
-              <span>模型名称</span>
-              <div className="dm-field-suffix">
-                <input readOnly value={llm?.model ?? ""} />
-              </div>
-            </div>
-            <div className="dm-field-row">
-              <span>查询改写模型</span>
-              <div className="dm-field-suffix">
-                <input readOnly value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"} />
-              </div>
-            </div>
+          <div className="dm-config-stack">
+            <ReadonlyField label="API 地址" value={llm?.base_url ?? ""} code copyable />
+            <ReadonlyField
+              label="API Key"
+              value={llm?.api_key_configured ? "已配置" : "未配置"}
+            />
+            <ReadonlyField label="模型名称" value={llm?.model ?? ""} />
+            <ReadonlyField
+              label="查询改写模型"
+              value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"}
+            />
           </div>
 
           <div className="dm-config-section">
@@ -83,12 +70,7 @@ export function ConfigLlm() {
               </div>
               <input disabled max={100} min={0} type="range" value={Math.round((llm?.temperature ?? 0) * 100)} />
             </div>
-            <div className="dm-field-row">
-              <span>最大输出 tokens</span>
-              <div className="dm-field-suffix">
-                <input readOnly value={llm?.max_output_tokens ?? ""} />
-              </div>
-            </div>
+            <ReadonlyField label="最大输出 tokens" value={llm?.max_output_tokens ?? ""} />
           </div>
         </div>
       </div>

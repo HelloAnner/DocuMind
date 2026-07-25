@@ -52,7 +52,7 @@ export function SystemAudit() {
           />
         </div>
 
-        <Panel title="Events">
+        <Panel title="审计事件">
           <div className="dm-table-head dm-audit-row">
             <span>时间</span>
             <span>租户</span>
