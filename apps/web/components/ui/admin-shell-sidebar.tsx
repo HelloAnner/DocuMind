@@ -21,6 +21,7 @@ import {
   Users,
   type LucideIcon,
 } from "lucide-react";
+import { useAuth } from "@/components/providers/auth-provider";
 import { NavItem } from "./nav-item";
 import { UserAccountMenu } from "./user-account-menu";
 
@@ -87,15 +88,21 @@ function isActive(pathname: string, item: NavEntry) {
 
 export function AdminShellSidebar() {
   const pathname = usePathname();
+  const { me } = useAuth();
   const isPlatform = pathname.startsWith("/system");
   const sections = isPlatform ? platformSections : tenantSections;
   const homeHref = isPlatform ? "/system" : "/admin";
+  const tenantName = me?.tenant.name;
+  const tenantSlug = me?.tenant.slug;
 
   return (
     <aside className="dm-admin-sidebar">
       <div className="dm-sidebar-top">
         <Link className="dm-admin-logo" href={homeHref}>
-          DocuMind
+          {isPlatform || !tenantName ? "DocuMind" : tenantName}
+          {!isPlatform && tenantSlug ? (
+            <span className="dm-admin-logo-slug">{tenantSlug}</span>
+          ) : null}
         </Link>
       </div>
 

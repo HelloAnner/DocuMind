@@ -244,8 +244,11 @@ async fn authenticate_from_db(
 
     let tenant_id: Uuid = membership.get("tenant_id");
     let membership_roles: Vec<String> = membership.get("roles");
-    let is_super_admin = platform_admin_active(pool, user_id).await?;
-    let roles = normalized_actor_roles(&membership_roles, is_super_admin);
+    let explicit_tenant = tenant_key.map(|v| !v.trim().is_empty()).unwrap_or(false);
+    let include_super_admin = !explicit_tenant;
+    let is_platform_admin = platform_admin_active(pool, user_id).await?;
+    let is_super_admin = is_platform_admin && include_super_admin;
+    let roles = normalized_actor_roles(&membership_roles, include_super_admin);
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -369,8 +372,10 @@ async fn resolve_actor_from_db(
     .await?
     .ok_or_else(AppError::unauthorized)?;
     let membership_roles: Vec<String> = membership.get("roles");
-    let is_super_admin = platform_admin_active(pool, user_id).await?;
-    let roles = normalized_actor_roles(&membership_roles, is_super_admin);
+    let include_super_admin = _requested_role == "super_admin";
+    let is_platform_admin = platform_admin_active(pool, user_id).await?;
+    let is_super_admin = is_platform_admin && include_super_admin;
+    let roles = normalized_actor_roles(&membership_roles, include_super_admin);
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
@@ -404,7 +409,7 @@ async fn platform_admin_active(pool: &PgPool, user_id: Uuid) -> Result<bool, App
     .await?)
 }
 
-fn normalized_actor_roles(membership_roles: &[String], is_super_admin: bool) -> Vec<String> {
+fn normalized_actor_roles(membership_roles: &[String], include_super_admin: bool) -> Vec<String> {
     let mut roles = membership_roles
         .iter()
         .filter_map(|role| match role.as_str() {
@@ -418,7 +423,7 @@ fn normalized_actor_roles(membership_roles: &[String], is_super_admin: bool) -> 
         .collect::<Vec<_>>();
     roles.sort();
     roles.dedup();
-    if is_super_admin {
+    if include_super_admin {
         roles.insert(0, "super_admin".to_string());
     }
     roles
@@ -494,8 +499,8 @@ fn build_actor_from_fallback(
     role: &str,
     default_kb_ids: Vec<Uuid>,
 ) -> CurrentActor {
-    let is_super_admin = role == "super_admin";
-    let roles = normalized_actor_roles(&[role.to_string()], is_super_admin);
+    let include_super_admin = role == "super_admin";
+    let roles = normalized_actor_roles(&[role.to_string()], include_super_admin);
     CurrentActor {
         user_id,
         tenant_id,
@@ -503,12 +508,12 @@ fn build_actor_from_fallback(
         name: name.to_string(),
         roles: roles.clone(),
         permissions: derive_permissions(&roles),
-        allowed_kb_ids: if is_super_admin {
+        allowed_kb_ids: if include_super_admin {
             Vec::new()
         } else {
             default_kb_ids
         },
-        is_super_admin,
+        is_super_admin: include_super_admin,
     }
 }
 
