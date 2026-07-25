@@ -205,7 +205,7 @@ export function SystemTenants() {
 
   return (
     <>
-      <Topbar title="租户管理" subtitle="管理租户生命周期和初始管理员邀请">
+      <Topbar title="租户管理" subtitle="管理租户生命周期；成员登录链接用于分发给租户成员，超级管理员自身登录仍会进入系统管理后台">
         <Button icon={<Plus size={14} />} onClick={() => { setDrawerOpen(true); setInviteUrl(""); }}>
           新建租户
         </Button>
@@ -242,7 +242,7 @@ export function SystemTenants() {
             <span>成员 / 管理员</span>
             <span>内容规模</span>
             <span>套餐</span>
-            <span>访问入口</span>
+            <span>成员登录链接</span>
             <span>操作</span>
           </div>
           {filtered.map((tenant) => (
@@ -268,9 +268,9 @@ export function SystemTenants() {
               <span>{planLabel[tenant.plan]}</span>
               <div className="dm-row-actions" style={{ justifyContent: "flex-start" }}>
                 <IconButton
-                  aria-label="复制租户访问链接"
+                  aria-label="复制成员登录链接"
                   onClick={() => copyAccessUrl(tenant.slug)}
-                  title={tenantAccessUrl(tenant.slug)}
+                  title={`复制给 ${tenant.name} 成员使用的登录链接：${tenantAccessUrl(tenant.slug)}`}
                 >
                   {copiedSlug === tenant.slug ? <Check size={14} /> : <Link2 size={14} />}
                 </IconButton>

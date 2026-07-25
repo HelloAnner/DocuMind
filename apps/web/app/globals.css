@@ -2691,6 +2691,21 @@ a {
   margin-bottom: 4px;
 }
 
+.dm-login-tenant-hint {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  text-align: center;
+}
+
+.dm-login-tenant-hint strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
 .dm-field {
   display: flex;
   flex-direction: column;

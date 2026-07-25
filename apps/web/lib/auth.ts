@@ -139,11 +139,19 @@ function storeLoginResponse(data: LoginResponse) {
   });
 }
 
-export async function loginWithPassword(username: string, password: string): Promise<MeResponse> {
+export async function loginWithPassword(
+  username: string,
+  password: string,
+  tenantSlug?: string
+): Promise<MeResponse> {
+  const body: Record<string, string> = { email: username, password };
+  if (tenantSlug?.trim()) {
+    body.tenant_slug = tenantSlug.trim();
+  }
   const res = await fetch(`${BASE}/api/v1/auth/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email: username, password }),
+    body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error("用户名或密码错误");
   const data: LoginResponse = await res.json();

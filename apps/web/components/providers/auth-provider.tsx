@@ -7,7 +7,7 @@ import { defaultRouteForRole, getMe, getStoredAuth, loginWithPassword, logoutReq
 interface AuthContextValue {
   me: MeResponse | null;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, tenantSlug?: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -41,8 +41,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [refresh]);
 
   const login = useCallback(
-    async (username: string, password: string) => {
-      const data = await loginWithPassword(username, password);
+    async (username: string, password: string, tenantSlug?: string) => {
+      const data = await loginWithPassword(username, password, tenantSlug);
       setMe(data);
       router.replace(defaultRouteForRole(data.roles[0] ?? "user"));
     },
