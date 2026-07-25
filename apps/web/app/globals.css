@@ -336,15 +336,15 @@ a {
 }
 
 .dm-topbar h1 {
-  font-size: 20px;
+  font-size: 18px;
   font-weight: 600;
-  line-height: 1.1;
+  line-height: 1.2;
   margin: 0;
 }
 
 .dm-topbar p {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   margin: 3px 0 0;
 }
 
@@ -473,7 +473,7 @@ a {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 16px 20px;
+  padding: 14px 16px;
 }
 
 .dm-stat-label {
@@ -486,15 +486,15 @@ a {
 .dm-stat-value {
   color: var(--text-primary);
   display: block;
-  font-size: 26px;
-  font-weight: 700;
-  line-height: 1.15;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
   margin: 4px 0 2px;
 }
 
 .dm-stat-hint {
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Search input */
@@ -562,7 +562,7 @@ a {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   min-width: 0;
-  padding: 20px;
+  padding: 16px;
 }
 
 .dm-panel-head {
@@ -573,11 +573,11 @@ a {
 }
 
 .dm-panel-title {
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .dm-panel-action {
@@ -640,9 +640,10 @@ a {
 }
 
 .dm-recent-doc-name strong {
+  color: var(--text-primary);
   display: block;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -651,7 +652,7 @@ a {
 .dm-recent-doc-name small {
   color: var(--text-muted);
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 /* Document row */
@@ -694,8 +695,8 @@ a {
 
 .dm-document-name strong {
   display: block;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -704,11 +705,12 @@ a {
 .dm-document-name small {
   color: var(--text-muted);
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .dm-document-cell {
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
 }
 
 .dm-document-actions {
@@ -786,13 +788,13 @@ a {
 
 .dm-knowledge-card > strong {
   color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-knowledge-card > p {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
   margin: 0;
 }
@@ -801,7 +803,7 @@ a {
   align-items: center;
   color: var(--text-muted);
   display: flex;
-  font-size: 11px;
+  font-size: 12px;
   justify-content: space-between;
   margin-top: auto;
 }
@@ -1480,7 +1482,7 @@ a {
 }
 
 .dm-manual-actions {
-  background: #faf9f6;
+  background: var(--bg-tertiary);
   border: 1px solid var(--border-faint);
   border-radius: var(--radius-md);
   display: flex;
@@ -1497,12 +1499,13 @@ a {
 
 .dm-manual-actions-head strong {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-manual-actions-head span {
   color: var(--text-muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -1739,8 +1742,8 @@ a {
 
 .dm-drop-zone strong {
   color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-drop-zone span {
@@ -1769,8 +1772,8 @@ a {
 .dm-file-preview-head strong {
   color: var(--text-primary);
   display: block;
-  font-size: 15px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-select {
@@ -1965,12 +1968,12 @@ a {
 
 .dm-health-row span {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .dm-health-row strong {
   color: var(--text-primary);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -2072,13 +2075,13 @@ a {
 
 .dm-config-card strong {
   color: var(--text-primary);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-config-card p {
-  color: var(--text-secondary);
-  font-size: 12px;
+  color: var(--text-tertiary);
+  font-size: 13px;
   line-height: 1.5;
   margin: 0;
 }
@@ -2128,20 +2131,20 @@ a {
 .dm-model-card strong {
   color: var(--text-primary);
   display: block;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-model-card small {
   color: var(--text-muted);
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .dm-model-card em {
   color: var(--text-muted);
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-style: normal;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2224,7 +2227,7 @@ a {
   color: var(--text-primary);
   display: block;
   font-size: 14px;
-  font-weight: 600;
+  font-weight: 500;
 }
 
 .dm-provider-card small,
@@ -2264,7 +2267,7 @@ a {
 .dm-table-row {
   border-bottom: 1px solid var(--border-faint);
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 /* Form elements */
@@ -2439,11 +2442,11 @@ a {
 }
 
 .dm-config-section-title {
-  color: var(--text-muted);
-  font-size: 12px;
+  color: var(--text-secondary);
+  font-size: 13px;
   font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
+  letter-spacing: 0;
+  text-transform: none;
 }
 
 .dm-button-row {
@@ -2506,21 +2509,21 @@ a {
 .dm-user-cell strong {
   color: var(--text-primary);
   display: block;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: 14px;
+  font-weight: 500;
 }
 
 .dm-user-cell small {
   color: var(--text-muted);
   display: block;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .dm-log-row > span,
 .dm-user-row > span,
 .dm-user-row > div {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -2529,7 +2532,7 @@ a {
 
 .dm-log-row > span:first-child {
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 500;
 }
 
@@ -2751,8 +2754,8 @@ a {
 /* System sidebar */
 
 .dm-system-sidebar {
-  background: #fdfcfb;
-  border-right: 1px solid #e8e6e3;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-subtle);
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
@@ -2762,8 +2765,8 @@ a {
 
 .dm-admin-sidebar,
 .dm-system-sidebar {
-  background: #fdfcfb;
-  border-right: 1px solid #e8e6e3;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-subtle);
 }
 
 .dm-admin-sidebar .dm-sidebar-top,
@@ -2774,16 +2777,16 @@ a {
 
 .dm-admin-sidebar .dm-admin-logo,
 .dm-system-sidebar .dm-admin-logo {
-  color: #18181b;
-  font-size: 16px;
-  font-weight: 650;
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
 }
 
 .dm-admin-sidebar .dm-nav-group-title,
 .dm-system-sidebar .dm-nav-group-title {
-  color: #8a8a85;
-  font-size: 13px;
-  font-weight: normal;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
   letter-spacing: 0;
   padding: 10px 12px 8px;
   text-transform: none;
@@ -2792,8 +2795,8 @@ a {
 .dm-admin-sidebar .dm-nav-item,
 .dm-system-sidebar .dm-nav-item {
   border-radius: 10px;
-  color: #52525b;
-  font-size: 15px;
+  color: var(--text-secondary);
+  font-size: 14px;
   font-weight: normal;
   gap: 10px;
   height: 38px;
@@ -2803,21 +2806,21 @@ a {
 
 .dm-admin-sidebar .dm-nav-item:hover,
 .dm-system-sidebar .dm-nav-item:hover {
-  background: #f3f2f0;
-  color: #18181b;
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 .dm-admin-sidebar .dm-nav-item.active,
 .dm-system-sidebar .dm-nav-item.active {
-  background: #e8e7e4;
-  color: #18181b;
+  background: var(--selected-bg);
+  color: var(--text-primary);
   font-weight: 500;
 }
 
 .dm-admin-sidebar .dm-return-row,
 .dm-system-sidebar .dm-return-row {
-  border-top: 1px solid #ebe9e6;
-  color: #71717a;
+  border-top: 1px solid var(--border-muted);
+  color: var(--text-tertiary);
   font-size: 13px;
   min-height: 44px;
   padding: 0 16px;
@@ -2825,8 +2828,8 @@ a {
 
 .dm-admin-sidebar .dm-return-row:hover,
 .dm-system-sidebar .dm-return-row:hover {
-  background: #f3f2f0;
-  color: #18181b;
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 /* Public pages (knowledge / history) */

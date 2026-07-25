@@ -64,7 +64,7 @@ export function AdminLogs() {
           />
         </div>
 
-        <Panel title="Q&A Logs" action={<span>共 {logs.length} 条记录</span>}>
+        <Panel title="问答记录" action={<span>共 {logs.length} 条记录</span>}>
           <div className="dm-table-head dm-log-row">
             <span>问题</span>
             <span>知识库</span>

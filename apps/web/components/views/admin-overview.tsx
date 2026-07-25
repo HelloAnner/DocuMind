@@ -74,7 +74,7 @@ export function AdminOverview() {
           </Panel>
 
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-            <Panel title="System Health">
+            <Panel title="运行健康">
               {[
                 { label: "索引完成", value: `${data?.indexed_doc_count ?? 0}/${data?.doc_count ?? 0}` },
                 { label: "运行任务", value: String(data?.running_jobs ?? 0) },

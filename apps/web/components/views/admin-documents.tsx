@@ -506,7 +506,7 @@ export function AdminDocuments() {
           </Panel>
 
           <Panel
-            title="Documents"
+            title="文档列表"
             action={
               <div className="dm-document-panel-actions">
                 <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={() => handleRetryFailed().catch(console.error)}>
