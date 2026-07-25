@@ -413,7 +413,13 @@ fn normalized_actor_roles(membership_roles: &[String], include_super_admin: bool
     let mut roles = membership_roles
         .iter()
         .filter_map(|role| match role.as_str() {
-            "super_admin" => None,
+            "super_admin" => {
+                if include_super_admin {
+                    None
+                } else {
+                    Some("tenant_admin".to_string())
+                }
+            }
             "enterprise_admin" | "team_admin" | "data_admin" | "tenant_owner" | "tenant_admin" => {
                 Some("tenant_admin".to_string())
             }
