@@ -60,18 +60,26 @@ const platformSections: NavSection[] = [
 
 const tenantSections: NavSection[] = [
   {
-    title: "租户工作台",
+    title: "概览",
+    items: [{ label: "租户总览", href: "/admin", icon: LayoutDashboard, exact: true }],
+  },
+  {
+    title: "知识库",
     items: [
-      { label: "租户总览", href: "/admin", icon: LayoutDashboard, exact: true },
       { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
       { label: "文档与解析", href: "/admin/documents", icon: FileText },
       { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
+    ],
+  },
+  {
+    title: "成员与权限",
+    items: [
       { label: "成员与邀请", href: "/admin/members", icon: Users },
       { label: "访问权限", href: "/admin/permissions", icon: Shield },
     ],
   },
   {
-    title: "知识库配置",
+    title: "模型与检索",
     items: [
       { label: "切割策略", href: "/admin/chunking", icon: Scissors },
       { label: "检索参数", href: "/admin/search", icon: Search },
