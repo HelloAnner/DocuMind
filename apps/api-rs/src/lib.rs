@@ -78,6 +78,7 @@ fn api_routes() -> Router<AppState> {
         .route("/api/metrics", get(metrics))
         .route("/api/config", get(config_snapshot))
         .merge(api::auth_router())
+        .merge(api::tenant_login_router())
         .merge(api::account_router())
         .merge(api::system_router())
         .merge(api::admin_router())

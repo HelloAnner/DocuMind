@@ -10,6 +10,7 @@ pub mod runtime_events;
 pub mod system;
 pub mod system_tenant_invitations;
 pub mod system_tenants;
+pub mod tenant_login;
 
 pub use account::router as account_router;
 pub use admin::router as admin_router;
@@ -20,3 +21,4 @@ pub use documents::router as documents_router;
 pub use history::router as history_router;
 pub use knowledge::router as knowledge_router;
 pub use system::router as system_router;
+pub use tenant_login::router as tenant_login_router;

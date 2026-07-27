@@ -39,6 +39,22 @@ export interface LoginResponse extends MeResponse {
   token_type: "bearer";
 }
 
+export type TenantLoginTone = "violet" | "azure" | "jade" | "amber" | "rose";
+
+export interface TenantLoginBranding {
+  kicker?: string;
+  headline?: string;
+  description?: string;
+  welcome?: string;
+  tone?: TenantLoginTone;
+}
+
+export interface TenantLoginContext {
+  name: string;
+  slug: string;
+  branding: TenantLoginBranding;
+}
+
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const AUTH_KEY = "documind-auth";
 
@@ -137,6 +153,18 @@ function storeLoginResponse(data: LoginResponse) {
     email: data.user.email,
     roles: data.roles,
   });
+}
+
+export async function getTenantLoginContext(tenantSlug: string): Promise<TenantLoginContext> {
+  const slug = tenantSlug.trim();
+  const response = await fetch(
+    `${BASE}/api/v1/auth/tenant-context?tenant=${encodeURIComponent(slug)}`,
+    { headers: { Accept: "application/json" } }
+  );
+  if (!response.ok) {
+    throw new Error(response.status === 404 ? "企业登录入口不存在或暂不可用" : "暂时无法识别企业登录入口");
+  }
+  return response.json() as Promise<TenantLoginContext>;
 }
 
 export async function loginWithPassword(
