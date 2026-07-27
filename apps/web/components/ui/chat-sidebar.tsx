@@ -255,9 +255,9 @@ export function ChatSidebar() {
   return (
     <aside className={`dm-chat-sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="dm-chat-sidebar-header">
-        <BrandMark compact={collapsed} />
+        <BrandMark />
         <div className="dm-chat-sidebar-header-actions">
-          {!collapsed ? <ThemeToggle /> : null}
+          <ThemeToggle />
           <IconButton
             aria-label={collapsed ? "展开会话导航" : "收起会话导航"}
             className="dm-chat-sidebar-collapse"

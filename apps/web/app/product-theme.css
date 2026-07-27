@@ -1063,26 +1063,28 @@ select:focus-visible {
   width: 40px;
 }
 
+.dm-chat-sidebar.collapsed .dm-brand-wordmark,
+.dm-chat-sidebar.collapsed .dm-theme-toggle,
 .dm-chat-sidebar.collapsed .dm-new-session-button span,
 .dm-chat-sidebar.collapsed .dm-chat-history,
-.dm-chat-sidebar.collapsed [class*="identity"],
-.dm-chat-sidebar.collapsed [class*="trigger"] > svg {
+.dm-chat-sidebar.collapsed .dm-user-menu-identity,
+.dm-chat-sidebar.collapsed .dm-user-menu-trigger > svg {
   display: none;
 }
 
-.dm-chat-sidebar.collapsed [class*="root"] {
+.dm-chat-sidebar.collapsed .dm-user-menu-root {
   margin-top: auto;
   padding: 8px;
   width: 56px;
 }
 
-.dm-chat-sidebar.collapsed [class*="trigger"] {
+.dm-chat-sidebar.collapsed .dm-user-menu-trigger {
   display: flex;
   justify-content: center;
   padding: 4px;
 }
 
-.dm-chat-sidebar.collapsed [class*="menu"] {
+.dm-chat-sidebar.collapsed .dm-user-menu-popover {
   bottom: 8px;
   left: 48px;
   right: auto;
@@ -1930,10 +1932,20 @@ select:focus-visible {
   }
 
   .dm-chat-sidebar.collapsed .dm-brand-wordmark,
+  .dm-chat-sidebar.collapsed .dm-user-menu-identity {
+    display: block;
+  }
+
+  .dm-chat-sidebar.collapsed .dm-theme-toggle {
+    display: inline-flex;
+  }
+
+  .dm-chat-sidebar.collapsed .dm-user-menu-trigger > svg {
+    display: block;
+  }
+
   .dm-chat-sidebar.collapsed .dm-new-session-button span,
-  .dm-chat-sidebar.collapsed .dm-chat-history,
-  .dm-chat-sidebar.collapsed [class*="identity"],
-  .dm-chat-sidebar.collapsed [class*="trigger"] > svg {
+  .dm-chat-sidebar.collapsed .dm-chat-history {
     display: initial;
   }
 
@@ -1947,15 +1959,22 @@ select:focus-visible {
     width: 100%;
   }
 
-  .dm-chat-sidebar.collapsed [class*="root"] {
+  .dm-chat-sidebar.collapsed .dm-user-menu-root {
     padding: 10px 12px 12px;
     width: auto;
   }
 
-  .dm-chat-sidebar.collapsed [class*="trigger"] {
+  .dm-chat-sidebar.collapsed .dm-user-menu-trigger {
     display: grid;
     justify-content: initial;
     padding: 8px;
+  }
+
+  .dm-chat-sidebar.collapsed .dm-user-menu-popover {
+    bottom: calc(100% - 4px);
+    left: 12px;
+    right: 12px;
+    width: auto;
   }
 
   .dm-chat-sidebar-collapse {

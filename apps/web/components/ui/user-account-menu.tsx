@@ -28,9 +28,9 @@ export function UserAccountMenu() {
   const initials = (me.user.name || me.user.email).trim().slice(0, 1).toUpperCase();
 
   return (
-    <div className={styles.root} ref={rootRef}>
+    <div className={`${styles.root} dm-user-menu-root`} ref={rootRef}>
       {open ? (
-        <div className={styles.menu} role="menu">
+        <div className={`${styles.menu} dm-user-menu-popover`} role="menu">
           <Link href="/account" onClick={() => setOpen(false)}>
             <UserRound size={15} />
             账号与个人资料
@@ -51,14 +51,14 @@ export function UserAccountMenu() {
       <button
         aria-expanded={open}
         aria-haspopup="menu"
-        className={styles.trigger}
+        className={`${styles.trigger} dm-user-menu-trigger`}
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <span className={styles.avatar}>
+        <span className={`${styles.avatar} dm-user-menu-avatar`}>
           {me.user.avatar_url ? <img alt="" src={me.user.avatar_url} /> : initials}
         </span>
-        <span className={styles.identity}>
+        <span className={`${styles.identity} dm-user-menu-identity`}>
           <strong>{me.user.name || me.user.email}</strong>
           <span>{isSuperAdmin ? "超级管理员" : isTenantAdmin ? "租户管理员" : me.tenant.name}</span>
         </span>
