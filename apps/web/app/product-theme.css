@@ -1438,6 +1438,7 @@ select:focus-visible {
 
 .dm-chat-agent-name {
   color: var(--text-primary);
+  display: inline;
   font-size: 14px;
   font-weight: 500;
   white-space: nowrap;
@@ -1447,6 +1448,10 @@ select:focus-visible {
 .dm-chat-title-icon {
   color: var(--text-muted);
   flex: 0 0 auto;
+}
+
+.dm-chat-title-separator {
+  display: inline;
 }
 
 .dm-chat-session-title strong {
@@ -2264,7 +2269,6 @@ select:focus-visible {
 }
 
 [data-theme="dark"] .dm-answer-content,
-[data-theme="dark"] .dm-composer-box,
 [data-theme="dark"] .dm-chat-main,
 [data-theme="dark"] .dm-right-rail,
 [data-theme="dark"] .dm-right-rail-body,
