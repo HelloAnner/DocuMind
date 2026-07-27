@@ -2337,6 +2337,12 @@ select:focus-visible {
   color-scheme: dark;
 }
 
+/* PDF.js may append a zero-sized inline canvas to <body>; keep it from
+   creating a line box that makes the fixed chat shell scroll. */
+body > .hiddenCanvasElement {
+  display: none !important;
+}
+
 /* Responsive product behavior */
 
 @media (min-width: 768px) and (max-width: 1024px) {
