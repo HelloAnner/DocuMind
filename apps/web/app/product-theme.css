@@ -2081,6 +2081,10 @@ select:focus-visible {
     letter-spacing: -0.05em;
   }
 
+  .dm-login-story h2 span {
+    font-size: 31px;
+  }
+
   .dm-login-story p {
     font-size: 12px;
   }
