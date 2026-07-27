@@ -1436,7 +1436,7 @@ select:focus-visible {
   min-width: 0;
 }
 
-.dm-chat-agent-name {
+.dm-chat-session-title .dm-chat-agent-name {
   color: var(--text-primary);
   display: inline;
   font-size: 14px;
@@ -1450,7 +1450,7 @@ select:focus-visible {
   flex: 0 0 auto;
 }
 
-.dm-chat-title-separator {
+.dm-chat-session-title .dm-chat-title-separator {
   display: inline;
 }
 
@@ -2676,9 +2676,9 @@ select:focus-visible {
     padding: 0 12px;
   }
 
-  .dm-chat-agent-name,
-  .dm-chat-title-separator,
-  .dm-chat-title-icon {
+  .dm-chat-session-title .dm-chat-agent-name,
+  .dm-chat-session-title .dm-chat-title-separator,
+  .dm-chat-session-title .dm-chat-title-icon {
     display: none;
   }
 
