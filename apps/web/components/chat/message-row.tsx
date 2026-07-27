@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   Check,
   CheckCircle2,
+  ChevronDown,
   Circle,
   Copy,
   FileSearch,
@@ -27,6 +28,7 @@ import { AnswerContent } from "./answer-content";
 import type { Citation, Message, RuntimeToolCall } from "@/lib/types";
 import type { PipelineStage } from "@/hooks/use-conversation-manager";
 import { AgentOrb } from "@/components/ui/brand-mark";
+import { useAuth } from "@/components/providers/auth-provider";
 
 function CitationChip({
   citation,
@@ -60,6 +62,20 @@ function CitationChip({
 
 function normalizeCitationText(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function formatRelativeTime(value: string) {
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return "";
+  const elapsed = Math.max(0, Date.now() - timestamp);
+  const minutes = Math.floor(elapsed / 60_000);
+  if (minutes < 1) return "刚刚";
+  if (minutes < 60) return `${minutes} 分钟前`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时前`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} 天前`;
+  return new Date(timestamp).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
 function citationDedupKey(citation: Citation) {
@@ -152,14 +168,19 @@ function AgentMeta({
     deletedAll ? "来源已删除" : "",
   ].filter(Boolean);
 
+  const relativeTime = formatRelativeTime(message.created_at);
+
   return (
     <div className="dm-answer-head">
       <span className="dm-answer-avatar">
         <AgentOrb size="small" />
       </span>
-      <div>
-        <strong>DocuMind</strong>
-        <p>{meta.length > 0 ? meta.join(" · ") : "DocuMind Agent · 知识库问答"}</p>
+      <div className="dm-answer-head-copy">
+        <div className="dm-message-identity">
+          <strong>DocuMind</strong>
+          {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
+        </div>
+        <p>{meta.length > 0 ? meta.join(" · ") : "企业知识问答"}</p>
       </div>
     </div>
   );
@@ -182,6 +203,7 @@ function ReasoningTrace({
   hasSources?: boolean;
   noAnswerReason?: string;
 }) {
+  const [expanded, setExpanded] = useState(false);
   // 默认 RAG 管道阶段（查询改写/混合检索/重排序/生成答案）本身只是进度节点，
   // 不属于需要展示摘要的“工具调用”。只有真实工具/思考/来源/无答案原因才展示。
   const stageToolNames = new Set(["query_rewrite", "hybrid_retrieval", "rerank", "answer_generation"]);
@@ -197,15 +219,44 @@ function ReasoningTrace({
   const statusText = isStreaming
     ? runningText(thinking, toolCalls)
     : durationMs
-      ? `全部工作已完成，耗时${formatDuration(durationMs)}`
+      ? `全部工作已完成，耗时 ${formatDuration(durationMs)}`
       : "全部工作已完成";
+  const canExpand = hasAtomTrace || Boolean(isStreaming && stages?.length);
 
   return (
-    <section className="dm-reasoning-trace">
-      <div className="dm-reasoning-toggle dm-reasoning-summary">
-        <Sparkles size={15} />
+    <section className={`dm-reasoning-trace ${expanded ? "expanded" : ""}`}>
+      <button
+        aria-expanded={canExpand ? expanded : undefined}
+        className="dm-reasoning-toggle dm-reasoning-summary"
+        disabled={!canExpand}
+        onClick={() => canExpand && setExpanded((value) => !value)}
+        type="button"
+      >
+        <Sparkles size={14} />
         <span>{statusText}</span>
-      </div>
+        {canExpand ? <ChevronDown className="dm-reasoning-chevron" size={14} /> : null}
+      </button>
+      {expanded ? (
+        <div className="dm-reasoning-detail">
+          {isStreaming && stages?.length ? (
+            <div className="dm-pipeline-stages">
+              {stages.map((stage) => (
+                <span className={stage.done ? "done" : stage.running ? "running" : ""} key={stage.label}>
+                  {stage.done ? <Check size={12} /> : stage.running ? <Loader2 className="spin" size={12} /> : <Circle size={10} />}
+                  {stage.label}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          {hasAtomTrace ? (
+            <ActionFeed
+              thinking={thinking ?? ""}
+              toolCalls={meaningfulToolCalls ?? []}
+              isRunning={isStreaming}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -403,6 +454,7 @@ export function MessageRow({
   onFollowUp,
   stages,
 }: MessageRowProps) {
+  const { me } = useAuth();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -413,10 +465,27 @@ export function MessageRow({
   };
 
   if (message.role === "user") {
+    const userLabel = me?.user.name?.trim() || me?.user.email?.split("@")[0] || "你";
+    const initials = userLabel.slice(0, 1).toUpperCase();
+    const relativeTime = formatRelativeTime(message.created_at);
     return (
-      <div className="dm-question-row">
-        <div className="dm-user-bubble">{message.content}</div>
-      </div>
+      <article className="dm-question-row">
+        <span className="dm-user-message-avatar" aria-hidden="true">
+          {me?.user.avatar_url ? <img alt="" src={me.user.avatar_url} /> : initials}
+        </span>
+        <div className="dm-user-message-stack">
+          <div className="dm-user-message-meta">
+            <strong>你</strong>
+            {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
+          </div>
+          <div className="dm-user-bubble">{message.content}</div>
+          <div className="dm-user-message-actions">
+            <IconButton aria-label="复制" onClick={handleCopy}>
+              {copied ? <Check size={14} /> : <Copy size={14} />}
+            </IconButton>
+          </div>
+        </div>
+      </article>
     );
   }
 
@@ -437,16 +506,6 @@ export function MessageRow({
         deletedAll={deletedAll}
       />
 
-      <ReasoningTrace
-        thinking={message.thinking}
-        toolCalls={message.tool_calls}
-        stages={stages}
-        isStreaming={isStreaming}
-        durationMs={message.duration_ms}
-        hasSources={hasDisplayCitations}
-        noAnswerReason={message.no_answer_reason}
-      />
-
       {failed || cancelled ? (
         <div className="dm-answer-error">
           {cancelled ? "生成已取消" : message.content || "生成失败，请重试"}
@@ -463,6 +522,16 @@ export function MessageRow({
           }}
         />
       ) : null}
+
+      <ReasoningTrace
+        thinking={message.thinking}
+        toolCalls={message.tool_calls}
+        stages={stages}
+        isStreaming={isStreaming}
+        durationMs={message.duration_ms}
+        hasSources={hasDisplayCitations}
+        noAnswerReason={message.no_answer_reason}
+      />
 
       <FollowUpQuestions questions={message.follow_up_questions} onClick={onFollowUp} />
 
