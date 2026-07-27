@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import "./product-theme.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ThemeProvider, themeBootstrapScript } from "@/components/providers/theme-provider";
 
 export const metadata: Metadata = {
   title: "DocuMind",
@@ -16,9 +18,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="zh-CN">
+    <html data-theme="dark" lang="zh-CN" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+      </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

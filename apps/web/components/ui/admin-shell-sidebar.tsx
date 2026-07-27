@@ -24,6 +24,8 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 import { NavItem } from "./nav-item";
 import { UserAccountMenu } from "./user-account-menu";
+import { BrandMark } from "./brand-mark";
+import { ThemeToggle } from "./theme-toggle";
 
 interface NavEntry {
   label: string;
@@ -94,7 +96,7 @@ function isActive(pathname: string, item: NavEntry) {
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 
-export function AdminShellSidebar() {
+export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { me } = useAuth();
   const isPlatform = pathname.startsWith("/system");
@@ -105,13 +107,17 @@ export function AdminShellSidebar() {
 
   return (
     <aside className="dm-admin-sidebar">
-      <div className="dm-sidebar-top">
-        <Link className="dm-admin-logo" href={homeHref}>
-          {isPlatform || !tenantName ? "DocuMind" : tenantName}
-          {!isPlatform && tenantSlug ? (
-            <span className="dm-admin-logo-slug">{tenantSlug}</span>
+      <div className="dm-sidebar-top dm-admin-brand-row">
+        <Link className="dm-admin-logo" href={homeHref} onClick={onNavigate}>
+          <BrandMark />
+          {!isPlatform && tenantName ? (
+            <span className="dm-admin-context">
+              <strong>{tenantName}</strong>
+              {tenantSlug ? <small>{tenantSlug}</small> : null}
+            </span>
           ) : null}
         </Link>
+        <ThemeToggle />
       </div>
 
       <nav className="dm-nav">
@@ -119,13 +125,13 @@ export function AdminShellSidebar() {
           <div className="dm-nav-section" key={section.title}>
             <div className="dm-nav-group-title">{section.title}</div>
             {section.items.map((item) => (
-              <NavItem key={item.href} {...item} active={isActive(pathname, item)} />
+              <NavItem key={item.href} {...item} active={isActive(pathname, item)} onClick={onNavigate} />
             ))}
           </div>
         ))}
       </nav>
 
-      <Link className="dm-return-row" href="/chat">
+      <Link className="dm-return-row" href="/chat" onClick={onNavigate}>
         <ArrowLeft size={15} />
         <span>返回知识问答</span>
       </Link>

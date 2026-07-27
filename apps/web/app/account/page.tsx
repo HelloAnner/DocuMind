@@ -14,6 +14,8 @@ import {
   type AccountTenant,
 } from "@/lib/auth";
 import styles from "./account.module.css";
+import { BrandMark } from "@/components/ui/brand-mark";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -71,6 +73,10 @@ export default function AccountPage() {
 
   return (
     <main className={styles.page}>
+      <div className="dm-account-brandbar">
+        <BrandMark />
+        <ThemeToggle />
+      </div>
       <div className={styles.container}>
         <Link className={styles.back} href={home}>
           <ArrowLeft size={15} /> 返回

@@ -7,13 +7,19 @@ import {
   ChevronDown,
   Headphones,
   MoreHorizontal,
+  PanelLeftClose,
+  PanelLeftOpen,
   Pencil,
   Trash2,
+  X,
 } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Conversation } from "@/lib/types";
 import { UserAccountMenu } from "./user-account-menu";
+import { useChatShell } from "@/components/providers/chat-shell-provider";
+import { BrandMark } from "./brand-mark";
+import { ThemeToggle } from "./theme-toggle";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
 
@@ -69,13 +75,9 @@ function useAliases() {
   return { aliases, setAlias };
 }
 
-interface ChatSidebarProps {
-  width?: number;
-  onResize?: (width: number) => void;
-}
-
-export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
+export function ChatSidebar() {
   const router = useRouter();
+  const { collapsed, mobileOpen, closeMobile, toggleCollapsed } = useChatShell();
   const {
     conversations,
     currentId,
@@ -106,11 +108,13 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
 
   const handleCreate = () => {
     setCurrentId(null);
+    closeMobile();
     router.push("/chat");
   };
 
   const handleSelect = (id: string) => {
     setCurrentId(id);
+    closeMobile();
     setUnreadIds((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev);
@@ -119,45 +123,6 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
     });
     router.push(`/chat?c=${encodeURIComponent(id)}`);
   };
-
-  const resizeStartX = useRef<number>(0);
-  const resizeStartWidth = useRef<number>(0);
-  const [isResizing, setIsResizing] = useState(false);
-
-  const startResize = (e: React.MouseEvent | React.TouchEvent) => {
-    if (!onResize) return;
-    const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-    resizeStartX.current = clientX;
-    resizeStartWidth.current = width ?? 244;
-    setIsResizing(true);
-    e.preventDefault();
-  };
-
-  useEffect(() => {
-    if (!isResizing) return;
-
-    const handleMove = (e: MouseEvent | TouchEvent) => {
-      const clientX = "touches" in e ? e.touches[0].clientX : e.clientX;
-      const delta = clientX - resizeStartX.current;
-      onResize?.(resizeStartWidth.current + delta);
-    };
-
-    const handleUp = () => {
-      setIsResizing(false);
-    };
-
-    window.addEventListener("mousemove", handleMove);
-    window.addEventListener("mouseup", handleUp);
-    window.addEventListener("touchmove", handleMove, { passive: true });
-    window.addEventListener("touchend", handleUp);
-
-    return () => {
-      window.removeEventListener("mousemove", handleMove);
-      window.removeEventListener("mouseup", handleUp);
-      window.removeEventListener("touchmove", handleMove);
-      window.removeEventListener("touchend", handleUp);
-    };
-  }, [isResizing, onResize]);
 
   useEffect(() => {
     if (unreadIds.size > 0 || conversations.length === 0) return;
@@ -288,8 +253,25 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
   };
 
   return (
-    <aside className="dm-chat-sidebar">
-      <div className="dm-sidebar-top">
+    <aside className={`dm-chat-sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
+      <div className="dm-chat-sidebar-header">
+        <BrandMark compact={collapsed} />
+        <div className="dm-chat-sidebar-header-actions">
+          {!collapsed ? <ThemeToggle /> : null}
+          <IconButton
+            aria-label={collapsed ? "展开会话导航" : "收起会话导航"}
+            className="dm-chat-sidebar-collapse"
+            onClick={toggleCollapsed}
+          >
+            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+          </IconButton>
+          <IconButton aria-label="关闭会话导航" className="dm-chat-sidebar-mobile-close" onClick={closeMobile}>
+            <X size={17} />
+          </IconButton>
+        </div>
+      </div>
+
+      <div className="dm-chat-primary-actions">
         <button type="button" className="dm-new-session-button" onClick={handleCreate}>
           <Headphones size={18} />
           <span>新会话</span>
@@ -326,16 +308,6 @@ export function ChatSidebar({ width, onResize }: ChatSidebarProps) {
         <UserAccountMenu />
       </div>
 
-      {onResize && (
-        <div
-          className="dm-sidebar-resize-handle"
-          data-resizing={isResizing}
-          onMouseDown={startResize}
-          onTouchStart={startResize}
-          role="separator"
-          aria-label="调整侧边栏宽度"
-        />
-      )}
     </aside>
   );
 }

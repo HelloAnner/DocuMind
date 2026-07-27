@@ -5,6 +5,7 @@ import { MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchJson } from "@/lib/api";
 import Link from "next/link";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 interface KnowledgeBase {
   id: string;
@@ -28,13 +29,16 @@ export default function KnowledgePage() {
     <main className="dm-public-page">
       <header className="dm-public-topbar">
         <h1>我可访问的知识库</h1>
-        <div className="dm-search-input" style={{ width: 280 }}>
-          <Search size={14} />
-          <input
-            placeholder="搜索知识库..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+        <div className="dm-public-topbar-actions">
+          <div className="dm-search-input" style={{ width: 280 }}>
+            <Search size={14} />
+            <input
+              placeholder="搜索知识库..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <ThemeToggle />
         </div>
       </header>
 

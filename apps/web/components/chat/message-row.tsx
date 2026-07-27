@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import {
-  Bot,
   Check,
   CheckCircle2,
   Circle,
@@ -27,6 +26,7 @@ import {
 import { AnswerContent } from "./answer-content";
 import type { Citation, Message, RuntimeToolCall } from "@/lib/types";
 import type { PipelineStage } from "@/hooks/use-conversation-manager";
+import { AgentOrb } from "@/components/ui/brand-mark";
 
 function CitationChip({
   citation,
@@ -155,7 +155,7 @@ function AgentMeta({
   return (
     <div className="dm-answer-head">
       <span className="dm-answer-avatar">
-        <Bot size={14} />
+        <AgentOrb size="small" />
       </span>
       <div>
         <strong>DocuMind</strong>

@@ -5,6 +5,7 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import { fetchJson } from "@/lib/api";
 import type { Conversation } from "@/lib/types";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 function groupByDate(items: Conversation[]) {
   const groups = new Map<string, Conversation[]>();
@@ -41,13 +42,16 @@ export default function HistoryPage() {
     <main className="dm-public-page">
       <header className="dm-public-topbar">
         <h1>历史问答</h1>
-        <div className="dm-search-input" style={{ width: 320 }}>
-          <Search size={14} />
-          <input
-            placeholder="搜索历史..."
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-          />
+        <div className="dm-public-topbar-actions">
+          <div className="dm-search-input" style={{ width: 320 }}>
+            <Search size={14} />
+            <input
+              placeholder="搜索历史..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <ThemeToggle />
         </div>
       </header>
 

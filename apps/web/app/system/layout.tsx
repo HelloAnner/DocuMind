@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { AdminShellSidebar } from "@/components/ui/admin-shell-sidebar";
+import { ProductAdminShell } from "@/components/ui/product-admin-shell";
 import { useAuth } from "@/components/providers/auth-provider";
 
 export default function SystemLayout({
@@ -20,21 +20,7 @@ export default function SystemLayout({
     }
   }, [me, loading, router]);
 
-  if (loading || !me) {
-    return (
-      <main className="dm-shell">
-        <AdminShellSidebar />
-        <section className="dm-workspace" style={{ display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
-          <span>加载中…</span>
-        </section>
-      </main>
-    );
-  }
+  if (loading || !me) return <ProductAdminShell loading />;
 
-  return (
-    <main className="dm-shell">
-      <AdminShellSidebar />
-      <section className="dm-workspace">{children}</section>
-    </main>
-  );
+  return <ProductAdminShell>{children}</ProductAdminShell>;
 }

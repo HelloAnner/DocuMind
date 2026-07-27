@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   Bookmark,
-  Bot,
   Folder,
+  Menu,
   Plus,
   Square,
   ThumbsDown,
@@ -14,11 +14,13 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
-import { StatCard } from "@/components/ui/stat-card";
 import { MessageRow } from "@/components/chat/message-row";
 import { DocumentPreview } from "@/components/chat/document-preview";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
+import { useChatShell } from "@/components/providers/chat-shell-provider";
+import { AgentOrb } from "@/components/ui/brand-mark";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -27,6 +29,7 @@ const suggestions = [
 ];
 
 export function ChatWorkspace() {
+  const { openMobile } = useChatShell();
   const {
     messages,
     conversations,
@@ -85,22 +88,21 @@ export function ChatWorkspace() {
 
   const renderEmpty = () => (
     <div className="dm-chat-empty">
-      <span className="dm-chat-empty-avatar">
-        <Bot size={24} />
-      </span>
-      <h2>向你的文档提问</h2>
-      <p>选择知识库，输入问题，获取带原文出处的精准答案</p>
-      <div className="dm-chat-empty-stats">
-        <StatCard label="文档数" value="128" hint="已索引" />
-        <StatCard label="切片数" value="4,832" hint="可用" />
+      <div className="dm-chat-empty-orb-wrap">
+        <AgentOrb size="large" />
+      </div>
+      <span className="dm-chat-empty-eyebrow">DOCUMIND AGENT</span>
+      <p className="dm-chat-empty-greeting">欢迎回来</p>
+      <h2>今天想从文档中了解什么？</h2>
+      <p className="dm-chat-empty-description">检索企业知识，获得带原文出处和定位信息的回答。</p>
+      <div className="dm-chat-capabilities" aria-label="问答能力">
+        <span>知识检索</span>
+        <span>引用定位</span>
+        <span>多轮追问</span>
       </div>
       <div className="dm-chat-empty-suggestions">
         {suggestions.map((text) => (
-          <button
-            key={text}
-            onClick={() => setInput(text)}
-            type="button"
-          >
+          <button key={text} onClick={() => setInput(text)} type="button">
             {text}
           </button>
         ))}
@@ -159,12 +161,16 @@ export function ChatWorkspace() {
         <div className="dm-chat-main">
           <div className="dm-chat-session-header">
             <div className="dm-chat-session-title">
+              <IconButton aria-label="打开会话导航" className="dm-chat-mobile-menu" onClick={openMobile}>
+                <Menu size={18} />
+              </IconButton>
               <strong>{currentConversation?.title ?? "新会话"}</strong>
               <IconButton aria-label="收藏会话" className="dm-chat-title-bookmark">
                 <Bookmark size={18} />
               </IconButton>
             </div>
             <div className="dm-chat-session-actions">
+              <ThemeToggle className="dm-chat-header-theme" />
               <IconButton
                 aria-label={rightOpen ? "收起文件预览" : "展开文件预览"}
                 className="dm-file-preview-toggle"
@@ -191,7 +197,7 @@ export function ChatWorkspace() {
                 onChange={(e) => setInput(e.target.value)}
                 onInput={(e) => {
                   e.currentTarget.style.height = "auto";
-                  e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 180)}px`;
+                  e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 160)}px`;
                 }}
                 onKeyDown={handleKeyDown}
                 onCompositionStart={() => setIsComposing(true)}
