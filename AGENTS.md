@@ -18,6 +18,7 @@ DocuMind 是企业级文档智能问答系统：Rust API + Agent Kernel 承载�
 - `make deploy` 是服务器源码镜像中的专用命令，只允许在 `ssh documind:/opt/documind/build/source` 运行；它使用 Podman 容器构建 Next.js 静态导出和原生 Linux amd64/musl 二进制，然后直接安装 release、切换 `current` 并更新服务。不得在本地项目目录执行 `make deploy`。
 - 本地通过 `make deploy-remote` 查询服务器源码 SHA：首次或服务器基线不可用时以 `scp -C` 上传完整 `git archive`，正常更新时只上传从服务器 SHA 到目标 SHA 的压缩增量包（新增/修改文件载荷和删除清单）；服务器先在 staging 目录事务性应用更新，再触发 `/opt/documind/build/source` 中的 `make deploy`。服务器不连接也不拉取 Git 仓库。
 - 服务器构建使用持久化 npm、Cargo registry 和 Cargo target 缓存；源码镜像本身不写入 `node_modules`、`.next`、`out` 或 `target`，每次构建使用独立临时工作目录，成功后清理，失败时保留现场。
+- 服务器构建的镜像和软件源固定走国内镜像：容器镜像使用 `m.daocloud.io`，Debian apt 使用 `mirrors.aliyun.com`，npm 使用 `registry.npmmirror.com`，Cargo 与 rustup 使用 `rsproxy.cn`；除非镜像本身故障，不得退回境外默认源拖慢发布。
 - 关键变量：
   - `DEPLOY_HOST=documind`
   - `DEPLOY_PORT=8089`

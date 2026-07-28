@@ -14,6 +14,7 @@ BUILD_STORE="$REMOTE_BUILD_ROOT/builds"
 DEPLOY_LOCK="$REMOTE_ROOT/shared/runtime/deploy.lock"
 SOURCE_UPDATE_LOCK="$REMOTE_BUILD_ROOT/source-update.lock"
 NODE_IMAGE="${NODE_BUILD_IMAGE:-m.daocloud.io/docker.io/library/node:22-bookworm-slim}"
+NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
 RUST_IMAGE="${RUST_BUILD_IMAGE:-localhost/documind-rust-musl-build:1.91-bookworm}"
 RUST_BASE_IMAGE="${RUST_BASE_IMAGE:-m.daocloud.io/docker.io/library/rust:1.91-bookworm}"
 RUST_BUILD_JOBS="${RUST_BUILD_JOBS:-4}"
@@ -114,6 +115,7 @@ docker run --rm \
   -e DOCUMIND_STATIC_EXPORT=1 \
   -e DOCUMIND_BASE_PATH="$DEPLOY_BASE_PATH" \
   -e NEXT_PUBLIC_API_BASE="$DEPLOY_BASE_PATH" \
+  -e NPM_CONFIG_REGISTRY="$NPM_REGISTRY" \
   "$NODE_IMAGE" \
   bash -lc 'npm ci && npm run build'
 
@@ -127,12 +129,29 @@ if ! docker image inspect "$RUST_IMAGE" >/dev/null 2>&1; then
 FROM $RUST_BASE_IMAGE
 ENV RUSTUP_DIST_SERVER=https://rsproxy.cn \
     RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
-RUN apt-get update \
-  && apt-get install -y --no-install-recommends cmake git linux-libc-dev musl-tools pkg-config \
+RUN sed -i \
+      -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+      -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
+      -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
+      /etc/apt/sources.list.d/debian.sources \
+  && apt-get -o Acquire::Retries=3 update \
+  && apt-get -o Acquire::Retries=3 install -y --no-install-recommends cmake git linux-libc-dev musl-tools pkg-config \
   && rustup target add x86_64-unknown-linux-musl \
   && rm -rf /var/lib/apt/lists/*
 DOCKERFILE
 fi
+
+cat > "$CARGO_HOME_CACHE/config.toml" <<'CARGO_CONFIG'
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"
+
+[net]
+git-fetch-with-cli = true
+retry = 3
+CARGO_CONFIG
 
 echo "Building native Linux/musl binary on the server"
 docker run --rm \
