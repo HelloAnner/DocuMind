@@ -40,8 +40,40 @@ if ! command -v gh >/dev/null 2>&1; then
   echo "GitHub CLI is required to verify the pushed deployment commit." >&2
   exit 1
 fi
-REPOSITORY_NAME="$(gh repo view --json nameWithOwner --jq .nameWithOwner)"
-PUSHED_SHA="$(gh api "repos/$REPOSITORY_NAME/git/ref/heads/$DEPLOY_BRANCH" --jq .object.sha)"
+ORIGIN_URL="$(git remote get-url origin)"
+case "$ORIGIN_URL" in
+  https://github.com/*)
+    REPOSITORY_NAME="${ORIGIN_URL#https://github.com/}"
+    ;;
+  ssh://git@ssh.github.com:443/*)
+    REPOSITORY_NAME="${ORIGIN_URL#ssh://git@ssh.github.com:443/}"
+    ;;
+  git@github.com:*|git@ssh.github.com:*)
+    REPOSITORY_NAME="${ORIGIN_URL#*:}"
+    ;;
+  *)
+    echo "Cannot derive a GitHub repository from origin: $ORIGIN_URL" >&2
+    exit 1
+    ;;
+esac
+REPOSITORY_NAME="${REPOSITORY_NAME%.git}"
+
+PUSHED_SHA=""
+for attempt in 1 2 3; do
+  PUSHED_SHA="$(
+    GH_HTTP_TIMEOUT=120 \
+      gh api "repos/$REPOSITORY_NAME/git/ref/heads/$DEPLOY_BRANCH" --jq .object.sha \
+      2>/dev/null || true
+  )"
+  if [[ -n "$PUSHED_SHA" ]]; then
+    break
+  fi
+  echo "GitHub SHA verification attempt $attempt failed; retrying." >&2
+done
+if [[ -z "$PUSHED_SHA" ]]; then
+  echo "Unable to verify the pushed GitHub commit after 3 attempts." >&2
+  exit 1
+fi
 if [[ "$PUSHED_SHA" != "$SOURCE_SHA" ]]; then
   echo "Refusing to synchronize an unpushed or non-main commit." >&2
   echo "Local HEAD: $SOURCE_SHA" >&2
