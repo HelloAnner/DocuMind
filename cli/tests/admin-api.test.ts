@@ -29,6 +29,7 @@ describe("ApiClient admin management", () => {
 
     try {
       await api.listAdminKnowledgeBases();
+      await api.listVectorIndexes();
       await api.createKnowledgeBase({ name: "Legal", status: "active", tags: ["law"] });
       await api.updateKnowledgeBase("kb/1", { name: "Legal 2", status: "archived", tags: [] });
       await api.deleteKnowledgeBase("kb/1");
@@ -48,6 +49,7 @@ describe("ApiClient admin management", () => {
       expect(requests.map((item) => `${item.method} ${item.path}`)).toEqual([
         "POST /api/auth/login",
         "GET /api/admin/knowledge-bases",
+        "GET /api/diagnostics/vector-indexes",
         "POST /api/admin/knowledge-bases",
         "PUT /api/admin/knowledge-bases/kb%2F1",
         "DELETE /api/admin/knowledge-bases/kb%2F1",
@@ -105,6 +107,7 @@ function createFetcher(requests: CapturedRequest[]): typeof fetch {
     if (url.pathname === "/api/admin/knowledge-bases" && captured.method === "GET") {
       return jsonResponse([]);
     }
+    if (url.pathname === "/api/diagnostics/vector-indexes") return jsonResponse([]);
     if (url.pathname.includes("knowledge-bases") && captured.method !== "DELETE") {
       if (url.pathname.endsWith("/documents")) return jsonResponse(uploadResponse());
       return jsonResponse(knowledgeBase());

@@ -283,7 +283,7 @@ export class ApiClient {
   }
 
   async listVectorIndexes(): Promise<VectorIndexSummary[]> {
-    return this.requestJson("/api/system/vector-indexes");
+    return this.requestJson("/api/diagnostics/vector-indexes");
   }
 
   async saveLastConversation(conversationId: string): Promise<void> {

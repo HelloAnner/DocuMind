@@ -259,7 +259,9 @@ async fn runtime_config(
             "max_output_tokens": cfg.rag.generation.max_output_tokens,
             "streaming_enabled": cfg.rag.generation.use_real_llm,
             "rewrite_enabled": cfg.rag.rewrite.enabled,
-            "rewrite_model": cfg.rag.rewrite.model
+            "rewrite_model": cfg.rag.rewrite.model,
+            "verify_claims": cfg.rag.citation.verify_claims,
+            "verify_consensus": cfg.rag.citation.verify_consensus
         },
         "agent": {
             "runtime": "llm_react",

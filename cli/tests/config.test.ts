@@ -14,6 +14,7 @@ describe("configuration", () => {
   test("round trips the default TOML configuration", () => {
     const parsed = parseConfig(serializeConfig(DEFAULT_CONFIG));
     expect(parsed).toEqual(DEFAULT_CONFIG);
+    expect(parsed.diagnostics.elasticsearch_index).toBe("chunks_search");
   });
 
   test("uses password environment variable before plaintext config", () => {
@@ -22,6 +23,17 @@ describe("configuration", () => {
     config.auth.password_env = "DOCUMIND_TEST_PASSWORD";
     process.env.DOCUMIND_TEST_PASSWORD = "environment-secret";
     expect(configuredPassword(config)).toBe("environment-secret");
+  });
+
+  test("migrates the legacy physical Elasticsearch index to the active alias", () => {
+    const legacy = serializeConfig({
+      ...structuredClone(DEFAULT_CONFIG),
+      diagnostics: {
+        ...DEFAULT_CONFIG.diagnostics,
+        elasticsearch_index: "chunks",
+      },
+    });
+    expect(parseConfig(legacy).diagnostics.elasticsearch_index).toBe("chunks_search");
   });
 
   test("rejects unsafe server protocols", () => {

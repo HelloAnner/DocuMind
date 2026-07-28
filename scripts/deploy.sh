@@ -144,8 +144,14 @@ else
 fi
 rerank_api_url="${rerank_api_url:-https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}"
 rerank_api_key="${rerank_api_key:-$llm_api_key}"
+rag_rewrite_model="$(remote_env_value RAG_REWRITE_MODEL)"
+rag_rewrite_model="${rag_rewrite_model:-qwen-turbo}"
+rag_verify_consensus="$(remote_env_value RAG_VERIFY_CONSENSUS)"
+rag_verify_consensus="${rag_verify_consensus:-false}"
 agent_reasoning_model="$(remote_env_value AGENT_REASONING_MODEL)"
-agent_reasoning_model="${agent_reasoning_model:-$llm_model}"
+if [[ -z "$agent_reasoning_model" || "$agent_reasoning_model" == "$llm_model" ]]; then
+  agent_reasoning_model="$rag_rewrite_model"
+fi
 if [[ -f .env ]]; then
   local_llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
   local_llm_api="$(grep -E '^LLM_API=' .env | tail -1 | cut -d= -f2- || true)"
@@ -246,7 +252,7 @@ LOG_FORMAT=json
 
 RAG_REWRITE_ENABLED=true
 RAG_HYDE_ENABLED=true
-RAG_REWRITE_MODEL=qwen-turbo
+RAG_REWRITE_MODEL=$rag_rewrite_model
 RAG_DENSE_TOP_K=100
 RAG_BM25_TOP_K=100
 RAG_RRF_TOP_K=20
@@ -258,6 +264,7 @@ RAG_RERANK_API_URL=$rerank_api_url
 RAG_RERANK_API_KEY=$rerank_api_key
 RAG_REQUIRE_CITATION=true
 RAG_VERIFY_CLAIMS=true
+RAG_VERIFY_CONSENSUS=$rag_verify_consensus
 RAG_TARGET_CHUNK_TOKENS=800
 RAG_MAX_CHUNK_TOKENS=1500
 RAG_HARD_SPLIT_TOKENS=2000
@@ -376,7 +383,8 @@ release_env_value() {
 
 for required_key in \
   RAG_RERANK_ENABLED RAG_RERANK_PROVIDER RAG_RERANK_MODEL \
-  RAG_RERANK_API_URL RAG_RERANK_API_KEY AGENT_REASONING_MODEL \
+  RAG_RERANK_API_URL RAG_RERANK_API_KEY RAG_REWRITE_MODEL \
+  RAG_VERIFY_CLAIMS RAG_VERIFY_CONSENSUS AGENT_REASONING_MODEL \
   AGENT_MAX_REPAIR_ATTEMPTS AGENT_TOTAL_TIMEOUT_SECONDS; do
   upsert_env_var "\$required_key" "\$(release_env_value "\$required_key")"
 done

@@ -11,6 +11,7 @@ import {
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { copyToClipboard } from "@/lib/clipboard";
 import type { Citation } from "@/lib/types";
 
 interface AnswerContentProps {
@@ -66,11 +67,11 @@ function renderCitations(children: ReactNode, onCitationClick?: (index: number) 
 
 function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
-  const handleCopy = () => {
-    navigator.clipboard.writeText(code).then(() => {
+  const handleCopy = async () => {
+    if (await copyToClipboard(code)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }
   };
 
   return (

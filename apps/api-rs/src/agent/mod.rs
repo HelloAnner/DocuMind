@@ -14,4 +14,4 @@ pub use generator::AnswerGenerator;
 pub use kernel::{AgentKernel, AgentProgress};
 pub use prompt::{BuiltinPromptRegistry, Prompt, PromptRegistry};
 pub use reasoner::{AgentReasoner, LlmAgentReasoner};
-pub use verifier::{ClaimVerifier, LlmClaimVerifier, VerificationReport};
+pub use verifier::{ClaimVerifier, LlmClaimVerifier, StructuralClaimVerifier, VerificationReport};

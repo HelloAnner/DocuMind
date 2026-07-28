@@ -130,6 +130,7 @@ pub struct GenerationConfig {
 pub struct CitationConfig {
     pub require_citation: bool,
     pub verify_claims: bool,
+    pub verify_consensus: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -363,12 +364,16 @@ pub fn load_config() -> Result<AppConfig> {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(true),
+            verify_consensus: env::var("RAG_VERIFY_CONSENSUS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(false),
         },
     };
 
     let agent = AgentConfig {
         reasoning_model: env::var("AGENT_REASONING_MODEL")
-            .unwrap_or_else(|_| rag.generation.model.clone()),
+            .unwrap_or_else(|_| rag.rewrite.model.clone()),
         default_tone: env::var("AGENT_DEFAULT_TONE").unwrap_or_else(|_| "concise_warm".to_string()),
         proactive_followup: env::var("AGENT_PROACTIVE_FOLLOWUP")
             .ok()

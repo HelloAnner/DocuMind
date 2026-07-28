@@ -29,6 +29,7 @@ import type { Citation, Message, RuntimeToolCall } from "@/lib/types";
 import type { PipelineStage } from "@/hooks/use-conversation-manager";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
+import { copyToClipboard } from "@/lib/clipboard";
 
 function CitationChip({
   citation,
@@ -457,11 +458,11 @@ export function MessageRow({
   const { me } = useAuth();
   const [copied, setCopied] = useState(false);
 
-  const handleCopy = () => {
-    navigator.clipboard.writeText(message.content).then(() => {
+  const handleCopy = async () => {
+    if (await copyToClipboard(message.content)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }
   };
 
   if (message.role === "user") {

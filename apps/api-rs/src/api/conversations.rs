@@ -1324,6 +1324,7 @@ fn agent_runtime_fingerprint(config: &crate::config::AppConfig) -> String {
         "max_context_chars": config.agent.max_context_chars,
         "require_citation": config.rag.citation.require_citation,
         "verify_claims": config.rag.citation.verify_claims,
+        "verify_consensus": config.rag.citation.verify_consensus,
     })
     .to_string()
 }

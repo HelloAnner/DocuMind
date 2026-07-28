@@ -6,6 +6,7 @@ import { ChatSidebar } from "@/components/ui/chat-sidebar";
 import { ConversationProvider } from "@/components/providers/conversation-provider";
 import { ChatShellProvider, useChatShell } from "@/components/providers/chat-shell-provider";
 import { useAuth } from "@/components/providers/auth-provider";
+import { isSuperAdminRole } from "@/lib/auth";
 
 function ChatFrame({ children }: { children: React.ReactNode }) {
   const { collapsed, mobileOpen, closeMobile } = useChatShell();
@@ -27,10 +28,16 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
 
   useEffect(() => {
     if (loading) return;
-    if (!me) router.replace("/login");
+    if (!me) {
+      router.replace("/login");
+      return;
+    }
+    if (isSuperAdminRole(me.roles)) {
+      router.replace("/system");
+    }
   }, [me, loading, router]);
 
-  if (loading || !me) {
+  if (loading || !me || isSuperAdminRole(me.roles)) {
     return (
       <main className="dm-chat-shell dm-chat-shell-loading">
         <span>加载中…</span>

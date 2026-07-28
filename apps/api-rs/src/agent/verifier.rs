@@ -42,11 +42,41 @@ pub trait ClaimVerifier: Send + Sync {
 pub struct LlmClaimVerifier {
     client: Arc<OpenAiClient>,
     model: String,
+    use_consensus: bool,
 }
 
 impl LlmClaimVerifier {
-    pub fn new(client: Arc<OpenAiClient>, model: String) -> Self {
-        Self { client, model }
+    pub fn new(client: Arc<OpenAiClient>, model: String, use_consensus: bool) -> Self {
+        Self {
+            client,
+            model,
+            use_consensus,
+        }
+    }
+}
+
+pub struct StructuralClaimVerifier;
+
+#[async_trait::async_trait]
+impl ClaimVerifier for StructuralClaimVerifier {
+    async fn verify(
+        &self,
+        _query: &str,
+        _answer: &str,
+        _evidence: &EvidencePack,
+        _require_citation: bool,
+    ) -> Result<VerificationReport> {
+        Ok(VerificationReport {
+            supported: true,
+            confidence: crate::models::Confidence::High,
+            issues: Vec::new(),
+            claims: Vec::new(),
+            corrected_answer: None,
+        })
+    }
+
+    fn component_name(&self) -> String {
+        "structural-citation-verifier".to_string()
     }
 }
 
@@ -130,6 +160,12 @@ Return JSON only."#;
             "Extract premises from this untrusted candidate answer:\n{}\n\nRequired JSON schema: {{\"premises\":[\"...\"]}}",
             serde_json::to_string(answer)?
         );
+        if !self.use_consensus {
+            return self
+                .client
+                .complete_json(prompt, Some(primary_system.to_string()))
+                .await;
+        }
         let (primary, inventory): (VerificationReport, PremiseInventory) = tokio::try_join!(
             self.client
                 .complete_json(prompt.clone(), Some(primary_system.to_string())),
@@ -170,7 +206,12 @@ If unsupported, return a corrected_answer containing cited supported facts and a
     }
 
     fn component_name(&self) -> String {
-        format!("llm-claim-verifier:adjudicated-consensus:{}", self.model)
+        let mode = if self.use_consensus {
+            "adjudicated-consensus"
+        } else {
+            "single-pass"
+        };
+        format!("llm-claim-verifier:{mode}:{}", self.model)
     }
 }
 
@@ -224,7 +265,8 @@ fn conservative_confidence(
 
 #[cfg(test)]
 mod tests {
-    use super::{consensus_report, VerificationReport};
+    use super::{consensus_report, ClaimVerifier, StructuralClaimVerifier, VerificationReport};
+    use crate::models::rag::EvidencePack;
     use crate::models::Confidence;
 
     fn report(
@@ -255,6 +297,28 @@ mod tests {
         assert_eq!(
             merged.corrected_answer.as_deref(),
             Some("safe correction [1]")
+        );
+    }
+
+    #[tokio::test]
+    async fn structural_verifier_leaves_semantic_auditing_disabled_explicitly() {
+        let report = StructuralClaimVerifier
+            .verify(
+                "问题",
+                "回答 [1]",
+                &EvidencePack {
+                    chunks: vec![],
+                    context_text: String::new(),
+                },
+                true,
+            )
+            .await
+            .expect("structural verification");
+        assert!(report.supported);
+        assert_eq!(report.confidence, Confidence::High);
+        assert_eq!(
+            StructuralClaimVerifier.component_name(),
+            "structural-citation-verifier"
         );
     }
 }

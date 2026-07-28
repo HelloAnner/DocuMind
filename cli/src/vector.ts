@@ -1,5 +1,5 @@
 import { ApiClient } from "./api.ts";
-import { ApiError, CliError } from "./errors.ts";
+import { CliError } from "./errors.ts";
 import type { Identity, JsonObject, VectorIndexSummary } from "./types.ts";
 
 export interface VectorBrowseOptions {
@@ -32,7 +32,10 @@ export interface VectorAuditItem {
   kb_id: string;
   kb_name: string;
   postgres_chunks: number;
-  postgres_embedded_chunks?: number;
+  postgres_searchable_chunks: number;
+  postgres_embedded_chunks: number;
+  degraded_documents: number;
+  excluded_chunks: number;
   elasticsearch_chunks: number;
   delta: number;
   consistent: boolean;
@@ -66,60 +69,30 @@ export class VectorDiagnostics {
 
   async indexes(): Promise<VectorIndexSummary[]> {
     const identity = await this.api.me();
-    try {
-      const indexes = await this.api.listVectorIndexes();
-      return indexes.filter((item) =>
-        item.tenant_id === identity.tenant.id && identity.allowed_kb_ids.includes(item.kb_id));
-    } catch (error) {
-      if (!(error instanceof ApiError) || error.status !== 403) throw error;
-      const knowledgeBases = await this.api.listKnowledgeBases();
-      const fallback: VectorIndexSummary[] = [];
-      for (const kb of knowledgeBases) {
-        const esDocuments = await this.count({ kbId: kb.id });
-        fallback.push({
-          id: `${kb.id}:unknown`,
-          name: this.api.config.diagnostics.elasticsearch_index,
-          alias: this.api.config.diagnostics.elasticsearch_index,
-          tenant_id: identity.tenant.id,
-          tenant: identity.tenant.name,
-          kb_id: kb.id,
-          kb_name: kb.name,
-          embedding_model: "unknown",
-          index_version: "unknown",
-          dimension: 0,
-          documents: kb.doc_count,
-          building_documents: 0,
-          degraded_documents: 0,
-          chunks: kb.chunk_count,
-          embedded_chunks: 0,
-          es_documents: esDocuments,
-          status: esDocuments === kb.chunk_count ? "healthy" : "degraded",
-        });
-      }
-      return fallback;
-    }
+    const indexes = await this.api.listVectorIndexes();
+    return indexes.filter((item) =>
+      item.tenant_id === identity.tenant.id && identity.allowed_kb_ids.includes(item.kb_id));
   }
 
   async audit(): Promise<VectorAuditResult> {
     const identity = await this.api.me();
-    const [knowledgeBases, indexes] = await Promise.all([
-      this.api.listKnowledgeBases(),
-      this.indexes(),
-    ]);
+    const indexes = await this.indexes();
     const items: VectorAuditItem[] = [];
-    for (const kb of knowledgeBases) {
-      const index = indexes.find((item) => item.kb_id === kb.id);
-      const elasticsearchChunks = await this.count({ kbId: kb.id });
-      const delta = elasticsearchChunks - kb.chunk_count;
+    for (const index of indexes) {
+      const elasticsearchChunks = await this.count({ kbId: index.kb_id });
+      const delta = elasticsearchChunks - index.searchable_chunks;
       items.push({
-        kb_id: kb.id,
-        kb_name: kb.name,
-        postgres_chunks: kb.chunk_count,
-        ...(index ? { postgres_embedded_chunks: index.embedded_chunks } : {}),
+        kb_id: index.kb_id,
+        kb_name: index.kb_name,
+        postgres_chunks: index.chunks,
+        postgres_searchable_chunks: index.searchable_chunks,
+        postgres_embedded_chunks: index.embedded_chunks,
+        degraded_documents: index.degraded_documents,
+        excluded_chunks: index.excluded_chunks,
         elasticsearch_chunks: elasticsearchChunks,
         delta,
         consistent: delta === 0,
-        ...(index ? { backend_status: index.status } : {}),
+        backend_status: index.status,
       });
     }
     return {

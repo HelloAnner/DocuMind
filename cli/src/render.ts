@@ -177,15 +177,17 @@ export function printDocuments(items: AdminDocument[]): void {
 
 export function printVectorIndexes(items: VectorIndexSummary[]): void {
   printTable(
-    ["KB ID", "知识库", "索引", "模型", "维度", "chunks", "embedded", "状态"],
+    ["KB ID", "知识库", "索引", "模型", "全部", "可检索", "已嵌入", "降级文档", "已排除", "状态"],
     items.map((item) => [
       item.kb_id,
       item.kb_name,
       item.name,
       item.embedding_model,
-      item.dimension,
       item.chunks,
+      item.searchable_chunks,
       item.embedded_chunks,
+      item.degraded_documents,
+      item.excluded_chunks,
       item.status,
     ]),
   );

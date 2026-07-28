@@ -3,7 +3,9 @@ use std::sync::Arc;
 use anyhow::Result;
 use sqlx::PgPool;
 
-use crate::agent::{AgentKernel, BuiltinPromptRegistry, LlmAgentReasoner, LlmClaimVerifier};
+use crate::agent::{
+    AgentKernel, BuiltinPromptRegistry, LlmAgentReasoner, LlmClaimVerifier, StructuralClaimVerifier,
+};
 use crate::config::AppConfig;
 use crate::llm::openai::{OpenAiClient, OpenAiClientConfig};
 use crate::llm::OpenAiAnswerGenerator;
@@ -83,10 +85,15 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         reasoning_client.clone(),
         config.agent.reasoning_model.clone(),
     ));
-    let verifier: Arc<dyn crate::agent::ClaimVerifier> = Arc::new(LlmClaimVerifier::new(
-        reasoning_client,
-        config.agent.reasoning_model.clone(),
-    ));
+    let verifier: Arc<dyn crate::agent::ClaimVerifier> = if config.rag.citation.verify_claims {
+        Arc::new(LlmClaimVerifier::new(
+            reasoning_client,
+            config.agent.reasoning_model.clone(),
+            config.rag.citation.verify_consensus,
+        ))
+    } else {
+        Arc::new(StructuralClaimVerifier)
+    };
 
     if !config.rag.embedding.enabled {
         anyhow::bail!("DocuMind Agent requires EMBED_ENABLED=true");

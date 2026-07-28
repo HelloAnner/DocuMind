@@ -433,8 +433,10 @@ export interface VectorIndexSummary {
   building_documents: number;
   degraded_documents: number;
   chunks: number;
+  searchable_chunks: number;
   embedded_chunks: number;
-  es_documents: number;
+  failed_embeddings: number;
+  excluded_chunks: number;
   status: string;
   lastIndexed?: string;
 }

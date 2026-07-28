@@ -407,13 +407,16 @@ async function vectorCommand(args: ParsedArgs, api: ApiClient, json: boolean): P
     const audit = await diagnostics.audit();
     if (json) printJson(audit);
     else printTable(
-      ["KB ID", "知识库", "PG chunks", "PG embedded", "ES chunks", "差值", "一致"],
+      ["KB ID", "知识库", "PG 全部", "PG 可检索", "PG 已嵌入", "ES", "降级文档", "已排除", "差值", "一致"],
       audit.items.map((item) => [
         item.kb_id,
         item.kb_name,
         item.postgres_chunks,
-        item.postgres_embedded_chunks ?? "-",
+        item.postgres_searchable_chunks,
+        item.postgres_embedded_chunks,
         item.elasticsearch_chunks,
+        item.degraded_documents,
+        item.excluded_chunks,
         item.delta,
         item.consistent ? "yes" : "NO",
       ]),

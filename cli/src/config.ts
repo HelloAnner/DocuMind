@@ -25,7 +25,7 @@ export const DEFAULT_CONFIG: CliConfig = {
   diagnostics: {
     ssh_host: "documind",
     elasticsearch_url: "http://127.0.0.1:8104",
-    elasticsearch_index: "chunks",
+    elasticsearch_index: "chunks_search",
   },
 };
 
@@ -56,6 +56,10 @@ export function parseConfig(text: string): CliConfig {
   const chat = optionalObjectValue(value.chat);
   const diagnostics = optionalObjectValue(value.diagnostics);
   const trace = stringValue(chat.trace, DEFAULT_CONFIG.chat.trace);
+  const configuredIndex = stringValue(
+    diagnostics.elasticsearch_index,
+    DEFAULT_CONFIG.diagnostics.elasticsearch_index,
+  );
   if (!(["off", "summary", "full"] as string[]).includes(trace)) {
     throw new CliError("chat.trace 只能是 off、summary 或 full", 2);
   }
@@ -81,7 +85,7 @@ export function parseConfig(text: string): CliConfig {
     diagnostics: {
       ssh_host: stringValue(diagnostics.ssh_host, ""),
       elasticsearch_url: stringValue(diagnostics.elasticsearch_url, ""),
-      elasticsearch_index: stringValue(diagnostics.elasticsearch_index, "chunks"),
+      elasticsearch_index: configuredIndex === "chunks" ? "chunks_search" : configuredIndex,
     },
   };
   validateConfig(config);
