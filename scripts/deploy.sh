@@ -7,6 +7,7 @@ REMOTE_ROOT="${REMOTE_ROOT:-/opt/documind}"
 DEPLOY_TARGET="${DEPLOY_TARGET:-x86_64-unknown-linux-musl}"
 LOCAL_BINARY="${LOCAL_BINARY:-target/deploy-linux-x86_64-musl/$DEPLOY_TARGET/release/documind}"
 RELEASE_ID="${RELEASE_ID:-$(date +%Y%m%d-%H%M%S)}"
+DEPLOY_LOCAL_SERVER="${DEPLOY_LOCAL_SERVER:-0}"
 REMOTE_PG_CONTAINER="${REMOTE_PG_CONTAINER:-documind-postgres}"
 REMOTE_REDIS_CONTAINER="${REMOTE_REDIS_CONTAINER:-documind-redis}"
 REMOTE_RABBITMQ_CONTAINER="${REMOTE_RABBITMQ_CONTAINER:-documind-rabbitmq}"
@@ -25,7 +26,7 @@ REMOTE_RABBITMQ_IMAGE="${REMOTE_RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/
 REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}"
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
 
-if [[ "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
+if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
   echo "Set ALLOW_CUSTOM_DEPLOY_HOST=1 if you really want to override ssh documind."
   exit 1
@@ -49,7 +50,33 @@ if echo "$binary_info" | grep -qi 'interpreter '; then
   exit 1
 fi
 
-local_sha256="$(shasum -a 256 "$LOCAL_BINARY" | awk '{print $1}')"
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | awk '{print $1}'
+    return
+  fi
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+run_remote_bash() {
+  if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
+    bash -s
+    return
+  fi
+  ssh "$DEPLOY_HOST" "bash -s"
+}
+
+copy_to_remote() {
+  local source_path="$1"
+  local destination_path="$2"
+  if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
+    cp "$source_path" "$destination_path"
+    return
+  fi
+  scp "$source_path" "$DEPLOY_HOST:$destination_path"
+}
+
+local_sha256="$(sha256_file "$LOCAL_BINARY")"
 
 REMOTE_RELEASE="$REMOTE_ROOT/releases/$RELEASE_ID"
 REMOTE_CURRENT="$REMOTE_ROOT/current"
@@ -60,7 +87,11 @@ REMOTE_PID="$REMOTE_SHARED/runtime/documind-$DEPLOY_PORT.pid"
 TMP_ENV="$(mktemp)"
 trap 'rm -f "$TMP_ENV"' EXIT
 
-remote_env_content="$(ssh "$DEPLOY_HOST" "test -f '$REMOTE_ENV' && cat '$REMOTE_ENV' || true" 2>/dev/null || true)"
+if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
+  remote_env_content="$(test -f "$REMOTE_ENV" && cat "$REMOTE_ENV" || true)"
+else
+  remote_env_content="$(ssh "$DEPLOY_HOST" "test -f '$REMOTE_ENV' && cat '$REMOTE_ENV' || true" 2>/dev/null || true)"
+fi
 existing_jwt_secret="$(printf '%s\n' "$remote_env_content" | grep -E '^JWT_SECRET=' | tail -1 | cut -d= -f2- || true)"
 jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || date +%s | shasum -a 256 | awk '{print $1}')}"
 
@@ -254,22 +285,30 @@ AGENT_MAX_REPAIR_ATTEMPTS=3
 AGENT_TOTAL_TIMEOUT_SECONDS=240
 ENV
 
-echo "Deploying DocuMind to ssh $DEPLOY_HOST"
+if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
+  echo "Deploying DocuMind from the server build workspace"
+else
+  echo "Deploying DocuMind to ssh $DEPLOY_HOST"
+fi
 echo "Release: $RELEASE_ID"
 echo "Port: $DEPLOY_PORT"
 echo "Binary sha256: $local_sha256"
 
-ssh "$DEPLOY_HOST" "bash -s" <<REMOTE
+run_remote_bash <<REMOTE
 set -euo pipefail
 mkdir -p '$REMOTE_RELEASE/bin' '$REMOTE_SHARED/logs' '$REMOTE_SHARED/runtime' '$REMOTE_SHARED/models'
 REMOTE
 
-scp "$LOCAL_BINARY" "$DEPLOY_HOST:$REMOTE_RELEASE/bin/documind"
-scp "$TMP_ENV" "$DEPLOY_HOST:$REMOTE_RELEASE/.env.default"
+copy_to_remote "$LOCAL_BINARY" "$REMOTE_RELEASE/bin/documind"
+copy_to_remote "$TMP_ENV" "$REMOTE_RELEASE/.env.default"
 
-COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
+if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
+  COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | tar -xzf - -C "$REMOTE_RELEASE"
+else
+  COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
+fi
 
-ssh "$DEPLOY_HOST" "bash -s" <<REMOTE
+run_remote_bash <<REMOTE
 set -euo pipefail
 
 remote_release='$REMOTE_RELEASE'
