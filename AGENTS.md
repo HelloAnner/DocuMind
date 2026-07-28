@@ -6,23 +6,27 @@ DocuMind 是企业级文档智能问答系统：Rust API + Agent Kernel 承载�
 
 - `ssh documind` 是 DocuMind 的独立服务器环境，不是普通跳板机；部署、端口、日志、PostgreSQL / Redis / RabbitMQ 等运行时状态都以这台机器为准。
 - 默认优先服务器环境：部署、排查、验收和端到端测试都在 `ssh documind` 上确认。
-- 本地环境不允许启动任何 DocuMind 服务器、前端 dev server、预览服务器或临时服务（包括但不限于 `next dev`、`next start`、`npm run dev`、`python -m http.server`、`serve`、本地 Rust API 进程等）；本地只用于编辑代码、静态检查、构建和生成发布包。
-- 当前仓库用于构建发布包；服务器部署根目录是 `/opt/documind`，采用 `releases/<timestamp>` + `current` + `shared` 的发布结构。
+- 本地环境不允许启动任何 DocuMind 服务器、前端 dev server、预览服务器、临时服务或发布构建（包括但不限于 `next dev`、`next start`、`npm run dev`、`python -m http.server`、`serve`、本地 Rust API 进程和 Linux/musl 发布编译）；本地只用于编辑代码、静态检查和不产生发布物的测试。
+- 服务器源码镜像固定为 `/opt/documind/build/source`，构建缓存位于 `/opt/documind/build/cache`；服务器部署根目录是 `/opt/documind`，采用 `releases/<timestamp>-<commit>` + `current` + `shared` 的发布结构。
 - DocuMind 启动端口和访问端口统一为服务器 `8089`。
 - DocuMind 是独立系统，默认使用自身认证页面、认证逻辑、用户与权限体系。
 - 门户接入只是 DocuMind 支持的一个可选功能；除非明确启用 `AUTH_LOGIN_MODE=portal`，否则不按门户托管系统处理。
 
 ## 部署
 
-- 用户说“部署 DocuMind”或“make deploy”时，视为授权执行 `make deploy`，并在 `ssh documind` 上完成部署与验证。
-- `make deploy` 会先构建 Next.js 静态导出，再交叉编译 Linux amd64/musl 二进制，最后上传到 `ssh documind:/opt/documind` 并重启远端进程。
+- 用户说“部署 DocuMind”时，视为授权先确认代码已进入并推送到远端 `main`，再在本地执行 `make deploy-remote`，最后在 `ssh documind` 上完成部署与验证。
+- `make deploy` 是服务器源码镜像中的专用命令，只允许在 `ssh documind:/opt/documind/build/source` 运行；它使用 Podman 容器构建 Next.js 静态导出和原生 Linux amd64/musl 二进制，然后直接安装 release、切换 `current` 并更新服务。不得在本地项目目录执行 `make deploy`。
+- 本地通过 `make deploy-remote` 查询服务器源码 SHA：首次或服务器基线不可用时以 `scp -C` 上传完整 `git archive`，正常更新时只上传从服务器 SHA 到目标 SHA 的压缩增量包（新增/修改文件载荷和删除清单）；服务器先在 staging 目录事务性应用更新，再触发 `/opt/documind/build/source` 中的 `make deploy`。服务器不连接也不拉取 Git 仓库。
+- 服务器构建使用持久化 npm、Cargo registry 和 Cargo target 缓存；源码镜像本身不写入 `node_modules`、`.next`、`out` 或 `target`，每次构建使用独立临时工作目录，成功后清理，失败时保留现场。
 - 关键变量：
   - `DEPLOY_HOST=documind`
   - `DEPLOY_PORT=8089`
   - `DEPLOY_BASE_PATH=/documind`
-  - `DEPLOY_TARGET=x86_64-unknown-linux-musl`
+  - `REMOTE_ROOT=/opt/documind`
 - 常用命令：
-  - `make deploy`：构建发布包并部署到 `ssh documind`
+  - `make sync-remote-source`：仅以完整归档或增量包同步已提交源码，不触发构建
+  - `make deploy-remote`：本地增量同步源码并触发服务器 `make deploy`
+  - `ssh documind 'cd /opt/documind/build/source && make deploy'`：服务器直接使用当前源码镜像构建并更新服务
   - `make status`：查看远端 DocuMind 进程、8089 端口和日志目录
   - `make health`：在服务器上检查 `127.0.0.1:8089/api/health` 与 `127.0.0.1:8089/documind/`
   - `make logs`：查看 `/opt/documind/shared/logs/documind-8089.log`
@@ -33,24 +37,26 @@ DocuMind 是企业级文档智能问答系统：Rust API + Agent Kernel 承载�
 - 每个较大的独立功能必须使用一个单独的 Git worktree 和临时本地分支进行隔离；缺陷修复也默认在独立 worktree 中完成。worktree 统一创建在用户目录的 `~/worktree/` 下，每个任务使用独立子目录（如 `~/worktree/documind-<task>`）；不得在仓库同级创建临时 worktree。多个功能可以在不同 worktree 中开发，但部署、服务器验收和合并到主分支必须串行执行，避免互相覆盖。
 - 默认主分支必须根据仓库配置或 `origin/HEAD` 动态确认；当前仓库为 `main`。`main` 永远是所有已经完成并通过验收的功能与修复的最终汇总分支，worktree 临时分支不是交付分支。
 - 开始开发前自动获取远端状态，并从最新的 `origin/main` 创建功能 worktree；不得把主工作区或其他 worktree 中用户已有的改动带入功能分支，也不得为了开始任务擅自丢弃、覆盖或隐藏这些改动。
-- 在功能 worktree 中完成实现、本地静态检查和构建，只暂存当前功能相关文件并创建内容准确的候选 commit。进入服务器验收前先获得全局部署锁，再获取最新远端状态、把临时分支 rebase 到最新 `main` 并重新执行受影响的检查；检查通过后通过 `make deploy` 自动部署到 `ssh documind`，并在真实服务器环境完成验证与测试，不以本地环境作为最终测试依据。
+- 在功能 worktree 中完成实现、本地静态检查和不产生发布物的测试，只暂存当前功能相关文件并创建内容准确的候选 commit。发布编译统一在服务器完成，不得为部署在本地构建 Next.js 静态导出或 Linux/musl 二进制。
+- 进入交付前获取最新远端状态，把临时分支 rebase 到最新 `main` 并重新执行受影响的本地检查；随后在主工作区把临时分支以 fast-forward-only 方式合并到 `main`，通过 `gh` 提供的 GitHub HTTPS 凭据将 `main` 推送到 `origin`，并用 `gh api` 确认远端 `main` SHA。服务器连接不上代码仓库，禁止在服务器执行 `git pull`、`git fetch` 或以旧源码继续构建。
+- 只有远端 `main` 已等于待发布 commit 后，才从该 commit 的干净 worktree 执行 `make deploy-remote`。该命令使用 `scp -C` 把完整源码归档或增量包同步到服务器源码镜像，再自动触发服务器 `make deploy`；真实服务器环境是发布构建和最终测试的唯一依据。
 - 所有功能验证、页面验收、端到端测试、浏览器截图与交互检查，都必须访问 `ssh documind` 上运行的服务器实例（`127.0.0.1:8089` 或通过 SSH 隧道访问该远端实例），不得访问本地启动的服务。
 - 部署后至少执行与改动相称的 `make status`、`make health`、服务日志检查、API 测试和端到端测试。涉及前端时，必须通过浏览器自动化访问服务器实例，实际操作关键路径并按需截图；涉及问答、Agent 或检索时，必须在服务器上用真实对话覆盖成功、失败和边界场景，并核对回答、引用、权限及日志。
 - 若改动涉及前端页面，以 `/Users/anner/style/wufan` 中的 Product 设计语言、双主题 Token、组件、布局和交互规范为视觉事实来源；Light 与 Dark 必须作为两套独立语义主题实现和验收，不得以简单反色替代。先完成前端代码（Next.js 静态导出部分），再与 Rust API 对接，保证前后端功能与数据流对齐。
-- 若改动仅涉及后端，则先完成 API/领域逻辑，再通过 `make deploy` 部署到服务器验证。
-- 服务器验收发现问题时，在原功能 worktree 中修复、创建新的候选 commit，并重新部署和验收；不得直接修改服务器文件或让服务器运行无法对应到明确 commit 的未提交代码。
-- 集成前再次获取最新远端状态；如果远端 `main` 已变化，则把临时分支 rebase 到最新 `main`、重新执行受影响的检查，并在最终代码发生变化时重新部署和服务器复验。随后在主工作区把临时分支以 fast-forward-only 方式合并到 `main`。对于会改变可部署产物的功能或修复，必须从最终 `main` 再次部署并完成服务器验收，确保服务器运行内容与最终主分支一致；随后自动将 `main` 推送到 `origin`。不得强制推送，不默认推送临时功能分支，也不默认创建 PR。
+- 若改动仅涉及后端，则先完成 API/领域逻辑，再通过 `make deploy-remote` 交由服务器构建并验证。
+- 服务器验收发现问题时，在原功能 worktree 中修复、创建新 commit，重新集成并推送 `main`，再增量同步、服务器构建和验收；不得直接修改服务器源码或 release 文件，也不得让服务器运行无法对应到远端 `main` 明确 commit 的代码。
+- 推送前再次获取最新远端状态；如果远端 `main` 已变化，则把临时分支 rebase 到最新 `main`、重新执行受影响的检查，然后再 fast-forward 集成。不得强制推送，不默认推送临时功能分支，也不默认创建 PR。
 - 推送成功后确认远端 `main` 包含功能提交、服务器健康且运行版本与 `main` 一致；然后自动移除已完成的 worktree、清理失效元数据并安全删除已经完全合并的临时本地分支。
 - 只有“功能已进入并推送到远端 `main`、服务器部署成功、真实环境验收通过、临时 worktree 已安全清理”全部满足时，一个功能开发或缺陷修复才算完成。任一步失败都不得宣称完成，也不得使用强制合并、强制推送、跳过测试或删除现场等方式绕过。
 
 ## 部署互斥与串行发布
 
-- 所有功能 worktree 可以并行开发、执行本地静态检查和构建，但共享的 `ssh documind` 部署环境、`/opt/documind/current`、基础组件和 8089 端口属于单一验收槽位，任何时刻只允许一个功能占用。
-- 全局部署锁使用服务器目录 `/opt/documind/shared/runtime/deploy.lock` 作为互斥租约。进入发布流程时必须通过原子 `mkdir` 成功创建该目录，并在目录中记录 worktree、分支、候选 commit、操作者和开始时间；目录已存在即表示其他功能正在发布，当前功能必须等待，不得覆盖、复用或删除他人的锁。
-- 部署锁的持有范围必须完整覆盖：获取最新远端状态、功能分支 rebase、候选版本部署、服务器验收、fast-forward 合并到 `main`、从最终 `main` 重新部署、最终验收、推送 `origin/main` 和远端版本确认。不得在候选版本验收后提前释放锁。
-- 持有部署锁期间，其他 worktree 禁止执行 `make deploy`、修改 `/opt/documind/current`、重启 DocuMind、执行数据库迁移，或运行会改变共享数据和部署状态的测试；可以继续本地开发、静态检查和构建，并等待进入串行发布队列。
-- 前一个功能完成合并后，后续功能必须重新获取 `origin/main`，并 rebase 到已经包含前序功能的最新 `main`，再进入部署验收流程；基于旧 `main` 得出的构建和服务器验收结果不得直接复用。
-- 正常完成时，只有确认远端 `main` 已包含功能提交、服务器健康且运行版本与该 `main` 一致后才能删除部署锁。候选部署、验收、合并或推送失败时，必须先重新部署并验证当前远端 `main`，再释放锁；无法安全恢复时保留 worktree 和锁现场并报告，不得继续部署下一个功能。
+- 所有功能 worktree 可以并行开发和执行本地静态检查，但共享的服务器源码镜像、构建缓存、`/opt/documind/current`、基础组件和 8089 端口属于单一发布槽位，任何时刻只允许一个服务器构建或部署占用。
+- 全局部署锁使用服务器目录 `/opt/documind/shared/runtime/deploy.lock`。服务器 `make deploy` 通过原子 `mkdir` 自动获取锁，并记录源码路径、commit、build ID 和开始时间；目录已存在即表示其他发布正在运行，当前任务必须等待，不得覆盖、复用或删除他人的锁。
+- 部署锁覆盖服务器源码复制、Next.js 构建、Rust 构建、release 安装、服务切换和部署脚本内健康检查。持锁期间禁止同步服务器源码、再次执行 `make deploy`、修改 `/opt/documind/current`、重启 DocuMind、执行数据库迁移或运行会改变共享数据和部署状态的测试。
+- 构建阶段失败时服务尚未变更，脚本自动释放部署锁并保留构建工作目录；进入 release 安装阶段后失败时保留工作目录和锁，必须先核对或恢复当前服务后才能人工释放。不得用删除锁的方式绕过未知发布状态。
+- 前一个功能完成推送和服务器验收后，后续功能必须重新获取 `origin/main`，并 rebase 到已经包含前序功能的最新 `main`，再推送、同步和发布；基于旧 `main` 得出的检查或构建结果不得直接复用。
+- 正常完成时，服务器 `make deploy` 在安装和内置健康检查成功后释放锁；随后仍须执行 `make status`、`make health`、日志及相应端到端验收，并确认当前 release 的 `source.sha` 等于远端 `main`。
 - 发现遗留锁时，必须先读取锁内的归属信息并确认原发布流程已经终止，同时核对服务器当前版本和远端 `main`；不能确认锁已失效时不得擅自删除。
 
 ## 服务器依赖隔离
