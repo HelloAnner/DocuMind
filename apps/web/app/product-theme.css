@@ -1511,6 +1511,7 @@ select:focus-visible {
   display: flex;
   flex-direction: row-reverse;
   gap: 12px;
+  justify-content: flex-start;
   padding-left: 0;
 }
 
@@ -1655,9 +1656,10 @@ select:focus-visible {
   font-size: 14px;
   gap: 10px;
   line-height: 1.6;
-  max-width: 85%;
+  margin-left: 42px;
+  max-width: calc(100% - 42px);
   padding: 14px;
-  width: fit-content;
+  width: min(800px, calc(100% - 42px));
 }
 
 .dm-markdown-content h1,
@@ -1719,7 +1721,6 @@ select:focus-visible {
   color: var(--text-secondary);
 }
 
-.dm-answer-content,
 .dm-answer-citations,
 .dm-follow-up-questions,
 .dm-reasoning-trace,
