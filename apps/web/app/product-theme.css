@@ -38,6 +38,9 @@
   --interactive-active: #ffffff;
   --input-bg: #fafafa;
   --input-border: #e4e4e7;
+  --chat-composer-border: rgba(0, 0, 0, 0.08);
+  --chat-composer-focus-border: rgba(24, 24, 27, 0.24);
+  --chat-composer-focus-ring: rgba(24, 24, 27, 0.06);
   --bubble-user: #f0efed;
   --bubble-agent: #ffffff;
   --sidebar-bg: #ffffff;
@@ -142,6 +145,9 @@
   --interactive-active: #27272a;
   --input-bg: #27272a;
   --input-border: #3f3f46;
+  --chat-composer-border: rgba(255, 255, 255, 0.04);
+  --chat-composer-focus-border: rgba(255, 255, 255, 0.18);
+  --chat-composer-focus-ring: rgba(255, 255, 255, 0.08);
   --bubble-user: #1a1a20;
   --bubble-agent: #16161c;
   --sidebar-bg: rgba(18, 18, 24, 0.5);
@@ -1847,32 +1853,53 @@ select:focus-visible {
 .dm-composer-box {
   background: var(--input-bg);
   backdrop-filter: blur(var(--glass-blur));
-  border: 1px solid var(--border-subtle);
+  border: 1px solid var(--chat-composer-border);
   border-radius: 16px;
-  box-shadow: var(--panel-shadow);
+  box-shadow: none;
   display: flex;
   flex-direction: column;
   margin: 0 auto;
   max-width: 800px;
-  min-height: 104px;
-  padding: 14px 16px 12px;
-  width: min(800px, calc(100% - 48px));
+  overflow: hidden;
+  padding: 0;
+  transition:
+    border-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    box-shadow 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  width: 100%;
+}
+
+.dm-composer-box:focus-within {
+  border-color: var(--chat-composer-focus-border);
+  box-shadow: 0 0 0 3px var(--chat-composer-focus-ring);
 }
 
 .dm-composer-input-row {
+  align-items: flex-start;
   display: flex;
   flex: 1;
-  min-height: 42px;
+  min-height: 60px;
+  padding: 16px 16px 12px;
 }
 
 .dm-composer-box textarea {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   color: var(--text-primary);
   font-size: 14px;
   line-height: 1.6;
   max-height: 160px;
-  min-height: 24px;
-  padding: 0;
+  min-height: 32px;
+  outline: none;
+  padding: 4px 6px;
+  resize: none;
   width: 100%;
+}
+
+.dm-composer-box textarea:focus,
+.dm-composer-box textarea:focus-visible {
+  box-shadow: none;
+  outline: none;
 }
 
 .dm-composer-box textarea::placeholder {
@@ -1888,31 +1915,37 @@ select:focus-visible {
 .dm-composer-toolbar {
   gap: 12px;
   justify-content: space-between;
-  margin-top: 8px;
+  margin-top: 0;
+  padding: 12px 16px;
 }
 
 .dm-composer-tools {
-  gap: 8px;
+  gap: 2px;
   min-width: 0;
 }
 
 .dm-composer-tool,
 .dm-composer-context {
   align-items: center;
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  border: 0;
+  border-radius: 6px;
   color: var(--text-muted);
   display: inline-flex;
-  font-size: 13px;
-  gap: 6px;
-  height: 36px;
-  padding: 0 12px;
+  font-size: 12px;
+  gap: 5px;
+  height: 28px;
   width: auto;
 }
 
 .dm-composer-tool {
   background: transparent;
   cursor: pointer;
+  flex: 0 0 28px;
+  justify-content: center;
+  padding: 0;
+  transition:
+    background-color 100ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 100ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .dm-composer-tool:hover {
@@ -1921,9 +1954,16 @@ select:focus-visible {
 }
 
 .dm-composer-context {
-  background: color-mix(in srgb, var(--surface-subdued) 62%, transparent);
+  background: transparent;
   cursor: default;
+  min-width: 0;
+  padding: 0 7px;
   white-space: nowrap;
+}
+
+.dm-composer-context-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .dm-send-button {
@@ -1932,6 +1972,9 @@ select:focus-visible {
   color: var(--send-icon);
   flex: 0 0 36px;
   height: 36px;
+  transition:
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms cubic-bezier(0.4, 0, 0.2, 1);
   width: 36px;
 }
 
@@ -2738,8 +2781,6 @@ body > .hiddenCanvasElement {
   }
 
   .dm-composer-box {
-    min-height: 104px;
-    padding: 12px;
     width: 100%;
   }
 
@@ -2747,9 +2788,17 @@ body > .hiddenCanvasElement {
     font-size: 16px;
   }
 
+  .dm-composer-input-row {
+    padding: 14px 12px 10px;
+  }
+
+  .dm-composer-toolbar {
+    padding: 10px 12px 12px;
+  }
+
   .dm-composer-context {
     font-size: 12px;
-    padding: 0 9px;
+    padding: 0 7px;
   }
 
   .dm-chat-empty {

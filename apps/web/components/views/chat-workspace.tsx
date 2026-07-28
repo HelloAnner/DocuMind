@@ -283,6 +283,7 @@ export function ChatWorkspace() {
               <div className="dm-composer-input-row">
                 <textarea
                   ref={textareaRef}
+                  aria-label="消息输入框"
                   placeholder={streamingId ? "DocuMind 正在处理…" : "描述你的需求，或 @ 引用文件"}
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -299,13 +300,23 @@ export function ChatWorkspace() {
               </div>
               <div className="dm-composer-toolbar">
                 <div className="dm-composer-tools">
-                  <button type="button" className="dm-composer-tool" aria-label="添加附件">
+                  <button
+                    type="button"
+                    className="dm-composer-tool"
+                    aria-label="添加附件"
+                    title="添加附件"
+                  >
                     <Paperclip size={14} />
-                    <span>附件</span>
                   </button>
-                  <span className="dm-composer-context" title="本次问答覆盖当前有权访问的知识库">
+                  <span
+                    className="dm-composer-context"
+                    title="本次问答覆盖当前有权访问的知识库"
+                    aria-label={`本次问答覆盖${availableKbs.length > 0 ? `${availableKbs.length} 个` : "当前有权访问的"}知识库`}
+                  >
                     <BookOpen size={14} aria-hidden="true" />
-                    {availableKbs.length > 0 ? `${availableKbs.length} 个知识库` : "知识库问答"}
+                    <span className="dm-composer-context-label">
+                      {availableKbs.length > 0 ? `${availableKbs.length} 个知识库` : "知识库问答"}
+                    </span>
                   </span>
                 </div>
                 <button
