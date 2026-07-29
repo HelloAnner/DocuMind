@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{Confidence, MessageRole, MessageStatus, NoAnswerReason};
-use crate::models::agent::{AgentMode, PromptVersions};
+use crate::models::agent::{AgentMode, PromptVersions, ReactStepTrace};
 use crate::models::citation::{Citation, CitationAnchor};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +39,7 @@ pub struct MessageResponse {
     pub agent_mode: Option<String>,
     pub prompt_versions: Option<PromptVersions>,
     pub citations: Vec<CitationResponse>,
+    pub reasoning_steps: Vec<ReactStepTrace>,
     pub parent_message_id: Option<Uuid>,
     pub retry_of_message_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,

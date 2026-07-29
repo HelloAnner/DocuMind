@@ -169,6 +169,14 @@ async fn message_to_response(
     } else {
         vec![]
     };
+    let reasoning_steps = if message.role == MessageRole::Assistant {
+        repo.get_agent_trace(message.id)
+            .await?
+            .map(|trace| trace.react_steps)
+            .unwrap_or_default()
+    } else {
+        vec![]
+    };
     let citation_resps: Vec<_> = citations.iter().map(|c| c.into()).collect();
     Ok(MessageResponse {
         message_id: message.id,
@@ -180,6 +188,7 @@ async fn message_to_response(
         agent_mode: message.agent_mode.as_ref().map(|m| m.to_string()),
         prompt_versions: message.prompt_versions.clone(),
         citations: citation_resps,
+        reasoning_steps,
         parent_message_id: message.parent_message_id,
         retry_of_message_id: message.retry_of_message_id,
         created_at: message.created_at,

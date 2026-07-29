@@ -8,7 +8,7 @@ use super::stream::AnswerStream;
 use super::tools::{KnowledgeSearchEffect, TerminalToolEffect, ToolEffect};
 use crate::models::agent::{
     AgentMode, AgentRun, AgentTrace, AnswerStreamItem, ConversationTurn, PromptVersions,
-    ReactStepTrace, RuntimeComponents,
+    ReactStepTrace, ReactToolCallTrace, RuntimeComponents,
 };
 use crate::models::rag::RerankedChunk;
 use crate::models::trace::{PlanMode, ResolvedRef, RetrievalPlan, RetrievalTrace};
@@ -343,14 +343,33 @@ pub(super) fn tool_step_summary(calls: &[AgentToolCall]) -> String {
 
 pub(super) fn successful_tool_step(
     step: usize,
-    name: &str,
+    call: &AgentToolCall,
+    arguments: serde_json::Value,
+    result: serde_json::Value,
+    output: Option<&str>,
     details: &AppliedToolTrace,
     started_at: chrono::DateTime<chrono::Utc>,
 ) -> ReactStepTrace {
+    let completed_at = now();
     ReactStepTrace {
         step,
-        action: name.to_string(),
-        decision_summary: format!("executed {name}"),
+        action: call.name.clone(),
+        decision_summary: format!("executed {}", call.name),
+        output: output.map(str::to_string),
+        tool_calls: vec![ReactToolCallTrace {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            arguments,
+            status: "succeeded".to_string(),
+            result: Some(result),
+            error: None,
+            started_at,
+            completed_at,
+            duration_ms: completed_at
+                .signed_duration_since(started_at)
+                .num_milliseconds()
+                .max(0) as u64,
+        }],
         queries: details.queries.clone(),
         rerank_query: details.rerank_query.clone(),
         hypothetical_answer: details.hypothetical_answer.clone(),
@@ -358,20 +377,39 @@ pub(super) fn successful_tool_step(
         accepted_chunk_ids: details.accepted_chunk_ids.clone(),
         warnings: details.warnings.clone(),
         started_at,
-        completed_at: now(),
+        completed_at,
     }
 }
 
 pub(super) fn failed_tool_step(
     step: usize,
-    name: &str,
+    call: &AgentToolCall,
+    arguments: serde_json::Value,
+    error: serde_json::Value,
+    output: Option<&str>,
     message: &str,
     started_at: chrono::DateTime<chrono::Utc>,
 ) -> ReactStepTrace {
+    let completed_at = now();
     ReactStepTrace {
         step,
-        action: name.to_string(),
-        decision_summary: format!("{name} failed"),
+        action: call.name.clone(),
+        decision_summary: format!("{} failed", call.name),
+        output: output.map(str::to_string),
+        tool_calls: vec![ReactToolCallTrace {
+            id: call.id.clone(),
+            name: call.name.clone(),
+            arguments,
+            status: "failed".to_string(),
+            result: None,
+            error: Some(error),
+            started_at,
+            completed_at,
+            duration_ms: completed_at
+                .signed_duration_since(started_at)
+                .num_milliseconds()
+                .max(0) as u64,
+        }],
         queries: Vec::new(),
         rerank_query: None,
         hypothetical_answer: None,
@@ -379,30 +417,55 @@ pub(super) fn failed_tool_step(
         accepted_chunk_ids: Vec::new(),
         warnings: vec![message.to_string()],
         started_at,
-        completed_at: now(),
+        completed_at,
     }
 }
 
 pub(super) fn response_step(step: usize, content: &str) -> ReactStepTrace {
+    let timestamp = now();
     ReactStepTrace {
         step,
         action: "respond".to_string(),
         decision_summary: format!("final response ({} chars)", content.chars().count()),
+        output: Some(content.to_string()),
+        tool_calls: Vec::new(),
         queries: Vec::new(),
         rerank_query: None,
         hypothetical_answer: None,
         retrieved_chunk_ids: Vec::new(),
         accepted_chunk_ids: Vec::new(),
         warnings: Vec::new(),
-        started_at: now(),
-        completed_at: now(),
+        started_at: timestamp,
+        completed_at: timestamp,
+    }
+}
+
+pub(super) fn failed_response_step(step: usize, content: &str, message: &str) -> ReactStepTrace {
+    let timestamp = now();
+    ReactStepTrace {
+        step,
+        action: "respond".to_string(),
+        decision_summary: "response rejected".to_string(),
+        output: Some(content.to_string()),
+        tool_calls: Vec::new(),
+        queries: Vec::new(),
+        rerank_query: None,
+        hypothetical_answer: None,
+        retrieved_chunk_ids: Vec::new(),
+        accepted_chunk_ids: Vec::new(),
+        warnings: vec![message.to_string()],
+        started_at: timestamp,
+        completed_at: timestamp,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::bounded_history;
+    use super::{bounded_history, successful_tool_step, AppliedToolTrace};
+    use crate::agent::model::AgentToolCall;
     use crate::models::agent::ConversationTurn;
+    use crate::models::now;
+    use serde_json::json;
 
     #[test]
     fn bounded_history_keeps_recent_turns() {
@@ -421,5 +484,39 @@ mod tests {
         let selected = bounded_history(&history, 1, 1_000);
         assert_eq!(selected.len(), 1);
         assert_eq!(selected[0].user_message, "new");
+    }
+
+    #[test]
+    fn successful_tool_step_preserves_public_call_details() {
+        let call = AgentToolCall {
+            id: "call-1".to_string(),
+            name: "knowledge_search".to_string(),
+            arguments_json: r#"{"query":"DocuMind 架构"}"#.to_string(),
+        };
+        let arguments = json!({"query": "DocuMind 架构"});
+        let public_result = json!({
+            "matches": [{
+                "document": "架构说明",
+                "content": "Rust API 与 Next.js 前端"
+            }]
+        });
+        let step = successful_tool_step(
+            2,
+            &call,
+            arguments.clone(),
+            public_result.clone(),
+            Some("需要检索架构文档"),
+            &AppliedToolTrace::default(),
+            now(),
+        );
+
+        assert_eq!(step.step, 2);
+        assert_eq!(step.output.as_deref(), Some("需要检索架构文档"));
+        assert_eq!(step.tool_calls.len(), 1);
+        assert_eq!(step.tool_calls[0].id, "call-1");
+        assert_eq!(step.tool_calls[0].arguments, arguments);
+        assert_eq!(step.tool_calls[0].result, Some(public_result));
+        assert_eq!(step.tool_calls[0].status, "succeeded");
+        assert!(step.tool_calls[0].error.is_none());
     }
 }

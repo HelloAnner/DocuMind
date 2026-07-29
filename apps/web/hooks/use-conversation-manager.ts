@@ -24,6 +24,7 @@ import type {
   MessageStatus,
   Rating,
   RetryMessageRequest,
+  RuntimeReasoningStep,
   RuntimeToolCall,
   RuntimeEventEnvelope,
   SendMessageRequest,
@@ -67,6 +68,10 @@ function normalizeToolStatus(value: unknown): RuntimeToolCall["status"] {
 
 function runtimeToolName(event: RuntimeEventEnvelope, fallback: string) {
   return firstRuntimeString(event.payload.name, event.step?.name, event.payload.display_name, fallback);
+}
+
+function runtimeStepNumber(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
 export function useConversationManager() {
@@ -218,6 +223,7 @@ export function useConversationManager() {
       }
 
       let assistantId = assistantTempId;
+      let activeReasoningStep: number | null = null;
       let pendingMessageUpdates: MessageListUpdate[] = [];
       let pendingMessageFrame: number | null = null;
       const applyPendingMessageUpdates = () => {
@@ -271,6 +277,23 @@ export function useConversationManager() {
           })
         );
       };
+      const updateReasoningStepInStream = (
+        stepNumber: number,
+        recipe: (step?: RuntimeReasoningStep) => RuntimeReasoningStep
+      ) => {
+        const messageId = assistantId;
+        queueMessageUpdate((prev) =>
+          prev.map((m) => {
+            if (m.message_id !== messageId && m.message_id !== assistantTempId) return m;
+            const steps = m.reasoning_steps ?? [];
+            const exists = steps.some((step) => step.step === stepNumber);
+            const nextSteps = exists
+              ? steps.map((step) => (step.step === stepNumber ? recipe(step) : step))
+              : [...steps, recipe(undefined)];
+            return { ...m, reasoning_steps: nextSteps };
+          })
+        );
+      };
       try {
         for await (const sse of streamSse(url, req, controller.signal)) {
           if (controller.signal.aborted) {
@@ -294,18 +317,29 @@ export function useConversationManager() {
               continue;
             }
 
-            if (runtime.event_type === "thinking.delta") {
-              const delta = runtime.payload.delta;
-              if (typeof delta === "string") {
-                const messageId = assistantId;
-                queueMessageUpdate((prev) =>
-                  prev.map((m) =>
-                    m.message_id === messageId || m.message_id === assistantTempId
-                      ? { ...m, thinking: `${m.thinking ?? ""}${delta}` }
-                      : m
-                  )
-                );
+            if (runtime.event_type === "agent.step.started") {
+              const stepNumber = runtimeStepNumber(runtime.payload.step);
+              if (stepNumber !== null) {
+                activeReasoningStep = stepNumber;
+                const action = firstRuntimeString(runtime.payload.action, "tool");
+                const decisionSummary = firstRuntimeString(runtime.payload.decision_summary);
+                updateReasoningStepInStream(stepNumber, (step) => ({
+                  step: stepNumber,
+                  action,
+                  decision_summary: decisionSummary,
+                  output: step?.output,
+                  tool_calls: step?.tool_calls ?? [],
+                  warnings: step?.warnings,
+                  started_at: step?.started_at ?? runtime.occurred_at,
+                  completed_at: step?.completed_at,
+                }));
               }
+              continue;
+            }
+
+            if (runtime.event_type === "thinking.delta") {
+              // Raw model reasoning is intentionally not rendered. The visible trace is
+              // assembled from real step, tool argument, result, and final-response events.
               continue;
             }
 
@@ -331,6 +365,7 @@ export function useConversationManager() {
                   arguments: runtime.payload.arguments ?? tool?.arguments,
                   arguments_preview: tool?.arguments_preview,
                   status: "running",
+                  step: tool?.step ?? activeReasoningStep ?? undefined,
                   started_at: tool?.started_at ?? runtime.occurred_at,
                   display: runtime.payload.display ?? tool?.display,
                 }));
@@ -349,6 +384,7 @@ export function useConversationManager() {
                 arguments: tool?.arguments,
                 arguments_preview: tool?.arguments_preview,
                 status: tool?.status ?? "running",
+                step: tool?.step ?? activeReasoningStep ?? undefined,
                 progress: typeof progress === "number" ? progress : tool?.progress,
                 message: typeof message === "string" ? message : tool?.message,
                 started_at: tool?.started_at,
@@ -372,11 +408,9 @@ export function useConversationManager() {
                     runtime.event_type === "tool.call.failed"
                       ? "failed"
                       : normalizeToolStatus(runtime.payload.status),
-                  result: typeof runtime.payload.result === "string"
-                    ? runtime.payload.result
-                    : typeof runtime.payload.error === "string"
-                      ? runtime.payload.error
-                      : tool?.result,
+                  result: runtime.payload.result ?? tool?.result,
+                  error: runtime.payload.error ?? tool?.error,
+                  step: tool?.step ?? activeReasoningStep ?? undefined,
                   progress: typeof runtime.payload.progress === "number"
                     ? runtime.payload.progress
                     : tool?.progress,

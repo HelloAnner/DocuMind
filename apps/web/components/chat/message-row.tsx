@@ -251,8 +251,9 @@ export function MessageRow({
       />
 
       <ReasoningTrace
-        thinking={message.thinking}
+        steps={message.reasoning_steps}
         toolCalls={message.tool_calls}
+        answerContent={message.content}
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
         status={message.status}

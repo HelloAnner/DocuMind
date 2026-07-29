@@ -7,9 +7,9 @@ use super::citation_resolver::cited_evidence_indexes;
 use super::events::{emit, AgentProgress, ProgressSender};
 use super::finalizer::GroundedAnswerFinalizer;
 use super::kernel_support::{
-    apply_tool_effect, base_trace, bounded_history, build_messages, build_run, failed_tool_step,
-    response_step, single_text_stream, successful_tool_step, tool_arguments_value,
-    tool_step_summary, ToolState,
+    apply_tool_effect, base_trace, bounded_history, build_messages, build_run,
+    failed_response_step, failed_tool_step, response_step, single_text_stream,
+    successful_tool_step, tool_arguments_value, tool_step_summary, ToolState,
 };
 use super::model::{
     AgentMessage, AgentModel, AgentModelRequest, AgentModelResponse, AgentModelStreamEvent,
@@ -155,6 +155,12 @@ impl AgentKernel {
 
             if !response.tool_calls.is_empty() {
                 empty_responses = 0;
+                let step_output = response
+                    .content
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|content| !content.is_empty())
+                    .map(str::to_string);
                 emit(
                     &progress,
                     AgentProgress::ReactStepStarted {
@@ -176,7 +182,7 @@ impl AgentKernel {
                         AgentProgress::ToolCallStarted {
                             tool_call_id: call.id.clone(),
                             name: call.name.clone(),
-                            arguments,
+                            arguments: arguments.clone(),
                         },
                     );
                     let fingerprint = format!("{}:{}", call.name, call.arguments_json);
@@ -190,7 +196,10 @@ impl AgentKernel {
                         messages.push(AgentMessage::tool(call.id.clone(), error.to_string()));
                         trace.react_steps.push(failed_tool_step(
                             step,
-                            &call.name,
+                            &call,
+                            arguments,
+                            error,
+                            step_output.as_deref(),
                             "identical tool call rejected",
                             started_at,
                         ));
@@ -229,12 +238,13 @@ impl AgentKernel {
                                     },
                                 );
                             }
+                            let public_result = applied.public_result.clone();
                             emit(
                                 &progress,
                                 AgentProgress::ToolCallCompleted {
                                     tool_call_id: call.id.clone(),
                                     name: call.name.clone(),
-                                    result: applied.public_result,
+                                    result: public_result.clone(),
                                 },
                             );
                             messages.push(AgentMessage::tool(
@@ -243,7 +253,10 @@ impl AgentKernel {
                             ));
                             trace.react_steps.push(successful_tool_step(
                                 step,
-                                &call.name,
+                                &call,
+                                arguments,
+                                public_result,
+                                step_output.as_deref(),
                                 &applied.trace,
                                 started_at,
                             ));
@@ -261,7 +274,10 @@ impl AgentKernel {
                             messages.push(AgentMessage::tool(call.id.clone(), payload.to_string()));
                             trace.react_steps.push(failed_tool_step(
                                 step,
-                                &call.name,
+                                &call,
+                                arguments,
+                                payload,
+                                step_output.as_deref(),
                                 &error.to_string(),
                                 started_at,
                             ));
@@ -287,15 +303,14 @@ impl AgentKernel {
                     .content
                     .ok_or_else(|| anyhow!("agent response content disappeared"))?;
                 if evidence.is_empty() && !cited_evidence_indexes(&content).is_empty() {
-                    messages.push(AgentMessage::assistant(content));
+                    messages.push(AgentMessage::assistant(content.clone()));
                     messages.push(AgentMessage::user(
                         "Runtime grounding guard: citation markers are invalid because this turn has no document evidence. Call knowledge_search to obtain current evidence, or answer without document claims and citations.",
                     ));
-                    trace.react_steps.push(failed_tool_step(
+                    trace.react_steps.push(failed_response_step(
                         step,
-                        "respond",
+                        &content,
                         "citation markers rejected because this turn has no document evidence",
-                        now(),
                     ));
                     continue;
                 }

@@ -74,6 +74,7 @@ export interface Message {
   citations: Citation[];
   thinking?: string;
   tool_calls?: RuntimeToolCall[];
+  reasoning_steps?: RuntimeReasoningStep[];
   follow_up_questions?: FollowUpQuestion[];
   duration_ms?: number;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
@@ -89,13 +90,26 @@ export interface RuntimeToolCall {
   arguments?: unknown;
   arguments_preview?: string;
   status: "running" | "succeeded" | "failed" | "cancelled";
-  result?: string;
+  result?: unknown;
+  error?: unknown;
+  step?: number;
   progress?: number;
   message?: string;
   display?: unknown;
   started_at?: string;
   completed_at?: string;
   duration_ms?: number;
+}
+
+export interface RuntimeReasoningStep {
+  step: number;
+  action: string;
+  decision_summary: string;
+  output?: string;
+  tool_calls: RuntimeToolCall[];
+  warnings?: string[];
+  started_at?: string;
+  completed_at?: string;
 }
 
 export interface FollowUpQuestion {

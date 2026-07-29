@@ -3190,3 +3190,415 @@ body > .hiddenCanvasElement {
     animation: none !important;
   }
 }
+
+/* Wufan-derived execution chain: real rounds, tool arguments, and tool results. */
+[data-theme="light"] {
+  --reasoning-card-bg: #ffffff;
+  --reasoning-card-muted: #f5f4f2;
+  --reasoning-code-bg: #f8f8f8;
+  --reasoning-code-head: #f0efed;
+  --reasoning-success: #16a34a;
+  --reasoning-error: #dc2626;
+}
+
+[data-theme="dark"] {
+  --reasoning-card-bg: #121218;
+  --reasoning-card-muted: #16161c;
+  --reasoning-code-bg: #0d0d12;
+  --reasoning-code-head: #1a1a20;
+  --reasoning-success: #22c55e;
+  --reasoning-error: #f87171;
+}
+
+.dm-reasoning-trace {
+  gap: 6px;
+  width: min(720px, calc(100% - 42px));
+}
+
+.dm-reasoning-toggle {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+  height: auto;
+  line-height: 20px;
+  min-height: 28px;
+  padding: 3px 2px;
+}
+
+.dm-reasoning-toggle:hover {
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.dm-reasoning-detail {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  margin-top: 2px;
+  padding: 0;
+  width: 100%;
+}
+
+.dm-reasoning-rounds {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 528px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0 8px 2px 0;
+  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-width: thin;
+}
+
+.dm-reasoning-round {
+  animation: dm-trace-row-enter 180ms ease-out both;
+  background: var(--reasoning-card-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.dm-reasoning-round.is-running {
+  border-color: color-mix(in srgb, var(--accent-action) 28%, var(--border-subtle));
+}
+
+.dm-reasoning-round.is-failed {
+  border-color: color-mix(in srgb, var(--reasoning-error) 30%, var(--border-subtle));
+}
+
+.dm-reasoning-round-head {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: grid;
+  gap: 9px;
+  grid-template-columns: 28px minmax(0, 1fr) auto auto;
+  min-height: 54px;
+  padding: 9px 12px;
+  text-align: left;
+  width: 100%;
+}
+
+.dm-reasoning-round-head:hover {
+  background: var(--hover-bg);
+}
+
+.dm-reasoning-round-index {
+  align-items: center;
+  background: var(--reasoning-card-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 600;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.dm-reasoning-round.is-running .dm-reasoning-round-index {
+  background: color-mix(in srgb, var(--accent-action) 10%, var(--reasoning-card-muted));
+  color: var(--accent-action);
+}
+
+.dm-reasoning-round-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.dm-reasoning-round-title strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 19px;
+}
+
+.dm-reasoning-round-title small {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.dm-reasoning-round-head > svg:not(.dm-reasoning-round-chevron) {
+  color: var(--reasoning-success);
+}
+
+.dm-reasoning-round.is-failed .dm-reasoning-round-head > svg:not(.dm-reasoning-round-chevron) {
+  color: var(--reasoning-error);
+}
+
+.dm-reasoning-round-chevron,
+.dm-tool-call-chevron {
+  color: var(--text-muted);
+  transition: transform 150ms var(--ease-default);
+}
+
+.dm-reasoning-round-head[aria-expanded="true"] .dm-reasoning-round-chevron,
+.dm-tool-call-head[aria-expanded="true"] .dm-tool-call-chevron {
+  transform: rotate(180deg);
+}
+
+.dm-reasoning-round-body {
+  border-top: 1px solid var(--border-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+
+.dm-reasoning-output,
+.dm-reasoning-tool-section {
+  min-width: 0;
+}
+
+.dm-reasoning-section-label {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 6px;
+  line-height: 17px;
+  margin-bottom: 6px;
+}
+
+.dm-reasoning-section-label b {
+  align-items: center;
+  background: var(--reasoning-card-muted);
+  border-radius: 999px;
+  display: inline-flex;
+  font-size: 10px;
+  font-weight: 500;
+  height: 17px;
+  justify-content: center;
+  min-width: 17px;
+  padding: 0 5px;
+}
+
+.dm-reasoning-output-text {
+  color: var(--text-secondary);
+  display: -webkit-box;
+  font-size: 13px;
+  line-height: 1.65;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 6;
+}
+
+.dm-reasoning-output-text.is-expanded {
+  display: block;
+}
+
+.dm-reasoning-show-all {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 11px;
+  margin-top: 4px;
+  padding: 0;
+}
+
+.dm-reasoning-show-all:hover {
+  color: var(--text-secondary);
+}
+
+.dm-reasoning-tools {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.dm-tool-call-card {
+  background: var(--reasoning-card-muted);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  overflow: hidden;
+}
+
+.dm-tool-call-card.is-failed,
+.dm-tool-call-card.is-cancelled {
+  border-color: color-mix(in srgb, var(--reasoning-error) 28%, var(--border-subtle));
+}
+
+.dm-tool-call-head {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: 24px minmax(0, 1fr) auto auto auto;
+  min-height: 44px;
+  padding: 7px 9px;
+  text-align: left;
+  width: 100%;
+}
+
+.dm-tool-call-head:hover {
+  background: var(--hover-bg);
+}
+
+.dm-tool-call-icon {
+  align-items: center;
+  background: var(--reasoning-card-bg);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  height: 24px;
+  justify-content: center;
+  width: 24px;
+}
+
+.dm-tool-call-card.is-running .dm-tool-call-icon {
+  color: var(--accent-action);
+}
+
+.dm-tool-call-title {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.dm-tool-call-title strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-tool-call-title code {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-tool-call-duration {
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.dm-tool-call-status {
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 18px;
+  padding: 0 7px;
+  white-space: nowrap;
+}
+
+.dm-tool-call-status.is-succeeded {
+  color: var(--reasoning-success);
+}
+
+.dm-tool-call-status.is-failed,
+.dm-tool-call-status.is-cancelled {
+  color: var(--reasoning-error);
+}
+
+.dm-tool-call-status.is-running {
+  color: var(--accent-action);
+}
+
+.dm-tool-call-body {
+  border-top: 1px solid var(--border-muted);
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  padding: 8px;
+}
+
+.dm-tool-payload {
+  background: var(--reasoning-code-bg);
+  border: 1px solid var(--border-muted);
+  border-radius: 7px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.dm-tool-payload.is-error {
+  border-color: color-mix(in srgb, var(--reasoning-error) 28%, var(--border-muted));
+}
+
+.dm-tool-payload-label {
+  background: var(--reasoning-code-head);
+  border-bottom: 1px solid var(--border-muted);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 24px;
+  padding: 0 8px;
+}
+
+.dm-tool-payload pre {
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.55;
+  margin: 0;
+  max-height: 240px;
+  min-height: 52px;
+  overflow: auto;
+  padding: 8px;
+  tab-size: 2;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.dm-tool-payload.is-error pre {
+  color: var(--reasoning-error);
+}
+
+@media (max-width: 767px) {
+  .dm-reasoning-trace {
+    width: calc(100% - 36px);
+  }
+
+  .dm-reasoning-round-head {
+    grid-template-columns: 26px minmax(0, 1fr) auto auto;
+    min-height: 50px;
+    padding: 8px 9px;
+  }
+
+  .dm-reasoning-round-index {
+    border-radius: 7px;
+    height: 26px;
+    width: 26px;
+  }
+
+  .dm-tool-call-head {
+    grid-template-columns: 24px minmax(0, 1fr) auto auto;
+  }
+
+  .dm-tool-call-duration {
+    display: none;
+  }
+
+  .dm-tool-call-body {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm-reasoning-round {
+    animation: none;
+  }
+}

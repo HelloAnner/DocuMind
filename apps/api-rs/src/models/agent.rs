@@ -326,6 +326,10 @@ pub struct ReactStepTrace {
     pub step: usize,
     pub action: String,
     pub decision_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+    #[serde(default)]
+    pub tool_calls: Vec<ReactToolCallTrace>,
     #[serde(default)]
     pub queries: Vec<String>,
     #[serde(default)]
@@ -340,6 +344,21 @@ pub struct ReactStepTrace {
     pub warnings: Vec<String>,
     pub started_at: DateTime<Utc>,
     pub completed_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReactToolCallTrace {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<serde_json::Value>,
+    pub started_at: DateTime<Utc>,
+    pub completed_at: DateTime<Utc>,
+    pub duration_ms: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
