@@ -275,7 +275,7 @@ export function ChatWorkspace() {
                 <textarea
                   ref={textareaRef}
                   aria-label="消息输入框"
-                  placeholder={streamingId ? "DocuMind 正在处理…" : "描述你的需求，或 @ 引用文件"}
+                  placeholder="描述你的需求，或 @ 引用文件"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onInput={(e) => {

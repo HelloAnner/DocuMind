@@ -256,7 +256,6 @@ export function MessageRow({
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
         status={message.status}
-        processingStarted={hasContent}
       />
 
       {failed || cancelled ? (

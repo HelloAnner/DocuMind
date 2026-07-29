@@ -18,7 +18,6 @@ interface ReasoningTraceProps {
   isStreaming: boolean;
   durationMs?: number;
   status: MessageStatus;
-  processingStarted: boolean;
 }
 
 export function ReasoningTrace({
@@ -27,7 +26,6 @@ export function ReasoningTrace({
   isStreaming,
   durationMs,
   status,
-  processingStarted,
 }: ReasoningTraceProps) {
   const [expanded, setExpanded] = useState(isStreaming);
   const [observedDurationMs, setObservedDurationMs] = useState(durationMs);
@@ -35,7 +33,7 @@ export function ReasoningTrace({
   const wasStreamingRef = useRef(isStreaming);
   const visibleTools = useMemo(() => toolCalls ?? [], [toolCalls]);
   const thinkingLines = useMemo(() => splitThinkingLines(thinking ?? ""), [thinking]);
-  const hasTrace = thinkingLines.length > 0 || visibleTools.length > 0;
+  const hasRealToolCall = visibleTools.length > 0;
 
   useEffect(() => {
     if (isStreaming) {
@@ -60,38 +58,27 @@ export function ReasoningTrace({
     }
   }, [durationMs]);
 
-  if (!isStreaming && !hasTrace) return null;
-
-  const runningMode =
-    processingStarted || Boolean(toolCalls?.length) ? "processing" : "thinking";
-  const canExpand = hasTrace;
+  if (!hasRealToolCall) return null;
 
   return (
     <section
       className={`dm-reasoning-trace ${expanded ? "expanded" : ""} ${isStreaming ? "running" : "completed"}`}
       data-testid="reasoning-trace"
     >
-      {isStreaming ? (
-        <div className="dm-reasoning-running-head" role="status" aria-live="polite">
-          <span className="dm-reasoning-running-text">
-            {runningMode === "processing" ? "正在处理中..." : "正在思考..."}
-          </span>
-        </div>
-      ) : (
+      {!isStreaming ? (
         <button
-          aria-expanded={canExpand ? expanded : undefined}
+          aria-expanded={expanded}
           className="dm-reasoning-toggle dm-reasoning-summary"
-          disabled={!canExpand}
-          onClick={() => canExpand && setExpanded((value) => !value)}
-          title={canExpand ? "展开或收起工作过程" : undefined}
+          onClick={() => setExpanded((value) => !value)}
+          title="展开或收起思维链"
           type="button"
         >
           <span>{completedLabel(status, observedDurationMs)}</span>
-          {canExpand ? <ChevronDown className="dm-reasoning-chevron" size={16} /> : null}
+          <ChevronDown className="dm-reasoning-chevron" size={16} />
         </button>
-      )}
+      ) : null}
 
-      {expanded && hasTrace ? (
+      {expanded ? (
         <div className="dm-reasoning-detail">
           <ActionFeed
             thinkingLines={thinkingLines}

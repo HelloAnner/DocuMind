@@ -2852,16 +2852,6 @@ body > .hiddenCanvasElement {
 }
 
 /* Moss-style reasoning trace and streamed answer feedback. */
-@keyframes dm-reasoning-running-shine {
-  from {
-    background-position: 100% 50%;
-  }
-
-  to {
-    background-position: 0% 50%;
-  }
-}
-
 @keyframes dm-action-spinner-turn {
   from {
     transform: translate(-50%, -50%) scale(0.75) rotate(0deg);
@@ -3037,36 +3027,6 @@ body > .hiddenCanvasElement {
   width: min(640px, calc(100% - 42px));
 }
 
-.dm-reasoning-running-head {
-  align-items: center;
-  color: var(--text-muted);
-  display: inline-flex;
-  font-size: 14px;
-  font-weight: 500;
-  height: 22px;
-  line-height: 22px;
-  margin-bottom: 6px;
-}
-
-.dm-reasoning-running-text {
-  animation: dm-reasoning-running-shine 1.4s linear infinite;
-  background: linear-gradient(
-    90deg,
-    var(--text-muted) 0%,
-    var(--text-muted) 40%,
-    var(--text-primary) 50%,
-    var(--text-muted) 60%,
-    var(--text-muted) 100%
-  );
-  background-clip: text;
-  background-position: 100% 50%;
-  background-size: 180% 100%;
-  color: transparent;
-  display: inline-block;
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-}
-
 .dm-reasoning-toggle {
   border-radius: 0;
   font-size: 14px;
@@ -3224,7 +3184,6 @@ body > .hiddenCanvasElement {
 
   .dm-anchor-box,
   .dm-login-story-copy,
-  .dm-reasoning-running-text,
   .dm-action-spinner::before,
   .dm-streaming-pulse-dot,
   .action-feed-row {

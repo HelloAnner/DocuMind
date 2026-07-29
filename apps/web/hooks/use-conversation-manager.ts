@@ -318,19 +318,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "tool.call.preview") {
-              const toolId = runtimeToolId(runtime);
-              if (!toolId) continue;
-              updateToolCallInStream(toolId, (tool) => ({
-                id: toolId,
-                name: runtimeToolName(runtime, tool?.name ?? toolId),
-                arguments_preview: firstRuntimeString(
-                  runtime.payload.arguments_preview,
-                  tool?.arguments_preview
-                ),
-                status: "running",
-                started_at: tool?.started_at ?? runtime.occurred_at,
-                display: runtime.payload.display ?? tool?.display,
-              }));
+              // Preview events describe a possible call; only started/result events are real calls.
               continue;
             }
 
@@ -369,7 +357,10 @@ export function useConversationManager() {
               continue;
             }
 
-            if (runtime.event_type === "tool.call.result") {
+            if (
+              runtime.event_type === "tool.call.result" ||
+              runtime.event_type === "tool.call.failed"
+            ) {
               const toolId = runtimeToolId(runtime);
               if (toolId) {
                 updateToolCallInStream(toolId, (tool) => ({
@@ -377,10 +368,15 @@ export function useConversationManager() {
                   name: runtimeToolName(runtime, tool?.name ?? toolId),
                   arguments: runtime.payload.arguments ?? tool?.arguments,
                   arguments_preview: tool?.arguments_preview,
-                  status: normalizeToolStatus(runtime.payload.status),
+                  status:
+                    runtime.event_type === "tool.call.failed"
+                      ? "failed"
+                      : normalizeToolStatus(runtime.payload.status),
                   result: typeof runtime.payload.result === "string"
                     ? runtime.payload.result
-                    : tool?.result,
+                    : typeof runtime.payload.error === "string"
+                      ? runtime.payload.error
+                      : tool?.result,
                   progress: typeof runtime.payload.progress === "number"
                     ? runtime.payload.progress
                     : tool?.progress,
