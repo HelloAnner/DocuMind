@@ -12,8 +12,6 @@ import {
   MessageSquareText,
   Paperclip,
   Square,
-  ThumbsDown,
-  ThumbsUp,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +19,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { MessageRow } from "@/components/chat/message-row";
 import { DocumentPreview } from "@/components/chat/document-preview";
 import { useConversation } from "@/components/providers/conversation-provider";
-import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
+import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -57,6 +55,7 @@ export function ChatWorkspace() {
     retryMessage,
     cancelMessage,
     submitFeedback,
+    clearFeedback,
     isFavorite,
     toggleFavorite,
   } = useConversation();
@@ -68,10 +67,6 @@ export function ChatWorkspace() {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const previousMessageCountRef = useRef(0);
-  const [feedbackMessageId, setFeedbackMessageId] = useState<string | null>(null);
-  const [feedbackReason, setFeedbackReason] = useState<FeedbackReason | undefined>();
-  const [feedbackComment, setFeedbackComment] = useState("");
-  const [feedbackCorrection, setFeedbackCorrection] = useState("");
   const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
 
   const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
@@ -190,7 +185,8 @@ export function ChatWorkspace() {
             isStreaming={message.message_id === streamingId}
             onRetry={() => retryMessage(message.message_id)}
             onCancel={() => cancelMessage(message.message_id)}
-            onFeedback={(id) => setFeedbackMessageId(id)}
+            onSubmitFeedback={submitFeedback}
+            onClearFeedback={clearFeedback}
             onCitationClick={handleCitationClick}
             onFollowUp={(text) => sendMessage(text)}
           />
@@ -327,141 +323,6 @@ export function ChatWorkspace() {
         {renderRightRail()}
       </div>
 
-      {feedbackMessageId && (
-        <FeedbackDrawer
-          onClose={() => setFeedbackMessageId(null)}
-          onSubmit={async (rating, reason, comment, correction) => {
-            await submitFeedback(feedbackMessageId, rating, reason, comment, correction);
-            setFeedbackMessageId(null);
-            setFeedbackReason(undefined);
-            setFeedbackComment("");
-            setFeedbackCorrection("");
-          }}
-          reason={feedbackReason}
-          setReason={setFeedbackReason}
-          comment={feedbackComment}
-          setComment={setFeedbackComment}
-          correction={feedbackCorrection}
-          setCorrection={setFeedbackCorrection}
-        />
-      )}
     </>
-  );
-}
-
-function FeedbackDrawer({
-  onClose,
-  onSubmit,
-  reason,
-  setReason,
-  comment,
-  setComment,
-  correction,
-  setCorrection,
-}: {
-  onClose: () => void;
-  onSubmit: (rating: Rating, reason?: FeedbackReason, comment?: string, correction?: string) => void;
-  reason?: FeedbackReason;
-  setReason: (r?: FeedbackReason) => void;
-  comment: string;
-  setComment: (s: string) => void;
-  correction: string;
-  setCorrection: (s: string) => void;
-}) {
-  const [rating, setRating] = useState<Rating | null>(null);
-  const reasons: { value: FeedbackReason; label: string }[] = [
-    { value: "wrong_answer", label: "答案错误" },
-    { value: "missing_source", label: "缺少引用" },
-    { value: "outdated", label: "内容过期" },
-    { value: "not_helpful", label: "没有帮助" },
-    { value: "other", label: "其他" },
-  ];
-
-  return (
-    <div className="dm-drawer-overlay" onClick={onClose}>
-      <aside className="dm-drawer" onClick={(e) => e.stopPropagation()}>
-        <div className="dm-drawer-head">
-          <div className="dm-drawer-head-row">
-            <h2>提交反馈</h2>
-            <IconButton onClick={onClose} aria-label="关闭">
-              <X size={18} />
-            </IconButton>
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 16, padding: "0 20px 20px" }}>
-          <div style={{ display: "flex", gap: 12 }}>
-            <Button variant={rating === "up" ? "primary" : "secondary"} onClick={() => setRating("up")}>
-              <ThumbsUp size={14} /> 有帮助
-            </Button>
-            <Button variant={rating === "down" ? "primary" : "secondary"} onClick={() => setRating("down")}>
-              <ThumbsDown size={14} /> 没有帮助
-            </Button>
-          </div>
-
-          {rating === "down" && (
-            <>
-              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>原因</label>
-              <select
-                value={reason ?? ""}
-                onChange={(e) => setReason((e.target.value as FeedbackReason) || undefined)}
-                style={{
-                  background: "var(--bg-tertiary)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 8,
-                  padding: "8px 10px",
-                }}
-              >
-                <option value="">请选择</option>
-                {reasons.map((r) => (
-                  <option key={r.value} value={r.value}>
-                    {r.label}
-                  </option>
-                ))}
-              </select>
-
-              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>补充说明</label>
-              <textarea
-                value={comment}
-                onChange={(e) => setComment(e.target.value)}
-                rows={3}
-                style={{
-                  background: "var(--bg-tertiary)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 8,
-                  padding: 10,
-                  resize: "none",
-                }}
-              />
-
-              <label style={{ fontSize: 12, color: "var(--text-muted)" }}>修正答案</label>
-              <textarea
-                value={correction}
-                onChange={(e) => setCorrection(e.target.value)}
-                rows={3}
-                style={{
-                  background: "var(--bg-tertiary)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: 8,
-                  padding: 10,
-                  resize: "none",
-                }}
-              />
-            </>
-          )}
-
-          <Button
-            variant="primary"
-            onClick={() => {
-              if (!rating) return;
-              onSubmit(rating, reason, comment || undefined, correction || undefined);
-            }}
-            disabled={!rating}
-          >
-            提交反馈
-          </Button>
-        </div>
-      </aside>
-    </div>
   );
 }

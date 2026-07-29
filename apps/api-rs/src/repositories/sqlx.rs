@@ -738,11 +738,22 @@ impl ConversationRepository for SqlxConversationRepository {
         Ok(count as usize == doc_ids.len())
     }
 
-    async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {
-        sqlx::query(
+    async fn upsert_feedback(&self, feedback: Feedback) -> anyhow::Result<Feedback> {
+        let row = sqlx::query(
             "INSERT INTO conversation_feedback (
-                id, assistant_message_id, user_id, rating, reason, comment, correction, created_at
-             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+                id, assistant_message_id, user_id, rating, reason, comment, correction,
+                created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             ON CONFLICT (assistant_message_id, user_id)
+             DO UPDATE SET
+                rating = EXCLUDED.rating,
+                reason = EXCLUDED.reason,
+                comment = EXCLUDED.comment,
+                correction = EXCLUDED.correction,
+                updated_at = EXCLUDED.updated_at
+             RETURNING
+                id, assistant_message_id, user_id, rating, reason, comment, correction,
+                created_at, updated_at",
         )
         .bind(feedback.id)
         .bind(feedback.assistant_message_id)
@@ -752,10 +763,72 @@ impl ConversationRepository for SqlxConversationRepository {
         .bind(feedback.comment)
         .bind(feedback.correction)
         .bind(feedback.created_at)
+        .bind(feedback.updated_at)
+        .fetch_one(&self.pool)
+        .await?;
+        parse_feedback(row)
+    }
+
+    async fn get_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<Feedback>> {
+        let row = sqlx::query(
+            "SELECT
+                id, assistant_message_id, user_id, rating, reason, comment, correction,
+                created_at, updated_at
+             FROM conversation_feedback
+             WHERE assistant_message_id = $1
+               AND user_id = $2",
+        )
+        .bind(assistant_message_id)
+        .bind(user_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(parse_feedback).transpose()
+    }
+
+    async fn delete_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "DELETE FROM conversation_feedback
+             WHERE assistant_message_id = $1
+               AND user_id = $2",
+        )
+        .bind(assistant_message_id)
+        .bind(user_id)
         .execute(&self.pool)
         .await?;
-        Ok(())
+        Ok(result.rows_affected() > 0)
     }
+}
+
+fn parse_feedback(row: sqlx::postgres::PgRow) -> anyhow::Result<Feedback> {
+    let rating = row
+        .try_get::<String, _>("rating")?
+        .parse()
+        .map_err(anyhow::Error::msg)?;
+    let reason = match row.try_get::<Option<String>, _>("reason")? {
+        Some(reason) => Some(reason.parse().map_err(anyhow::Error::msg)?),
+        None => None,
+    };
+
+    Ok(Feedback {
+        id: row.try_get("id")?,
+        assistant_message_id: row.try_get("assistant_message_id")?,
+        user_id: row.try_get("user_id")?,
+        rating,
+        reason,
+        comment: row.try_get("comment")?,
+        correction: row.try_get("correction")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
 }
 
 fn parse_message(row: sqlx::postgres::PgRow) -> anyhow::Result<ConversationMessage> {

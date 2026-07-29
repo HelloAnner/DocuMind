@@ -108,6 +108,15 @@ export async function submitFeedback(
   });
 }
 
+export async function deleteFeedback(
+  conversationId: string,
+  messageId: string
+): Promise<{ message_id: string }> {
+  return fetchJson(`/api/conversations/${conversationId}/messages/${messageId}/feedback`, {
+    method: "DELETE",
+  });
+}
+
 export interface KnowledgeBase {
   id: string;
   tenant_id: string;

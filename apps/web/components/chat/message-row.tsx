@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Check,
   Copy,
@@ -18,7 +18,7 @@ import {
 } from "./citation-card";
 import { AnswerContent } from "./answer-content";
 import { ReasoningTrace } from "./reasoning-trace";
-import type { Citation, Message } from "@/lib/types";
+import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -127,7 +127,14 @@ interface MessageRowProps {
   isStreaming: boolean;
   onRetry: () => void;
   onCancel: () => void;
-  onFeedback: (id: string) => void;
+  onSubmitFeedback: (
+    id: string,
+    rating: Rating,
+    reason?: FeedbackReason,
+    comment?: string,
+    correction?: string
+  ) => Promise<boolean>;
+  onClearFeedback: (id: string) => Promise<boolean>;
   onCitationClick: (c: Citation) => void;
   onFollowUp: (text: string) => void;
 }
@@ -194,18 +201,75 @@ export function MessageRow({
   isStreaming,
   onRetry,
   onCancel,
-  onFeedback,
+  onSubmitFeedback,
+  onClearFeedback,
   onCitationClick,
   onFollowUp,
 }: MessageRowProps) {
   const { me } = useAuth();
   const [copied, setCopied] = useState(false);
+  const [feedbackRating, setFeedbackRating] = useState<Rating | null>(
+    message.feedback?.rating ?? null
+  );
+  const [feedbackSaving, setFeedbackSaving] = useState(false);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [downPanelOpen, setDownPanelOpen] = useState(false);
+  const [downReason, setDownReason] = useState(message.feedback?.comment ?? "");
 
   const handleCopy = async () => {
     if (await copyToClipboard(message.content)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
     }
+  };
+
+  useEffect(() => {
+    setFeedbackRating(message.feedback?.rating ?? null);
+    setDownReason(message.feedback?.comment ?? "");
+    setDownPanelOpen(false);
+    setFeedbackError("");
+  }, [message.feedback?.comment, message.feedback?.rating, message.message_id]);
+
+  const saveFeedback = async (
+    rating: Rating,
+    reason?: FeedbackReason,
+    comment?: string
+  ) => {
+    if (feedbackSaving) return;
+    const previous = feedbackRating;
+    setFeedbackSaving(true);
+    setFeedbackError("");
+    setFeedbackRating(rating);
+    const saved = await onSubmitFeedback(
+      message.message_id,
+      rating,
+      reason,
+      comment
+    );
+    if (saved) {
+      setDownPanelOpen(false);
+    } else {
+      setFeedbackRating(previous);
+      setFeedbackError("反馈提交失败，请重试");
+    }
+    setFeedbackSaving(false);
+  };
+
+  const clearFeedback = async () => {
+    if (feedbackSaving) return;
+    const previous = feedbackRating;
+    setFeedbackSaving(true);
+    setFeedbackError("");
+    setFeedbackRating(null);
+    const cleared = await onClearFeedback(message.message_id);
+    if (cleared) {
+      setDownPanelOpen(false);
+      setDownReason("");
+    } else {
+      setFeedbackRating(previous);
+      setFeedbackError("取消反馈失败，请重试");
+    }
+    setFeedbackSaving(false);
   };
 
   if (message.role === "user") {
@@ -243,7 +307,10 @@ export function MessageRow({
   const hasContent = message.content.trim().length > 0;
 
   return (
-    <article className={`dm-answer-card ${isStreaming ? "streaming" : ""}`}>
+    <article
+      className={`dm-answer-card ${isStreaming ? "streaming" : ""}`}
+      data-feedback-rating={feedbackRating ?? "none"}
+    >
       <AgentMeta
         message={{ ...message, citations: displayCitations }}
         hasCitations={hasDisplayCitations}
@@ -292,14 +359,54 @@ export function MessageRow({
 
       <div className="dm-answer-actions">
         <IconButton aria-label="复制" onClick={handleCopy}>
-          {copied ? <Check size={16} /> : <Copy size={16} />}
+          {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconButton>
-        <IconButton aria-label="点赞" onClick={() => onFeedback(message.message_id)}>
-          <ThumbsUp size={16} />
-        </IconButton>
-        <IconButton aria-label="点踩" onClick={() => onFeedback(message.message_id)}>
-          <ThumbsDown size={16} />
-        </IconButton>
+        {!isStreaming ? (
+          <>
+            <IconButton
+              aria-label={feedbackRating === "up" ? "取消点赞" : "点赞"}
+              aria-pressed={feedbackRating === "up"}
+              className={`dm-feedback-button is-up ${
+                feedbackRating === "up" ? "is-active" : ""
+              }`}
+              disabled={feedbackSaving}
+              onClick={() => {
+                if (feedbackRating === "up") void clearFeedback();
+                else void saveFeedback("up");
+              }}
+              title={feedbackRating === "up" ? "取消点赞" : "有帮助"}
+            >
+              <ThumbsUp
+                fill={feedbackRating === "up" ? "currentColor" : "none"}
+                size={13}
+              />
+            </IconButton>
+            <IconButton
+              aria-controls={`feedback-panel-${message.message_id}`}
+              aria-expanded={downPanelOpen}
+              aria-label={feedbackRating === "down" ? "取消点踩" : "点踩"}
+              aria-pressed={feedbackRating === "down"}
+              className={`dm-feedback-button is-down ${
+                feedbackRating === "down" || downPanelOpen ? "is-active" : ""
+              }`}
+              disabled={feedbackSaving}
+              onClick={() => {
+                if (feedbackRating === "down") {
+                  void clearFeedback();
+                } else {
+                  setDownPanelOpen((open) => !open);
+                  setFeedbackError("");
+                }
+              }}
+              title={feedbackRating === "down" ? "取消点踩" : "没有帮助"}
+            >
+              <ThumbsDown
+                fill={feedbackRating === "down" ? "currentColor" : "none"}
+                size={13}
+              />
+            </IconButton>
+          </>
+        ) : null}
         {isStreaming ? (
           <Button variant="secondary" onClick={onCancel}>
             停止
@@ -308,6 +415,54 @@ export function MessageRow({
           <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={onRetry}>
             重试
           </Button>
+        ) : null}
+
+        {downPanelOpen && !isStreaming ? (
+          <form
+            className="dm-feedback-panel"
+            id={`feedback-panel-${message.message_id}`}
+            onSubmit={(event) => {
+              event.preventDefault();
+              const comment = downReason.trim() || undefined;
+              void saveFeedback("down", "not_helpful", comment);
+            }}
+          >
+            <label htmlFor={`feedback-reason-${message.message_id}`}>
+              这条回复哪里不对？
+            </label>
+            <textarea
+              autoFocus
+              id={`feedback-reason-${message.message_id}`}
+              onChange={(event) => setDownReason(event.target.value)}
+              placeholder="可以简单说下原因"
+              rows={3}
+              value={downReason}
+            />
+            {feedbackError ? (
+              <p className="dm-feedback-error" role="alert">
+                {feedbackError}
+              </p>
+            ) : null}
+            <div className="dm-feedback-panel-actions">
+              <button
+                onClick={() => {
+                  setDownPanelOpen(false);
+                  setFeedbackError("");
+                }}
+                type="button"
+              >
+                取消
+              </button>
+              <button disabled={feedbackSaving} type="submit">
+                {feedbackSaving ? "提交中…" : "提交"}
+              </button>
+            </div>
+          </form>
+        ) : null}
+        {feedbackError && !downPanelOpen ? (
+          <span className="dm-feedback-error is-inline" role="alert">
+            {feedbackError}
+          </span>
         ) : null}
       </div>
     </article>

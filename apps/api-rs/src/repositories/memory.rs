@@ -27,7 +27,7 @@ pub struct InMemoryConversationRepository {
     retrieval_traces: Arc<RwLock<HashMap<Uuid, Vec<RetrievalTrace>>>>,
     citations: Arc<RwLock<HashMap<Uuid, Vec<Citation>>>>,
     agent_traces: Arc<RwLock<HashMap<Uuid, AgentTrace>>>,
-    feedback: Arc<RwLock<HashMap<Uuid, Feedback>>>,
+    feedback: Arc<RwLock<HashMap<(Uuid, Uuid), Feedback>>>,
 }
 
 impl Default for InMemoryConversationRepository {
@@ -303,10 +303,33 @@ impl ConversationRepository for InMemoryConversationRepository {
         Ok(!kb_ids.is_empty() && !citations.is_empty())
     }
 
-    async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()> {
+    async fn upsert_feedback(&self, mut feedback: Feedback) -> anyhow::Result<Feedback> {
         let mut fb = self.feedback.write().unwrap();
-        fb.insert(feedback.id, feedback);
-        Ok(())
+        let key = (feedback.assistant_message_id, feedback.user_id);
+        if let Some(existing) = fb.get(&key) {
+            feedback.id = existing.id;
+            feedback.created_at = existing.created_at;
+        }
+        fb.insert(key, feedback.clone());
+        Ok(feedback)
+    }
+
+    async fn get_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<Feedback>> {
+        let fb = self.feedback.read().unwrap();
+        Ok(fb.get(&(assistant_message_id, user_id)).cloned())
+    }
+
+    async fn delete_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<bool> {
+        let mut fb = self.feedback.write().unwrap();
+        Ok(fb.remove(&(assistant_message_id, user_id)).is_some())
     }
 }
 
@@ -314,6 +337,7 @@ impl ConversationRepository for InMemoryConversationRepository {
 mod tests {
     use super::*;
     use crate::models::conversation::ConversationSession;
+    use crate::models::feedback::Rating;
     use crate::models::message::ConversationMessage;
     use crate::models::now;
     use crate::models::{ConversationStatus, MessageRole, MessageStatus};
@@ -444,5 +468,63 @@ mod tests {
             .citations_valid_for_scope(tenant, &[kb_id], &[citation])
             .await
             .unwrap());
+    }
+
+    #[tokio::test]
+    async fn feedback_is_unique_per_message_and_user_and_can_be_removed() {
+        let repo = InMemoryConversationRepository::new();
+        let message_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+        let created_at = now();
+        let original_id = Uuid::new_v4();
+
+        repo.upsert_feedback(Feedback {
+            id: original_id,
+            assistant_message_id: message_id,
+            user_id,
+            rating: Rating::Up,
+            reason: None,
+            comment: None,
+            correction: None,
+            created_at,
+            updated_at: created_at,
+        })
+        .await
+        .unwrap();
+
+        let updated_at = now();
+        let updated = repo
+            .upsert_feedback(Feedback {
+                id: Uuid::new_v4(),
+                assistant_message_id: message_id,
+                user_id,
+                rating: Rating::Down,
+                reason: None,
+                comment: Some("答案不够准确".to_string()),
+                correction: None,
+                created_at: updated_at,
+                updated_at,
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(updated.id, original_id);
+        assert_eq!(updated.created_at, created_at);
+        assert_eq!(updated.rating, Rating::Down);
+        assert_eq!(updated.comment.as_deref(), Some("答案不够准确"));
+        assert_eq!(
+            repo.get_feedback(message_id, user_id)
+                .await
+                .unwrap()
+                .map(|feedback| feedback.id),
+            Some(original_id)
+        );
+        assert!(repo.delete_feedback(message_id, user_id).await.unwrap());
+        assert!(repo
+            .get_feedback(message_id, user_id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(!repo.delete_feedback(message_id, user_id).await.unwrap());
     }
 }

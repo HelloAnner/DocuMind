@@ -3602,3 +3602,163 @@ body > .hiddenCanvasElement {
     animation: none;
   }
 }
+
+/* Wufan message feedback: compact actions, persisted selection, inline dislike detail. */
+[data-theme="light"] {
+  --feedback-positive: #16a34a;
+  --feedback-positive-bg: rgba(22, 163, 74, 0.1);
+  --feedback-negative: #dc2626;
+  --feedback-negative-bg: rgba(220, 38, 38, 0.09);
+  --feedback-panel-bg: #ffffff;
+  --feedback-panel-shadow: 0 12px 32px rgba(25, 22, 18, 0.12);
+}
+
+[data-theme="dark"] {
+  --feedback-positive: #22c55e;
+  --feedback-positive-bg: rgba(34, 197, 94, 0.12);
+  --feedback-negative: #ef4444;
+  --feedback-negative-bg: rgba(239, 68, 68, 0.12);
+  --feedback-panel-bg: #0a0a0f;
+  --feedback-panel-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+.dm-answer-actions {
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin-top: 4px;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.dm-answer-actions .dm-icon-button {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  color: var(--text-muted);
+  height: 26px;
+  min-width: 26px;
+  width: 26px;
+}
+
+.dm-answer-actions .dm-icon-button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.dm-answer-actions .dm-icon-button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+.dm-answer-actions .dm-feedback-button.is-up.is-active {
+  background: var(--feedback-positive-bg);
+  color: var(--feedback-positive);
+}
+
+.dm-answer-actions .dm-feedback-button.is-down.is-active {
+  background: var(--feedback-negative-bg);
+  color: var(--feedback-negative);
+}
+
+.dm-feedback-panel {
+  background: var(--feedback-panel-bg);
+  border: 1px solid var(--border-muted);
+  border-radius: 8px;
+  box-shadow: var(--feedback-panel-shadow);
+  display: flex;
+  flex: 0 0 100%;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 6px;
+  max-width: min(360px, 100%);
+  padding: 10px;
+}
+
+.dm-feedback-panel label {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 18px;
+}
+
+.dm-feedback-panel textarea {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-muted);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.5;
+  min-height: 72px;
+  outline: none;
+  padding: 8px 9px;
+  resize: vertical;
+  width: 100%;
+}
+
+.dm-feedback-panel textarea::placeholder {
+  color: var(--text-placeholder);
+}
+
+.dm-feedback-panel textarea:focus {
+  border-color: color-mix(in srgb, var(--text-muted) 58%, var(--border-muted));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--text-muted) 8%, transparent);
+}
+
+.dm-feedback-error {
+  color: var(--feedback-negative);
+  font-size: 11px;
+  line-height: 16px;
+  margin: 0;
+}
+
+.dm-feedback-error.is-inline {
+  align-self: center;
+  margin-left: 5px;
+}
+
+.dm-feedback-panel-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 1px;
+}
+
+.dm-feedback-panel-actions button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  line-height: 26px;
+  padding: 0 9px;
+}
+
+.dm-feedback-panel-actions button:hover:not(:disabled) {
+  background: var(--hover-bg);
+  color: var(--text-secondary);
+}
+
+.dm-feedback-panel-actions button[type="submit"] {
+  background: var(--feedback-negative);
+  color: #ffffff;
+}
+
+.dm-feedback-panel-actions button[type="submit"]:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--feedback-negative) 88%, #000000);
+  color: #ffffff;
+}
+
+.dm-feedback-panel-actions button:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
+@media (max-width: 767px) {
+  .dm-feedback-panel {
+    max-width: 100%;
+  }
+}

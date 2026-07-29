@@ -75,6 +75,7 @@ export interface Message {
   thinking?: string;
   tool_calls?: RuntimeToolCall[];
   reasoning_steps?: RuntimeReasoningStep[];
+  feedback?: FeedbackResponse;
   follow_up_questions?: FollowUpQuestion[];
   duration_ms?: number;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
@@ -205,7 +206,16 @@ export interface MessageTraceResponse {
 export interface FeedbackResponse {
   feedback_id: UUID;
   message_id: UUID;
+  rating: Rating;
+  reason?: FeedbackReason | null;
+  comment?: string | null;
+  correction?: string | null;
   created_at: string;
+  updated_at: string;
+}
+
+export interface DeleteFeedbackResponse {
+  message_id: UUID;
 }
 
 export interface SSEEvent {

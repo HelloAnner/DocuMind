@@ -78,6 +78,7 @@ pub struct Feedback {
     pub comment: Option<String>,
     pub correction: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,5 +96,30 @@ pub struct SubmitFeedbackRequest {
 pub struct FeedbackResponse {
     pub feedback_id: Uuid,
     pub message_id: Uuid,
+    pub rating: Rating,
+    pub reason: Option<FeedbackReason>,
+    pub comment: Option<String>,
+    pub correction: Option<String>,
     pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<&Feedback> for FeedbackResponse {
+    fn from(feedback: &Feedback) -> Self {
+        Self {
+            feedback_id: feedback.id,
+            message_id: feedback.assistant_message_id,
+            rating: feedback.rating,
+            reason: feedback.reason,
+            comment: feedback.comment.clone(),
+            correction: feedback.correction.clone(),
+            created_at: feedback.created_at,
+            updated_at: feedback.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeleteFeedbackResponse {
+    pub message_id: Uuid,
 }

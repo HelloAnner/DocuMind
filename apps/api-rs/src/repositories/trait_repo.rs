@@ -79,5 +79,15 @@ pub trait ConversationRepository: Send + Sync {
         citations: &[CitationOutput],
     ) -> anyhow::Result<bool>;
 
-    async fn save_feedback(&self, feedback: Feedback) -> anyhow::Result<()>;
+    async fn upsert_feedback(&self, feedback: Feedback) -> anyhow::Result<Feedback>;
+    async fn get_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<Option<Feedback>>;
+    async fn delete_feedback(
+        &self,
+        assistant_message_id: Uuid,
+        user_id: Uuid,
+    ) -> anyhow::Result<bool>;
 }

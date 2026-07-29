@@ -26,7 +26,9 @@ use crate::models::citation::Citation;
 use crate::models::conversation::{
     ConversationListResponse, ConversationSession, CreateConversationRequest,
 };
-use crate::models::feedback::{Feedback, FeedbackResponse, SubmitFeedbackRequest};
+use crate::models::feedback::{
+    DeleteFeedbackResponse, Feedback, FeedbackResponse, SubmitFeedbackRequest,
+};
 use crate::models::message::{
     ConversationMessage, MessageListResponse, MessageResponse, RetryMessageRequest,
     SendMessageRequest,
@@ -84,7 +86,7 @@ pub fn router() -> axum::Router<AppState> {
         )
         .route(
             "/api/conversations/:conversation_id/messages/:message_id/feedback",
-            axum::routing::post(submit_feedback),
+            axum::routing::post(submit_feedback).delete(delete_feedback),
         )
 }
 
@@ -152,7 +154,7 @@ async fn get_messages(
         .await?;
     let mut responses = Vec::with_capacity(messages.len());
     for m in &messages {
-        responses.push(message_to_response(&state.repository, m).await?);
+        responses.push(message_to_response(&state.repository, m, actor.user_id).await?);
     }
     Ok(Json(MessageListResponse {
         conversation_id: session.id,
@@ -163,6 +165,7 @@ async fn get_messages(
 async fn message_to_response(
     repo: &Arc<dyn ConversationRepository>,
     message: &ConversationMessage,
+    current_user_id: Uuid,
 ) -> Result<MessageResponse, AppError> {
     let citations = if message.role == MessageRole::Assistant {
         repo.get_citations(message.id).await?
@@ -177,6 +180,14 @@ async fn message_to_response(
     } else {
         vec![]
     };
+    let feedback = if message.role == MessageRole::Assistant {
+        repo.get_feedback(message.id, current_user_id)
+            .await?
+            .as_ref()
+            .map(FeedbackResponse::from)
+    } else {
+        None
+    };
     let citation_resps: Vec<_> = citations.iter().map(|c| c.into()).collect();
     Ok(MessageResponse {
         message_id: message.id,
@@ -189,6 +200,7 @@ async fn message_to_response(
         prompt_versions: message.prompt_versions.clone(),
         citations: citation_resps,
         reasoning_steps,
+        feedback,
         parent_message_id: message.parent_message_id,
         retry_of_message_id: message.retry_of_message_id,
         created_at: message.created_at,
@@ -1737,20 +1749,16 @@ async fn submit_feedback(
     Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
     Json(req): Json<SubmitFeedbackRequest>,
 ) -> Result<Json<FeedbackResponse>, AppError> {
-    let session = state
-        .repository
-        .get_session(actor.tenant_id, conversation_id)
-        .await?
-        .ok_or_else(AppError::conversation_not_found)?;
-    let message = state
-        .repository
-        .get_message(actor.tenant_id, message_id)
-        .await?
-        .ok_or_else(AppError::message_not_found)?;
-    if message.conversation_id != session.id || message.role != MessageRole::Assistant {
-        return Err(AppError::message_not_found());
-    }
+    validate_feedback_target(
+        &state,
+        actor.tenant_id,
+        actor.user_id,
+        conversation_id,
+        message_id,
+    )
+    .await?;
 
+    let timestamp = now();
     let feedback = Feedback {
         id: Uuid::new_v4(),
         assistant_message_id: message_id,
@@ -1759,9 +1767,10 @@ async fn submit_feedback(
         reason: req.reason,
         comment: req.comment,
         correction: req.correction,
-        created_at: now(),
+        created_at: timestamp,
+        updated_at: timestamp,
     };
-    state.repository.save_feedback(feedback.clone()).await?;
+    let feedback = state.repository.upsert_feedback(feedback).await?;
 
     // Negative feedback invalidates the exact context- and runtime-aware cache entry.
     if feedback.rating == crate::models::feedback::Rating::Down {
@@ -1774,11 +1783,53 @@ async fn submit_feedback(
         }
     }
 
-    Ok(Json(FeedbackResponse {
-        feedback_id: feedback.id,
+    Ok(Json(FeedbackResponse::from(&feedback)))
+}
+
+async fn delete_feedback(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
+) -> Result<Json<DeleteFeedbackResponse>, AppError> {
+    validate_feedback_target(
+        &state,
+        actor.tenant_id,
+        actor.user_id,
+        conversation_id,
         message_id,
-        created_at: feedback.created_at,
-    }))
+    )
+    .await?;
+    state
+        .repository
+        .delete_feedback(message_id, actor.user_id)
+        .await?;
+    Ok(Json(DeleteFeedbackResponse { message_id }))
+}
+
+async fn validate_feedback_target(
+    state: &AppState,
+    tenant_id: Uuid,
+    user_id: Uuid,
+    conversation_id: Uuid,
+    message_id: Uuid,
+) -> Result<(), AppError> {
+    let session = state
+        .repository
+        .get_session(tenant_id, conversation_id)
+        .await?
+        .ok_or_else(AppError::conversation_not_found)?;
+    let message = state
+        .repository
+        .get_message(tenant_id, message_id)
+        .await?
+        .ok_or_else(AppError::message_not_found)?;
+    if session.user_id != user_id
+        || message.conversation_id != session.id
+        || message.role != MessageRole::Assistant
+    {
+        return Err(AppError::message_not_found());
+    }
+    Ok(())
 }
 
 async fn get_conversation(

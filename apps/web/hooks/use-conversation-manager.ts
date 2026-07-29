@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   cancelMessage,
   createConversation,
+  deleteFeedback,
   deleteConversation,
   getMessages,
   listConversations,
@@ -29,14 +30,6 @@ import type {
   RuntimeEventEnvelope,
   SendMessageRequest,
 } from "@/lib/types";
-
-export type FeedbackState = {
-  messageId: string;
-  rating: Rating;
-  reason?: FeedbackReason;
-  comment?: string;
-  correction?: string;
-};
 
 type MessageListUpdate = (messages: Message[]) => Message[];
 
@@ -719,14 +712,37 @@ export function useConversationManager() {
       comment?: string,
       correction?: string
     ) => {
-      if (!currentId) return;
+      if (!currentId) return false;
       try {
-        await submitFeedback(currentId, messageId, { rating, reason, comment, correction });
+        const feedback = await submitFeedback(currentId, messageId, {
+          rating,
+          reason,
+          comment,
+          correction,
+        });
+        updateMessage(messageId, { feedback });
+        return true;
       } catch (e) {
         console.error("feedback failed", e);
+        return false;
       }
     },
-    [currentId]
+    [currentId, updateMessage]
+  );
+
+  const doClearFeedback = useCallback(
+    async (messageId: string) => {
+      if (!currentId) return false;
+      try {
+        await deleteFeedback(currentId, messageId);
+        updateMessage(messageId, { feedback: undefined });
+        return true;
+      } catch (e) {
+        console.error("clear feedback failed", e);
+        return false;
+      }
+    },
+    [currentId, updateMessage]
   );
 
   const isFavorite = useCallback(
@@ -821,6 +837,7 @@ export function useConversationManager() {
     retryMessage,
     cancelMessage: doCancelMessage,
     submitFeedback: doSubmitFeedback,
+    clearFeedback: doClearFeedback,
     refreshConversations: loadConversations,
     isFavorite,
     toggleFavorite,

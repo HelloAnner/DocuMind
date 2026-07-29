@@ -5,6 +5,7 @@ use uuid::Uuid;
 use super::{Confidence, MessageRole, MessageStatus, NoAnswerReason};
 use crate::models::agent::{AgentMode, PromptVersions, ReactStepTrace};
 use crate::models::citation::{Citation, CitationAnchor};
+use crate::models::feedback::FeedbackResponse;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversationMessage {
@@ -40,6 +41,8 @@ pub struct MessageResponse {
     pub prompt_versions: Option<PromptVersions>,
     pub citations: Vec<CitationResponse>,
     pub reasoning_steps: Vec<ReactStepTrace>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub feedback: Option<FeedbackResponse>,
     pub parent_message_id: Option<Uuid>,
     pub retry_of_message_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
