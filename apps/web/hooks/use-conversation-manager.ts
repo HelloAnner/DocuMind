@@ -685,7 +685,6 @@ export function useConversationManager() {
 
       const req: SendMessageRequest = {
         content,
-        kb_ids: allKbIds,
         client_request_id: `req-${Date.now()}`,
         stream: true,
       };
@@ -699,7 +698,7 @@ export function useConversationManager() {
         false
       );
     },
-    [currentId, createAndSelect, processStream, allKbIds]
+    [currentId, createAndSelect, processStream]
   );
 
   const retryMessage = useCallback(

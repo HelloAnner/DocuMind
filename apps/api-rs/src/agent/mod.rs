@@ -1,17 +1,23 @@
 pub mod citation_resolver;
-pub mod generator;
+mod events;
+mod finalizer;
 pub mod kernel;
 mod kernel_support;
+pub mod model;
 pub mod prompt;
-pub mod reasoner;
+mod stream;
+pub mod tools;
 mod trace_builder;
+mod verification_prompt;
 pub mod verifier;
 
 #[cfg(test)]
 mod kernel_tests;
 
-pub use generator::AnswerGenerator;
-pub use kernel::{AgentKernel, AgentProgress};
+pub use events::AgentProgress;
+pub use finalizer::GroundedAnswerFinalizer;
+pub use kernel::AgentKernel;
+pub use model::AgentModel;
 pub use prompt::{BuiltinPromptRegistry, Prompt, PromptRegistry};
-pub use reasoner::{AgentReasoner, LlmAgentReasoner};
+pub use tools::{AgentToolRegistry, ClarificationTool, KnowledgeSearchTool};
 pub use verifier::{ClaimVerifier, LlmClaimVerifier, StructuralClaimVerifier, VerificationReport};

@@ -1,163 +1,80 @@
-# Agent 提示词设计 (Agent Prompting)
+# 会话 Agent Prompt 与事件
 
-Conversation 域中的 Agent 不是通用聊天机器人，而是企业文档问答编排器。它的提示词目标是：理解真实问题、决定是否需要改写或澄清、调用 RAG 工具、基于证据生成答案，并在证据不足时明确拒答。
+会话层只负责构造权限安全的 `AgentRequest`、输出事件和持久化结果。它不再通过多个 JSON Prompt 分别完成 mode、rewrite、plan 和 generate。
 
-Agent 的产品人格、温度、角色灵活度和行为边界归属独立的 [Agent 域](../11-agent/agent.md)。本文只保留 Conversation 调用 Agent 时需要的提示词契约。
-
-## Agent 角色
+## 请求上下文
 
 ```text
-你是 DocuMind 的企业文档问答 Agent。
-你的任务是帮助用户从其有权限访问的知识库文档中找到答案。
-你只能依据检索到的文档片段作答。
-如果文档片段不能支持答案，必须明确说明文档中未找到相关信息。
-不要使用通用知识补全企业内部事实。
+tenant/user/conversation
++ current user message
++ recent completed turns
++ session effective_kb_ids
++ AgentOptions
 ```
 
-## 提示词分层
+已有会话默认沿用创建会话时保存的知识库范围。前端发送普通消息时不重复提交“当前全部知识库”，避免后来新增的知识库在无意中扩大旧会话范围。API 客户端仍可显式提交 scope，但后端始终与当前用户权限取交集。
 
-| 层级 | 来源 | 是否可配置 | 作用 |
-|---|---|---|---|
-| System Prompt | 系统内置 | 低 | 红线、角色、证据约束 |
-| Policy Prompt | 租户 / 知识库配置 | 中 | 语气、引用格式、敏感信息策略 |
-| Task Prompt | 当前请求生成 | 高 | 当前问题、历史、检索证据、输出要求 |
-| Tool Prompt | 工具定义 | 中 | 改写、检索、澄清、生成的工具契约 |
+## Prompt 组合
 
-## Query Rewrite Prompt
-
-用于把用户问题改写成适合检索的查询。改写必须保留用户真实意图，不能添加用户没有表达过的事实。
+会话把结构化消息交给 `AgentModel`：
 
 ```text
-你需要将用户问题改写为适合文档检索的查询。
-
-规则：
-1. 保留用户原始问题的真实意图。
-2. 可以结合最近对话历史消解指代词，例如“它”“那份文档”“这个指标”。
-3. 不要引入历史中没有出现过的新实体、新时间或新条件。
-4. 如果用户问题已经清晰，保持原意轻量改写。
-5. 如果无法判断指代对象，输出 needs_clarification=true。
-
-输出 JSON：
-{
-  "rewritten_query": "...",
-  "keywords": ["..."],
-  "resolved_refs": [
-    {
-      "text": "它",
-      "resolved_to": "...",
-      "evidence_message_id": "..."
-    }
-  ],
-  "needs_clarification": false,
-  "clarification_question": null
-}
+system: identity + conversation + tool + grounding + response + security
+assistant/user: bounded completed history
+user: current message
 ```
 
-## Retrieval Planning Prompt
+当前消息必须是最后一条 `user` message。历史用于理解意图，不是证据。Tool observation 只存在于本次 ReAct 运行，不伪装成 user message。
 
-用于复杂问题拆解。只在问题包含多个实体、多个条件或比较任务时启用。
+## 原生工具轮次
 
 ```text
-判断当前问题是否需要拆成多个检索子查询。
-
-拆分原则：
-1. 一个子查询只检索一个明确意图。
-2. 不要为了显得复杂而拆分简单问题。
-3. 每个子查询必须能回溯到用户原始问题。
-
-输出 JSON：
-{
-  "mode": "single_query | multi_query",
-  "queries": [
-    {
-      "query": "...",
-      "reason": "..."
-    }
-  ]
-}
+assistant(tool_calls)
+  -> tool(tool_call_id, observation)
+  -> assistant(tool_calls or final content)
 ```
 
-## Answer Generation Prompt
+工具调用使用 provider 原生字段，不要求模型把 action 包在正文 JSON 中。这样 provider 能校验 schema，Kernel 也能准确关联并行 tool call。
 
-生成答案时，历史只用于理解追问，事实只能来自本轮检索证据。
+## SSE 与 Atom 事件
 
-```text
-你是企业文档问答助手。请仅根据 <context> 中的文档片段回答 <question>。
+前端既保留旧的阶段事件，又可消费细粒度运行事件：
 
-硬性规则：
-1. 不要使用文档片段之外的知识回答企业事实。
-2. 每个关键结论都必须能被至少一个 citation 支持。
-3. 如果证据不足，直接说“文档中未找到相关信息”，并说明缺少什么证据。
-4. 不要编造页码、文档名、金额、日期、负责人或条款编号。
-5. 如果多个文档存在冲突，列出冲突来源，不要擅自裁决。
-6. 回答要先给结论，再列依据。
+| 事件 | 含义 |
+|---|---|
+| `status.updated` | understanding/retrieving/reranking/generating |
+| `rewrite.completed` | 当前有效的自包含检索问题 |
+| `retrieval.completed` | 召回数与 warnings |
+| `rerank.completed` | 精排后的 chunk IDs |
+| `answer.delta` | 回答正文 |
+| `citation.delta` | 解析后的真实引用 |
+| `answer.completed` | confidence 和 usage |
+| `tool.call.started` | 工具名和参数 |
+| `tool.call.completed` | 工具公开结果 |
+| `tool.call.failed` | 结构化工具错误 |
 
-<history>
-{conversation_history_for_intent_only}
-</history>
+`rewrite.completed` 现在是兼容性事件：直答时等于当前原始消息；执行 search 后更新为工具的 `rerank_query`。它不代表额外调用了一个 rewrite 模型。
 
-<context>
-{ranked_chunks_with_metadata}
-</context>
+## 性能语义
 
-<question>
-{original_user_question}
-</question>
+调用次数按实际任务决定：
 
-输出格式：
-- 答案：...
-- 依据：使用 [1] [2] 引用
-- 置信度：high | medium | low
-```
+- 普通问候：1 次 AgentModel；
+- 文档问答：1 次 AgentModel tool selection + 1 次/多次工具观察后的 AgentModel + 1 次 verifier；
+- 澄清：1 次 AgentModel + 终止型 clarification tool；
+- verifier 修正：不再触发新的 answer generation，只接受一次结构有效的 verifier correction。
 
-## Clarification Prompt
+因此简单请求不会为固定阶段付费，复杂请求仍可根据证据多步执行。
 
-当问题无法被可靠改写时，Agent 应该追问，而不是猜。
+## Trace
 
-```text
-用户问题存在歧义，无法确定检索对象。
-请提出一个简短澄清问题。
+每个 assistant message 保存：
 
-要求：
-1. 只问一个问题。
-2. 给出最可能的 2-3 个候选对象。
-3. 不要直接回答原问题。
-```
+- Prompt 四层版本；
+- AgentModel、search/rerank、verifier 组件；
+- mode、stop reason 和 usage；
+- ReAct steps；
+- retrieval/query traces；
+- cache key。
 
-示例：
-
-```text
-你说的“它”是指上一轮提到的《Q3采购合同》，还是《供应商验收规范》？
-```
-
-## 工具调用策略
-
-| 工具 | 触发条件 | 输出 |
-|---|---|---|
-| `rewrite_query` | 每次用户提问 | rewritten query、keywords、clarification 标记 |
-| `plan_retrieval` | 长问题、比较问题、多实体问题 | one or more sub queries |
-| `hybrid_search` | 有明确检索查询 | Top chunks |
-| `rerank_chunks` | hybrid search 有结果 | Top evidence chunks |
-| `generate_answer` | 有足够证据 | answer、citations、confidence |
-| `ask_clarification` | 指代不明或范围不明 | clarification question |
-
-## 防幻觉约束
-
-- 引用链必须来自本轮 `reranked_chunks`
-- 回答中的数字、日期、条款编号必须在引用文本中出现
-- 低于 rerank 阈值时不进入自由生成
-- LLM 输出后做 citation 校验：没有引用支撑的句子降置信度或移除
-- 对“最新”“当前”“今天”等时效问题，若文档没有时间证据，需要说明文档时间范围
-
-## Prompt 版本管理
-
-Prompt 应有版本号，便于复盘和 A/B 测试。
-
-```yaml
-prompt_version: conversation-agent-v1
-rewrite_prompt_version: query-rewrite-v1
-answer_prompt_version: grounded-answer-v1
-policy_version: tenant-default-v1
-```
-
-每条 assistant message 需要保存使用的 prompt 版本、模型名、温度、Top-P 和工具链配置。
+前端展示不是唯一事实源；后端和 DocuMind CLI 应以持久化 Trace 判断工具、耗时、引用和权限。

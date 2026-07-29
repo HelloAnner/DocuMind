@@ -1,203 +1,94 @@
-# 查询改写 (Query Rewriting)
+# 查询改写与检索规划
 
-查询改写是 Query Pipeline 的第一阶段，目标是把用户自然语言提问转换成**适合检索、保留原意、可被下游验证**的结构化查询。改写质量直接决定 Dense / Sparse 两路检索的召回上限，也决定了 Agent 是否真正理解用户。
+查询改写不再是每轮必跑的独立 LLM JSON 阶段，而是 `knowledge_search` 的显式参数。只有模型判断当前问题需要企业文档时，才在工具调用中形成自包含查询、Multi-Query、HyDE、关键词和指代记录。
 
-## 1. 定位与边界
+## 为什么合并进工具
 
-- **做什么**：指代消解、意图显化、关键词抽取、同义词扩展、复杂问题拆解、HyDE 生成。
-- **不做什么**：不替用户补充未经历史确认的事实；不把模糊问题强行改写成确定问题；不修改用户原始问题原文。
-- **核心红线**：改写后的查询必须能从「原始问题 + 历史消息」中解释出来；任何新增实体、时间、数值、判断标准都需标注来源，否则回退或触发澄清。
+旧固定改写有两个问题：
 
-## 2. 输入输出契约
+- 即使用户只说“你好”，也会读取历史并生成 rewritten query；
+- 分类、改写和生成分属多次调用，延迟和错误传播都很高。
 
-### 2.1 输入
+现在当前消息首先由 AgentModel 语义判断。直接回答时完全没有 rewrite；需要文档时，改写结果和工具意图处在同一个结构化调用里。
+
+## knowledge_search 输入
 
 ```json
 {
-  "original_query": "那它什么时候付款？",
-  "conversation_id": "conv_001",
-  "history": [
-    {
-      "role": "user",
-      "content": "Q3采购合同的违约责任是什么？"
-    },
-    {
-      "role": "assistant",
-      "content": "根据《2025年Q3采购合同》……",
-      "citations": [
-        { "doc_title": "2025年Q3采购合同.pdf", "chunk_id": "chunk_003" }
-      ]
-    }
+  "queries": [
+    "2025年Q3采购合同的付款节点",
+    "2025年Q3采购合同的验收付款条件"
   ],
-  "effective_kb_ids": ["kb_001"],
-  "options": {
-    "hyde_enabled": true,
-    "multi_query_enabled": true,
-    "max_sub_queries": 3
-  }
-}
-```
-
-### 2.2 输出
-
-```json
-{
-  "original_query": "那它什么时候付款？",
-  "rewritten_query": "2025年Q3采购合同约定的付款节点是什么？",
-  "keywords": ["2025年Q3采购合同", "付款节点", "付款时间", "验收后付款"],
-  "hypothetical_answer": "合同约定签署后支付首付款30%，验收通过后支付60%，质保期结束后支付10%。",
-  "sub_queries": [],
-  "resolved_refs": [
+  "rerank_query": "2025年Q3采购合同的付款与验收节点",
+  "hypothetical_answer": null,
+  "response_mode": "comparer",
+  "keywords": ["2025年Q3采购合同", "付款", "验收"],
+  "resolved_references": [
     {
       "text": "它",
-      "resolved_to": "2025年Q3采购合同",
-      "source_message_id": "msg_assistant_001",
-      "confidence": "high"
+      "resolved_to": "2025年Q3采购合同"
     }
   ],
-  "added_constraints": [],
-  "removed_constraints": [],
-  "needs_clarification": false,
-  "clarification_question": null
+  "reason": "分别检索付款和验收条款"
 }
 ```
 
-### 2.3 字段说明
+## 保真规则
 
-| 字段 | 说明 |
-|---|---|
-| `rewritten_query` | 给 Dense Vector Search 的主查询，保留完整语义 |
-| `keywords` | 给 BM25 的关键词/短语集合，可包含同义词 |
-| `hypothetical_answer` | HyDE 生成的假想答案，作为备用 Dense 查询向量（可选） |
-| `sub_queries` | Multi-Query 拆解后的子查询，每个子查询独立检索后合并 |
-| `resolved_refs` | 指代消解记录，用于后续保真校验和引用链 |
-| `added_constraints` | 改写时新增的约束，必须有历史或上下文来源 |
-| `needs_clarification` | 无法可靠改写时返回 true，下游不再检索 |
+- 当前消息是主任务；
+- 完整的新消息不得被上一轮问题覆盖；
+- 只补全明确、唯一的指代或省略；
+- query 必须自包含；
+- 不增加历史中不存在的实体、日期、数值或约束；
+- 存在两种会导致不同搜索的解释时调用 `ask_clarification`；
+- 历史答案不得直接作为本轮证据。
 
-## 3. 核心改写策略
+## Multi-Query
 
-### 3.1 多轮上下文融合与指代消解
+`queries` 中每项都独立执行 dense + BM25，并分别参与 RRF。工具会限制数量到 `max_queries_per_step`，然后合并去重并统一 rerank。
 
-- 默认取最近 **3-5 轮**完成态 QA 作为上下文。
-- 只把历史用于**理解意图**，不把历史答案作为事实来源。
-- 消解目标必须显式化：`resolved_refs` 记录原文片段、解析来源 message、置信度。
-- 当候选指代对象多于一个且无法区分时，返回 `needs_clarification=true`。
+适合：
 
-### 3.2 HyDE（Hypothetical Document Embedding）
+- 多对象比较；
+- 多条件问题；
+- reviewer 检查清单；
+- 一个问题中相互独立的多个事实。
 
-- 触发条件：`hyde_enabled=true` 且问题适合用段落回答（非导航、非澄清）。
-- 流程：用轻量 LLM 生成假想答案段落 → 对假想答案做 embedding → 作为 Dense 查询向量。
-- 与 `rewritten_query` 的向量做**加权融合**或**独立检索后合并**，默认权重：`rewritten_query=0.7`，`hypothetical_answer=0.3`。
-- HyDE 失败或生成无关内容时，自动回退到 `rewritten_query` 向量。
+依赖前一次结果的查询应在下一轮 tool call 提交。
 
-### 3.3 Multi-Query 扩展
+## HyDE
 
-- 触发条件：问题包含多实体、多条件、比较、总分结构，且 `multi_query_enabled=true`。
-- 每个子查询必须是完整独立检索单元，子查询数量 ≤ `max_sub_queries`（默认 3）。
-- 子查询必须能逐条映射回原始问题，禁止为拆分而拆分。
-- 下游检索对每个子查询并行执行，结果按 RRF 合并去重。
+`hypothetical_answer` 是可选召回辅助。只有 `hyde_enabled=true` 时才传入 Retriever。它永远不进入 evidence，不允许产生 citation，也不能覆盖实际文档内容。
 
-### 3.4 术语规范化与企业黑话映射
+## 关键词和指代 Trace
 
-- 优先使用租户级术语表 / 同义词表做规则映射，降低 LLM 猜测。
-- 对不在术语表中的新缩写，LLM 可尝试展开，但需在 `added_constraints` 中标注，供保真校验审查。
-- 严禁把口语中的模糊数量词（“大概”“可能”）改写成精确数字。
+`keywords` 与 `resolved_references` 不参与权限判断，但会进入 Query Trace，支持：
 
-### 3.5 查询解析（面向 BM25）
+- 检查模型是否引入新约束；
+- 评估多轮指代准确率；
+- 对比原始问题、rerank query 与最终召回；
+- 复盘错误检索。
 
-- `keywords` 从 `rewritten_query` 中抽取，保留名词短语、专有名词、数字、日期、条款编号。
-- 可自动扩展同义词（如“付款节点”↔“付款时间”↔“付款条件”），扩展范围受术语表约束。
-- 对必须同时出现的关键概念，生成 `must` 短语；对可选近义词，生成 `should` 短语。
+## 失败语义
 
-## 4. 改写流水线
+没有隐式 fallback：
 
-```text
-原始问题 + 历史 + scope
-    │
-    ▼
-[Step 1] 意图识别
-    │  判断：澄清 / 直接回答 / 总结 / 对比 / 分析 / 导航
-    ▼
-[Step 2] 上下文融合
-    │  消解指代、继承话题、补全省略条件
-    ▼
-[Step 3] 术语映射
-    │  术语表 + 同义词表
-    ▼
-[Step 4] 生成改写
-    │  rewritten_query / keywords / hypothetical_answer / sub_queries
-    ▼
-[Step 5] 保真校验
-    │  检查 added_constraints 是否有来源
-    ├── 通过 → 输出
-    └── 不通过 → 回退原始问题 或 触发澄清
-```
+- 参数不是合法 JSON：返回 tool execution error；
+- query 为空：明确拒绝；
+- analyst 被禁用：明确拒绝；
+- provider/retriever/reranker 失败：作为 observation 返回模型；
+- 无召回：返回 `no_relevant_evidence`；
+- 相同调用重复：Kernel 拒绝第二次执行。
 
-## 5. Prompt 设计
+模型可根据 observation 改变查询或说明限制。达到步数上限则以 low confidence 终止。
 
-### 5.1 System Prompt 骨架
+## 评估
 
-```text
-你是 DocuMind 查询改写助手。任务是把用户问题改写成适合企业文档检索的查询。
-
-规则：
-1. 保留用户真实意图，不添加历史中没有出现过的新实体、时间、数值或判断标准。
-2. 可以结合最近对话历史消解指代词（“它”“那份文档”“这个指标”）。
-3. 无法判断指代对象时，输出 needs_clarification=true 并给出简短澄清问题。
-4. 复杂问题可拆分为 2-3 个子查询，每个子查询必须能回溯到原问题。
-5. 输出严格的 JSON，不要解释。
-```
-
-### 5.2 Few-shot 示例
-
-示例必须覆盖：直接改写、指代消解、需要澄清、Multi-Query、术语规范化。
-
-## 6. 与下游对接
-
-```text
-RewriteOutput
-    │
-    ├── rewritten_query ──────────────┐
-    ├── keywords ───────────────┐    │
-    ├── hypothetical_answer ─────┤    │
-    └── sub_queries ──────────────┤    │
-                                │    │
-    ┌───────────────────────────┘    │
-    ▼                                ▼
-BM25 Sparse Query              Dense Vector Query
-    │                                │
-    ▼                                ▼
-ES multi-match / ik_max_word   ES kNN (HNSW, cosine)
-```
-
-- `rewritten_query` 同时作为 LLM 生成用的问题主干；`keywords` 专供 BM25。
-- 存在 `sub_queries` 时，每个子查询独立产出 `rewritten_query` + `keywords`，并行检索后合并。
-- `hypothetical_answer` 作为 Dense 向量的辅助输入，失败时回退。
-
-## 7. 失败与降级策略
-
-| 场景 | 处理 |
-|---|---|
-| LLM 改写超时/失败 | 回退到原始问题，keywords 用 jieba 分词兜底 |
-| 输出 JSON 解析失败 | 记录日志，回退到原始问题 |
-| 保真校验不通过 | 若新增约束无来源，触发澄清或回退 |
-| HyDE 生成无关内容 | 丢弃 hypothetical_answer，仅用 rewritten_query |
-| 子查询拆分失败 | 退化为单查询 |
-
-## 8. 评估指标
-
-| 指标 | 说明 |
-|---|---|
-| `rewrite.clarification_rate` | 澄清率，过高说明系统爱猜，过低说明可能硬答 |
-| `rewrite.added_constraint_rate` | 新增约束比例，用于监控偏离原意 |
-| `rewrite.resolution_accuracy` | 指代消解准确率 |
-| `rewrite.json_valid_rate` | 输出 JSON 可用率 |
-| `retrieval.recall@k` | 改写后检索召回率 |
-
-## 9. 相关文档
-
-- [混合检索](../7-hybrid-search/hybrid-search.md)
-- [精排](../8-reranking/reranking.md)
-- [答案生成](../9-answer-generation/answer-generation.md)
-- [上下文策略](../10-conversation/context-policy.md)
-- [问题保真](../10-conversation/question-fidelity.md)
+- 直答 tool-call rate；
+- greeting after document turn 的误检索率；
+- rewrite drift rate；
+- resolved-reference accuracy；
+- retrieval recall@k；
+- duplicate tool-call rejection rate；
+- no-evidence classification accuracy；
+- 端到端首字节与完成耗时。

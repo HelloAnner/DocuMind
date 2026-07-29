@@ -4,11 +4,11 @@ use anyhow::Result;
 use sqlx::PgPool;
 
 use crate::agent::{
-    AgentKernel, BuiltinPromptRegistry, LlmAgentReasoner, LlmClaimVerifier, StructuralClaimVerifier,
+    AgentKernel, AgentModel, AgentToolRegistry, BuiltinPromptRegistry, ClarificationTool,
+    GroundedAnswerFinalizer, KnowledgeSearchTool, LlmClaimVerifier, StructuralClaimVerifier,
 };
 use crate::config::AppConfig;
 use crate::llm::openai::{OpenAiClient, OpenAiClientConfig};
-use crate::llm::OpenAiAnswerGenerator;
 use crate::rag::{
     EmbeddingClientConfig, EsRetriever, HttpReranker, RerankProvider, SimpleContextAssembler,
 };
@@ -78,13 +78,7 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         model: config.agent.reasoning_model.clone(),
         timeout_seconds: 120,
     })?);
-    let answer_generator: Arc<dyn crate::agent::generator::AnswerGenerator> = Arc::new(
-        OpenAiAnswerGenerator::new(generation_client, config.rag.generation.model.clone()),
-    );
-    let reasoner: Arc<dyn crate::agent::AgentReasoner> = Arc::new(LlmAgentReasoner::new(
-        reasoning_client.clone(),
-        config.agent.reasoning_model.clone(),
-    ));
+    let agent_model: Arc<dyn AgentModel> = generation_client;
     let verifier: Arc<dyn crate::agent::ClaimVerifier> = if config.rag.citation.verify_claims {
         Arc::new(LlmClaimVerifier::new(
             reasoning_client,
@@ -133,15 +127,17 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         .map_err(|error| anyhow::anyhow!("reranker readiness probe failed: {error}"))?;
     let reranker: Arc<dyn crate::rag::Reranker> = Arc::new(reranker_adapter);
 
+    let tools = AgentToolRegistry::new(vec![
+        Arc::new(KnowledgeSearchTool::new(retriever, reranker)),
+        Arc::new(ClarificationTool),
+    ])?;
     let agent_kernel = AgentKernel::new(
-        reasoner,
-        retriever,
-        reranker,
+        agent_model,
+        tools,
         Arc::new(SimpleContextAssembler::new()),
-        answer_generator,
         Arc::new(BuiltinPromptRegistry::new()),
-        verifier,
-    );
+        Arc::new(GroundedAnswerFinalizer::new(verifier)),
+    )?;
 
     let storage = build_storage(&config);
 

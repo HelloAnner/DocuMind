@@ -398,7 +398,7 @@ pub fn load_config() -> Result<AppConfig> {
         max_history_turns: env_usize("AGENT_MAX_HISTORY_TURNS", 12).clamp(1, 50),
         max_history_chars: env_usize("AGENT_MAX_HISTORY_CHARS", 24_000).clamp(2_000, 100_000),
         max_context_chars: env_usize("AGENT_MAX_CONTEXT_CHARS", 30_000).clamp(4_000, 120_000),
-        max_repair_attempts: env_usize("AGENT_MAX_REPAIR_ATTEMPTS", 3).clamp(0, 5),
+        max_repair_attempts: env_usize("AGENT_MAX_REPAIR_ATTEMPTS", 1).clamp(0, 1),
         total_timeout_seconds: env::var("AGENT_TOTAL_TIMEOUT_SECONDS")
             .ok()
             .and_then(|value| value.parse().ok())

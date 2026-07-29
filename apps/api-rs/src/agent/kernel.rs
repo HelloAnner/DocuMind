@@ -1,136 +1,93 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::generator::AnswerGenerator;
-use super::kernel_support::{
-    action_name, base_trace, bounded_history, build_run, emit, evidence_observations,
-    merge_evidence, single_text_stream,
-};
-use super::prompt::PromptRegistry;
-use super::reasoner::{
-    AgentReasoner, PreviousAction, QueryUnderstanding, ReactActionKind, ReactStateView,
-};
-use super::trace_builder::{reranked_traces, retrieved_traces};
-use super::verifier::ClaimVerifier;
-use crate::models::agent::{
-    AgentRequest, AgentRun, ConversationTurn, PromptVersions, ReactStepTrace,
-};
-use crate::models::now;
-use crate::models::rag::{ContextInput, RerankInput, RerankedChunk, RetrievalInput};
-use crate::models::trace::{PlanMode, RetrievalPlan, RetrievalTrace, SubQuery};
-use crate::models::{Confidence, NoAnswerReason};
-use crate::rag::{ContextAssembler, Reranker, Retriever};
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 
-#[derive(Debug, Clone)]
-pub enum AgentProgress {
-    StatusUpdated {
-        status: &'static str,
-    },
-    RewriteCompleted {
-        rewritten_query: String,
-        keywords: Vec<String>,
-    },
-    ReactStepStarted {
-        step: usize,
-        action: String,
-        decision_summary: String,
-    },
-    ToolCallStarted {
-        tool_call_id: String,
-        name: String,
-        arguments: serde_json::Value,
-    },
-    ToolCallCompleted {
-        tool_call_id: String,
-        name: String,
-        result: serde_json::Value,
-    },
-    RetrievalCompleted {
-        chunk_count: usize,
-        warnings: Vec<String>,
-    },
-    RerankCompleted {
-        top_chunk_ids: Vec<uuid::Uuid>,
-    },
-}
+use super::citation_resolver::cited_evidence_indexes;
+use super::events::{emit, AgentProgress, ProgressSender};
+use super::finalizer::GroundedAnswerFinalizer;
+use super::kernel_support::{
+    apply_tool_effect, base_trace, bounded_history, build_messages, build_run, failed_tool_step,
+    response_step, single_text_stream, successful_tool_step, tool_arguments_value,
+    tool_step_summary, ToolState,
+};
+use super::model::{AgentMessage, AgentModel, AgentModelRequest};
+use super::prompt::{Prompt, PromptRegistry};
+use super::tools::{AgentToolRegistry, ToolExecutionContext};
+use crate::models::agent::{AgentMode, AgentRequest, AgentRun, ConversationTurn};
+use crate::models::now;
+use crate::models::rag::{ContextInput, RerankedChunk};
+use crate::models::trace::{RetrievalPlan, RetrievalTrace};
+use crate::models::{Confidence, NoAnswerReason, Usage};
+use crate::rag::ContextAssembler;
 
 #[derive(Debug, Clone)]
 pub struct PreparedAgentRequest {
     pub request: AgentRequest,
-    pub understanding: QueryUnderstanding,
     pub bounded_history: Vec<ConversationTurn>,
+    pub prompt: Prompt,
+    pub mode: AgentMode,
     pub started_at: chrono::DateTime<chrono::Utc>,
 }
 
 impl PreparedAgentRequest {
     pub fn standalone_query(&self) -> &str {
-        &self.understanding.standalone_query
+        &self.request.original_query
     }
 
     pub fn context_fingerprint_input(&self) -> Result<String> {
-        if !self.understanding.context_dependent {
-            return Ok("context-independent".to_string());
-        }
         Ok(serde_json::to_string(&serde_json::json!({
-            "memory_summary": self.understanding.memory_summary,
             "history": self.bounded_history,
+            "utc_date": now().date_naive(),
         }))?)
     }
 }
 
 #[derive(Clone)]
 pub struct AgentKernel {
-    pub reasoner: Arc<dyn AgentReasoner>,
-    pub retriever: Arc<dyn Retriever>,
-    pub reranker: Arc<dyn Reranker>,
+    pub model: Arc<dyn AgentModel>,
+    pub tools: AgentToolRegistry,
+    pub knowledge_search_component: String,
     pub context_assembler: Arc<dyn ContextAssembler>,
-    pub answer_generator: Arc<dyn AnswerGenerator>,
     pub prompt_registry: Arc<dyn PromptRegistry>,
-    pub claim_verifier: Arc<dyn ClaimVerifier>,
+    pub answer_finalizer: Arc<GroundedAnswerFinalizer>,
 }
 
 impl AgentKernel {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
-        reasoner: Arc<dyn AgentReasoner>,
-        retriever: Arc<dyn Retriever>,
-        reranker: Arc<dyn Reranker>,
+        model: Arc<dyn AgentModel>,
+        tools: AgentToolRegistry,
         context_assembler: Arc<dyn ContextAssembler>,
-        answer_generator: Arc<dyn AnswerGenerator>,
         prompt_registry: Arc<dyn PromptRegistry>,
-        claim_verifier: Arc<dyn ClaimVerifier>,
-    ) -> Self {
-        Self {
-            reasoner,
-            retriever,
-            reranker,
+        answer_finalizer: Arc<GroundedAnswerFinalizer>,
+    ) -> Result<Self> {
+        let knowledge_search_component = tools
+            .component_name("knowledge_search")
+            .ok_or_else(|| anyhow!("agent kernel requires the knowledge_search tool"))?;
+        Ok(Self {
+            model,
+            tools,
+            knowledge_search_component,
             context_assembler,
-            answer_generator,
             prompt_registry,
-            claim_verifier,
-        }
+            answer_finalizer,
+        })
     }
 
     pub async fn prepare(&self, request: AgentRequest) -> Result<PreparedAgentRequest> {
-        let started_at = now();
         let bounded_history = bounded_history(
             &request.history,
             request.options.runtime.max_history_turns,
             request.options.runtime.max_history_chars,
         );
-        let understanding = self
-            .reasoner
-            .understand(
-                &request.original_query,
-                &bounded_history,
-                request.options.allow_analyst_mode,
-            )
-            .await?;
+        let prompt = self.prompt_registry.compose(&request.options).await?;
+        let mode = request.options.mode.unwrap_or(AgentMode::Answerer);
         Ok(PreparedAgentRequest {
             request,
-            understanding,
             bounded_history,
-            started_at,
+            prompt,
+            mode,
+            started_at: now(),
         })
     }
 
@@ -142,7 +99,7 @@ impl AgentKernel {
     pub async fn run_prepared(
         &self,
         prepared: PreparedAgentRequest,
-        progress: Option<tokio::sync::mpsc::UnboundedSender<AgentProgress>>,
+        progress: ProgressSender,
     ) -> Result<AgentRun> {
         let request = &prepared.request;
         emit(
@@ -154,318 +111,273 @@ impl AgentKernel {
         emit(
             &progress,
             AgentProgress::RewriteCompleted {
-                rewritten_query: prepared.understanding.standalone_query.clone(),
-                keywords: prepared.understanding.keywords.clone(),
+                rewritten_query: request.original_query.clone(),
+                keywords: Vec::new(),
             },
         );
 
         let mut trace = base_trace(&prepared, self);
+        let mut messages = build_messages(&prepared);
+        let definitions = self.tools.definitions();
         let mut evidence = Vec::<RerankedChunk>::new();
-        let mut previous_actions = Vec::<PreviousAction>::new();
-        let mut react_steps = Vec::<ReactStepTrace>::new();
         let mut retrieval_traces = Vec::<RetrievalTrace>::new();
         let mut plan = RetrievalPlan::default();
+        let mut mode = prepared.mode;
+        let mut rewritten_query = request.original_query.clone();
         let mut answer_stream = None;
         let mut no_answer_reason = None;
+        let mut usage = Usage {
+            input_tokens: 0,
+            output_tokens: 0,
+        };
+        let mut seen_calls = HashSet::new();
+        let mut empty_responses = 0usize;
+        let mut document_search_attempted = false;
 
         for step in 1..=request.options.runtime.max_react_steps.max(1) {
-            let observations = evidence_observations(&evidence);
-            let state = ReactStateView {
-                original_query: &request.original_query,
-                standalone_query: &prepared.understanding.standalone_query,
-                mode: prepared.understanding.mode,
-                response_strategy: &prepared.understanding.response_strategy,
-                understanding_needs_clarification: prepared.understanding.needs_clarification,
-                proposed_clarification_question: prepared
-                    .understanding
-                    .clarification_question
-                    .as_deref(),
-                evidence: &observations,
-                previous_actions: &previous_actions,
-                current_step: step,
-                remaining_steps: request.options.runtime.max_react_steps.saturating_sub(step),
-                max_queries_per_step: request.options.runtime.max_queries_per_step,
-                hyde_enabled: request.options.runtime.hyde_enabled,
-            };
-            let decision = self.reasoner.decide(&state).await?;
-            let action_name = action_name(&decision.action).to_string();
-            emit(
-                &progress,
-                AgentProgress::ReactStepStarted {
-                    step,
-                    action: action_name.clone(),
-                    decision_summary: decision.decision_summary.clone(),
-                },
-            );
-            let step_started = now();
+            let response = self
+                .model
+                .complete(AgentModelRequest {
+                    messages: messages.clone(),
+                    tools: definitions.clone(),
+                    temperature: request.options.generation.temperature,
+                    max_tokens: request.options.generation.max_output_tokens,
+                })
+                .await?;
+            if let Some(turn_usage) = response.usage.as_ref() {
+                usage.input_tokens = usage.input_tokens.saturating_add(turn_usage.input_tokens);
+                usage.output_tokens = usage.output_tokens.saturating_add(turn_usage.output_tokens);
+            }
 
-            match decision.action {
-                ReactActionKind::Search => {
-                    let search = decision
-                        .search
-                        .ok_or_else(|| anyhow::anyhow!("search decision has no parameters"))?;
-                    let tool_call_id = format!("knowledge_search_{step}");
+            if !response.tool_calls.is_empty() {
+                empty_responses = 0;
+                emit(
+                    &progress,
+                    AgentProgress::ReactStepStarted {
+                        step,
+                        action: "tool".to_string(),
+                        decision_summary: tool_step_summary(&response.tool_calls),
+                    },
+                );
+                messages.push(AgentMessage::assistant_with_tools(
+                    response.content,
+                    response.tool_calls.clone(),
+                ));
+                let mut terminal = None;
+                for call in response.tool_calls {
+                    let started_at = now();
+                    let arguments = tool_arguments_value(&call.arguments_json);
                     emit(
                         &progress,
                         AgentProgress::ToolCallStarted {
-                            tool_call_id: tool_call_id.clone(),
-                            name: "knowledge_search".to_string(),
-                            arguments: serde_json::json!({
-                                "queries": search.queries,
-                                "rerank_query": search.rerank_query,
-                                "uses_hyde": search.hypothetical_answer.is_some()
-                                    && request.options.runtime.hyde_enabled,
-                            }),
+                            tool_call_id: call.id.clone(),
+                            name: call.name.clone(),
+                            arguments,
                         },
                     );
-                    emit(
-                        &progress,
-                        AgentProgress::StatusUpdated {
-                            status: "retrieving",
-                        },
-                    );
-                    let retrieval = self
-                        .retriever
-                        .retrieve(RetrievalInput {
-                            tenant_id: request.tenant_id,
-                            effective_kb_ids: request.effective_kb_ids.clone(),
-                            queries: search.queries.clone(),
-                            hypothetical_answer: request
-                                .options
-                                .runtime
-                                .hyde_enabled
-                                .then_some(search.hypothetical_answer.clone())
-                                .flatten(),
-                            top_k: request.options.retrieval.rrf_top_k.max(1),
-                            dense_top_k: request.options.retrieval.dense_top_k.max(1),
-                            bm25_top_k: request.options.retrieval.bm25_top_k.max(1),
-                        })
-                        .await?;
-                    let retrieval_warnings = retrieval.warnings;
-                    let retrieved = retrieval.chunks;
-                    retrieval_traces.extend(retrieved_traces(request.user_message_id, &retrieved));
-                    emit(
-                        &progress,
-                        AgentProgress::RetrievalCompleted {
-                            chunk_count: retrieved.len(),
-                            warnings: retrieval_warnings.clone(),
-                        },
-                    );
-                    emit(
-                        &progress,
-                        AgentProgress::StatusUpdated {
-                            status: "reranking",
-                        },
-                    );
-                    let reranked = self
-                        .reranker
-                        .rerank(RerankInput {
-                            query: search.rerank_query.clone(),
-                            chunks: retrieved,
-                            top_k: request.options.retrieval.rerank_top_k.max(1),
-                        })
-                        .await?;
-                    retrieval_traces.extend(reranked_traces(request.user_message_id, &reranked));
-                    emit(
-                        &progress,
-                        AgentProgress::RerankCompleted {
-                            top_chunk_ids: reranked
-                                .iter()
-                                .map(|item| item.chunk.chunk_id)
-                                .collect(),
-                        },
-                    );
-                    let accepted = reranked;
-                    let accepted_ids = accepted
-                        .iter()
-                        .map(|item| item.chunk.chunk_id)
-                        .collect::<Vec<_>>();
-                    let retrieved_ids = retrieval_traces
-                        .iter()
-                        .rev()
-                        .take(request.options.retrieval.rrf_top_k.max(1))
-                        .map(|item| item.chunk_id)
-                        .collect::<Vec<_>>();
-                    merge_evidence(&mut evidence, accepted);
-                    let result_summary = format!(
-                        "{} top-ranked evidence chunks were supplied for semantic coverage review",
-                        accepted_ids.len()
-                    );
-                    emit(
-                        &progress,
-                        AgentProgress::ToolCallCompleted {
-                            tool_call_id,
-                            name: "knowledge_search".to_string(),
-                            result: serde_json::json!({
-                                "accepted_chunk_count": accepted_ids.len(),
-                                "accepted_chunk_ids": accepted_ids,
-                                "accumulated_evidence_count": evidence.len(),
-                                "warnings": retrieval_warnings,
-                            }),
-                        },
-                    );
-                    for query in &search.queries {
-                        plan.queries.push(SubQuery {
-                            query: query.clone(),
-                            reason: decision.decision_summary.clone(),
+                    let fingerprint = format!("{}:{}", call.name, call.arguments_json);
+                    if !seen_calls.insert(fingerprint) {
+                        let error = serde_json::json!({
+                            "error_type": "duplicate_tool_call",
+                            "retryable": false,
+                            "message": "The identical tool call already ran. Change the query or answer from existing observations."
                         });
+                        emit_tool_failure(&progress, &call.id, &call.name, error.clone());
+                        messages.push(AgentMessage::tool(call.id.clone(), error.to_string()));
+                        trace.react_steps.push(failed_tool_step(
+                            step,
+                            &call.name,
+                            "identical tool call rejected",
+                            started_at,
+                        ));
+                        continue;
                     }
-                    plan.mode = if plan.queries.len() > 1 {
-                        PlanMode::Multi
-                    } else {
-                        PlanMode::Single
+
+                    let context = ToolExecutionContext {
+                        request,
+                        progress: &progress,
                     };
-                    previous_actions.push(PreviousAction {
-                        step,
-                        action: action_name.clone(),
-                        queries: search.queries.clone(),
-                        result_summary,
-                    });
-                    react_steps.push(ReactStepTrace {
-                        step,
-                        action: action_name,
-                        decision_summary: decision.decision_summary,
-                        queries: search.queries,
-                        rerank_query: Some(search.rerank_query),
-                        hypothetical_answer: search.hypothetical_answer,
-                        retrieved_chunk_ids: retrieved_ids,
-                        accepted_chunk_ids: accepted_ids,
-                        warnings: retrieval_warnings,
-                        started_at: step_started,
-                        completed_at: now(),
-                    });
+                    match self.tools.execute(&call, &context).await {
+                        Ok(execution) => {
+                            let previous_query = rewritten_query.clone();
+                            let applied = apply_tool_effect(
+                                execution.effect,
+                                execution.model_result,
+                                execution.public_result,
+                                ToolState {
+                                    evidence: &mut evidence,
+                                    retrieval_traces: &mut retrieval_traces,
+                                    plan: &mut plan,
+                                    keywords: &mut trace.keywords,
+                                    resolved_refs: &mut trace.resolved_refs,
+                                    mode: &mut mode,
+                                    rewritten_query: &mut rewritten_query,
+                                    max_context_chars: request.options.runtime.max_context_chars,
+                                },
+                            );
+                            document_search_attempted |= applied.document_search_attempted;
+                            if rewritten_query != previous_query {
+                                emit(
+                                    &progress,
+                                    AgentProgress::RewriteCompleted {
+                                        rewritten_query: rewritten_query.clone(),
+                                        keywords: Vec::new(),
+                                    },
+                                );
+                            }
+                            emit(
+                                &progress,
+                                AgentProgress::ToolCallCompleted {
+                                    tool_call_id: call.id.clone(),
+                                    name: call.name.clone(),
+                                    result: applied.public_result,
+                                },
+                            );
+                            messages.push(AgentMessage::tool(
+                                call.id.clone(),
+                                applied.model_result.to_string(),
+                            ));
+                            trace.react_steps.push(successful_tool_step(
+                                step,
+                                &call.name,
+                                &applied.trace,
+                                started_at,
+                            ));
+                            if let Some(effect) = applied.terminal {
+                                terminal = Some(effect);
+                            }
+                        }
+                        Err(error) => {
+                            let payload = serde_json::json!({
+                                "error_type": "tool_execution_error",
+                                "retryable": false,
+                                "message": error.to_string()
+                            });
+                            emit_tool_failure(&progress, &call.id, &call.name, payload.clone());
+                            messages.push(AgentMessage::tool(call.id.clone(), payload.to_string()));
+                            trace.react_steps.push(failed_tool_step(
+                                step,
+                                &call.name,
+                                &error.to_string(),
+                                started_at,
+                            ));
+                        }
+                    }
                 }
-                ReactActionKind::Finish if !evidence.is_empty() => {
-                    let answer_focus = decision
-                        .answer_focus
-                        .ok_or_else(|| anyhow::anyhow!("finish decision has no answer focus"))?;
-                    let selected_evidence =
-                        select_evidence(&evidence, &decision.selected_evidence_ids)?;
-                    react_steps.push(ReactStepTrace {
+                if let Some(effect) = terminal {
+                    mode = effect.mode;
+                    no_answer_reason = effect.no_answer_reason;
+                    answer_stream = Some(single_text_stream(
+                        effect.answer,
+                        effect.confidence,
+                        Some(usage.clone()),
+                    ));
+                    trace.stop_reason = "waiting_for_clarification".to_string();
+                    break;
+                }
+                continue;
+            }
+
+            if response.has_content() {
+                let content = response
+                    .content
+                    .ok_or_else(|| anyhow!("agent response content disappeared"))?;
+                emit(
+                    &progress,
+                    AgentProgress::ReactStepStarted {
                         step,
-                        action: action_name,
-                        decision_summary: decision.decision_summary,
-                        queries: vec![],
-                        rerank_query: None,
-                        hypothetical_answer: None,
-                        retrieved_chunk_ids: vec![],
-                        accepted_chunk_ids: selected_evidence
-                            .iter()
-                            .map(|item| item.chunk.chunk_id)
-                            .collect(),
-                        warnings: vec![],
-                        started_at: step_started,
-                        completed_at: now(),
-                    });
-                    let assembled = self
-                        .context_assembler
-                        .assemble(ContextInput {
-                            chunks: selected_evidence,
-                            original_query: request.original_query.clone(),
-                            max_context_chars: request.options.runtime.max_context_chars,
-                        })
-                        .await?;
-                    let prompt = self
-                        .prompt_registry
-                        .compose(
-                            prepared.understanding.mode,
-                            &request.original_query,
-                            &prepared.understanding.standalone_query,
-                            &answer_focus,
-                            &assembled,
-                            &request.options,
-                        )
-                        .await?;
-                    trace.prompt_versions = PromptVersions {
-                        persona: prompt.persona_version.clone(),
-                        guardrail: prompt.guardrail_version.clone(),
-                        mode: prompt.mode_version.clone(),
-                        task: prompt.task_version.clone(),
+                        action: "respond".to_string(),
+                        decision_summary: if evidence.is_empty() {
+                            "direct response without tools".to_string()
+                        } else {
+                            "grounded response from accumulated evidence".to_string()
+                        },
+                    },
+                );
+                trace.react_steps.push(response_step(step, &content));
+                if evidence.is_empty() {
+                    let content = if document_search_attempted
+                        && !cited_evidence_indexes(&content).is_empty()
+                    {
+                        "未检索到可以支持该结论的文档证据。".to_string()
+                    } else {
+                        content
                     };
+                    let confidence = if document_search_attempted {
+                        no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
+                        Confidence::Low
+                    } else {
+                        Confidence::Medium
+                    };
+                    answer_stream =
+                        Some(single_text_stream(content, confidence, Some(usage.clone())));
+                    trace.stop_reason = if document_search_attempted {
+                        "no_relevant_evidence_response".to_string()
+                    } else {
+                        "direct_response".to_string()
+                    };
+                } else {
                     emit(
                         &progress,
                         AgentProgress::StatusUpdated {
                             status: "generating",
                         },
                     );
+                    let assembled = self
+                        .context_assembler
+                        .assemble(ContextInput {
+                            chunks: evidence.clone(),
+                            original_query: request.original_query.clone(),
+                            max_context_chars: request.options.runtime.max_context_chars,
+                        })
+                        .await?;
                     answer_stream = Some(
-                        self.answer_generator
-                            .generate(
-                                prepared.understanding.standalone_query.clone(),
+                        self.answer_finalizer
+                            .finalize(
+                                &rewritten_query,
+                                content,
                                 assembled,
-                                prompt,
-                                request.options.generation.clone(),
-                                self.claim_verifier.clone(),
                                 request.options.require_citation,
-                                request.options.runtime.max_repair_attempts,
+                                request.options.runtime.allow_verifier_correction,
+                                Some(usage.clone()),
                             )
                             .await?,
                     );
-                    trace.stop_reason = "evidence_sufficient".to_string();
-                    break;
+                    trace.stop_reason = "grounded_response".to_string();
                 }
-                ReactActionKind::Finish => {
-                    let result_summary =
-                        "finish rejected because no document evidence was observed";
-                    previous_actions.push(PreviousAction {
-                        step,
-                        action: action_name.clone(),
-                        queries: vec![],
-                        result_summary: result_summary.to_string(),
-                    });
-                    react_steps.push(ReactStepTrace {
-                        step,
-                        action: action_name,
-                        decision_summary: decision.decision_summary,
-                        queries: vec![],
-                        rerank_query: None,
-                        hypothetical_answer: None,
-                        retrieved_chunk_ids: vec![],
-                        accepted_chunk_ids: vec![],
-                        warnings: vec![result_summary.to_string()],
-                        started_at: step_started,
-                        completed_at: now(),
-                    });
-                }
-                ReactActionKind::Clarify => {
-                    let question = decision.clarification_question.ok_or_else(|| {
-                        anyhow::anyhow!("clarify decision has no clarification question")
-                    })?;
-                    react_steps.push(ReactStepTrace {
-                        step,
-                        action: action_name,
-                        decision_summary: decision.decision_summary,
-                        queries: vec![],
-                        rerank_query: None,
-                        hypothetical_answer: None,
-                        retrieved_chunk_ids: vec![],
-                        accepted_chunk_ids: vec![],
-                        warnings: vec![],
-                        started_at: step_started,
-                        completed_at: now(),
-                    });
-                    answer_stream = Some(single_text_stream(question, Confidence::Low));
-                    no_answer_reason = Some(NoAnswerReason::NeedsClarification);
-                    trace.stop_reason = "clarification_required".to_string();
-                    break;
-                }
+                break;
             }
+
+            empty_responses += 1;
+            if empty_responses > 1 {
+                return Err(anyhow!(
+                    "agent model returned neither content nor tool calls twice"
+                ));
+            }
+            messages.push(AgentMessage::user(
+                "Your previous turn was empty. Reply now, or call one available tool.",
+            ));
         }
 
         if answer_stream.is_none() {
-            trace.stop_reason = "react_budget_exhausted_without_sufficient_evidence".to_string();
+            trace.stop_reason = "react_budget_exhausted".to_string();
             no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
             answer_stream = Some(single_text_stream(
-                "在本次检索预算内，没有找到足以可靠回答该问题的文档证据。".to_string(),
+                "已达到本次处理步骤上限，暂时无法可靠完成这个问题。".to_string(),
                 Confidence::Low,
+                Some(usage.clone()),
             ));
         }
-        trace.react_steps = react_steps;
+        trace.mode = mode;
+        trace.rewritten_query = Some(rewritten_query.clone());
         trace.retrieval_plan = plan.clone();
-        let answer_stream = answer_stream
-            .ok_or_else(|| anyhow::anyhow!("agent completed without an answer stream"))?;
+        trace.usage = Some(usage);
+        let answer_stream =
+            answer_stream.ok_or_else(|| anyhow!("agent completed without an answer stream"))?;
         Ok(build_run(
             &prepared,
+            mode,
+            rewritten_query,
             trace,
             plan,
             retrieval_traces,
@@ -475,17 +387,18 @@ impl AgentKernel {
     }
 }
 
-fn select_evidence(
-    evidence: &[RerankedChunk],
-    selected_ids: &[usize],
-) -> Result<Vec<RerankedChunk>> {
-    let selected = selected_ids
-        .iter()
-        .filter_map(|id| id.checked_sub(1).and_then(|index| evidence.get(index)))
-        .cloned()
-        .collect::<Vec<_>>();
-    if selected.is_empty() {
-        anyhow::bail!("finish action selected no valid document evidence");
-    }
-    Ok(selected)
+fn emit_tool_failure(
+    progress: &ProgressSender,
+    tool_call_id: &str,
+    name: &str,
+    error: serde_json::Value,
+) {
+    emit(
+        progress,
+        AgentProgress::ToolCallFailed {
+            tool_call_id: tool_call_id.to_string(),
+            name: name.to_string(),
+            error,
+        },
+    );
 }

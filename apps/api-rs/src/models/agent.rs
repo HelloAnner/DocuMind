@@ -132,8 +132,8 @@ pub struct AgentRuntimeConfig {
     pub max_history_chars: usize,
     #[serde(default = "default_max_context_chars")]
     pub max_context_chars: usize,
-    #[serde(default = "default_max_repair_attempts")]
-    pub max_repair_attempts: usize,
+    #[serde(default = "default_true")]
+    pub allow_verifier_correction: bool,
 }
 
 fn default_max_react_steps() -> usize {
@@ -151,10 +151,6 @@ fn default_max_history_chars() -> usize {
 fn default_max_context_chars() -> usize {
     30_000
 }
-fn default_max_repair_attempts() -> usize {
-    3
-}
-
 impl Default for AgentRuntimeConfig {
     fn default() -> Self {
         Self {
@@ -164,7 +160,7 @@ impl Default for AgentRuntimeConfig {
             max_history_turns: default_max_history_turns(),
             max_history_chars: default_max_history_chars(),
             max_context_chars: default_max_context_chars(),
-            max_repair_attempts: default_max_repair_attempts(),
+            allow_verifier_correction: true,
         }
     }
 }

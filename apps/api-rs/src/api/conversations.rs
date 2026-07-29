@@ -30,7 +30,7 @@ use crate::models::message::{
     ConversationMessage, MessageListResponse, MessageResponse, RetryMessageRequest,
     SendMessageRequest,
 };
-use crate::models::trace::{QueryTrace, ResolvedRef, RetrievalSource, RetrievalTrace};
+use crate::models::trace::{QueryTrace, RetrievalSource, RetrievalTrace};
 use crate::models::{now, ActorScope, Confidence, MessageRole, MessageStatus, NoAnswerReason};
 use crate::repositories::cache_key;
 use crate::repositories::{AnswerCache, CachedAnswer, ConversationRepository};
@@ -556,7 +556,7 @@ async fn run_agent_pipeline_inner(
     let runtime_fingerprint = agent_runtime_fingerprint(&config);
 
     let cache_key = cache_key(
-        "v2",
+        "v3",
         actor.tenant_id,
         &effective_kb_ids,
         prepared.standalone_query(),
@@ -564,7 +564,7 @@ async fn run_agent_pipeline_inner(
         &doc_version_hash,
         &runtime_fingerprint,
     );
-    let answer_cache_enabled = !prepared.understanding.time_sensitive;
+    let answer_cache_enabled = true;
     let cached_answer = if answer_cache_enabled {
         let cached = match cache.get(&cache_key).await {
             Ok(value) => value,
@@ -600,42 +600,32 @@ async fn run_agent_pipeline_inner(
     let mut pipeline_retrieval_traces: Vec<RetrievalTrace> = vec![];
 
     if let Some(cached) = cached_answer {
-        mode = prepared.understanding.mode;
+        mode = prepared.mode;
         rewritten_query = Some(prepared.standalone_query().to_string());
         trace = crate::models::agent::AgentTrace {
             mode,
-            mode_reason: "context-safe semantic cache hit".to_string(),
+            mode_reason: "context-safe native ReAct cache hit".to_string(),
             rewritten_query: rewritten_query.clone(),
-            keywords: prepared.understanding.keywords.clone(),
-            resolved_refs: prepared
-                .understanding
-                .resolved_references
-                .iter()
-                .map(|reference| ResolvedRef {
-                    text: reference.text.clone(),
-                    resolved_to: reference.resolved_to.clone(),
-                    source_message_id: None,
-                    evidence_message_id: None,
-                })
-                .collect(),
+            keywords: vec![],
+            resolved_refs: vec![],
             retrieval_plan: crate::models::trace::RetrievalPlan::default(),
             prompt_versions: crate::models::agent::PromptVersions {
-                persona: "persona-v3".to_string(),
-                guardrail: "grounded-untrusted-evidence-v19".to_string(),
-                mode: format!("mode-{}-llm-v19", mode),
-                task: "react-grounded-answer-v19".to_string(),
+                persona: prepared.prompt.persona_version.clone(),
+                guardrail: prepared.prompt.guardrail_version.clone(),
+                mode: prepared.prompt.mode_version.clone(),
+                task: prepared.prompt.task_version.clone(),
             },
             model: config.rag.generation.model.clone(),
             usage: None,
             started_at: now(),
-            memory_summary: prepared.understanding.memory_summary.clone(),
+            memory_summary: String::new(),
             react_steps: vec![],
             stop_reason: "cache_hit".to_string(),
             runtime_components: RuntimeComponents {
-                reasoner: kernel.reasoner.component_name(),
-                retriever: kernel.retriever.component_name(),
-                reranker: kernel.reranker.component_name(),
-                verifier: kernel.claim_verifier.component_name(),
+                reasoner: kernel.model.component_name(),
+                retriever: kernel.knowledge_search_component.clone(),
+                reranker: kernel.knowledge_search_component.clone(),
+                verifier: kernel.answer_finalizer.component_name(),
             },
             cache_key: Some(cache_key.clone()),
         };
@@ -796,7 +786,7 @@ async fn run_agent_pipeline_inner(
             .find_map(|step| step.hypothetical_answer.clone()),
         resolved_refs: trace.resolved_refs.clone(),
         effective_kb_ids: effective_kb_ids.clone(),
-        rewrite_model: config.agent.reasoning_model.clone(),
+        rewrite_model: config.rag.generation.model.clone(),
         created_at: now(),
     };
     repo.save_query_trace(query_trace).await?;
@@ -901,7 +891,8 @@ fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> Option<Ss
         }),
         AgentProgress::ReactStepStarted { .. }
         | AgentProgress::ToolCallStarted { .. }
-        | AgentProgress::ToolCallCompleted { .. } => None,
+        | AgentProgress::ToolCallCompleted { .. }
+        | AgentProgress::ToolCallFailed { .. } => None,
     }
 }
 
@@ -1105,6 +1096,23 @@ fn send_progress_event(
                 "result": result,
             }),
         ),
+        AgentProgress::ToolCallFailed {
+            tool_call_id,
+            name,
+            error,
+        } => send_runtime_step_event(
+            tx,
+            runtime_events,
+            "tool.call.failed",
+            &tool_call_id,
+            &name,
+            json!({
+                "tool_call_id": tool_call_id,
+                "name": name,
+                "status": "failed",
+                "error": error,
+            }),
+        ),
         AgentProgress::RetrievalCompleted {
             chunk_count,
             warnings,
@@ -1305,14 +1313,17 @@ fn agent_options_from_config(config: &crate::config::AppConfig) -> AgentOptions 
             max_history_turns: config.agent.max_history_turns,
             max_history_chars: config.agent.max_history_chars,
             max_context_chars: config.agent.max_context_chars,
-            max_repair_attempts: config.agent.max_repair_attempts,
+            allow_verifier_correction: config.agent.max_repair_attempts > 0,
         },
     }
 }
 
 fn agent_runtime_fingerprint(config: &crate::config::AppConfig) -> String {
     json!({
-        "agent_contract": "llm-react-v3",
+        "agent_contract": "native-tool-react-v20",
+        "persona_prompt": "persona-v4",
+        "guardrail_prompt": "adaptive-grounding-v20",
+        "mode_prompt": "semantic-mode-autonomous-v20",
         "reasoning_model": config.agent.reasoning_model,
         "generation_model": config.rag.generation.model,
         "embedding_model": config.rag.embedding.model,
@@ -1322,6 +1333,8 @@ fn agent_runtime_fingerprint(config: &crate::config::AppConfig) -> String {
         "max_react_steps": config.agent.max_react_steps,
         "max_queries_per_step": config.agent.max_queries_per_step,
         "max_context_chars": config.agent.max_context_chars,
+        "allow_analyst_mode": config.agent.allow_analyst_mode,
+        "verifier_correction": config.agent.max_repair_attempts > 0,
         "require_citation": config.rag.citation.require_citation,
         "verify_claims": config.rag.citation.verify_claims,
         "verify_consensus": config.rag.citation.verify_consensus,

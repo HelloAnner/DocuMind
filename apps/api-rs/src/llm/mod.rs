@@ -1,5 +1,3 @@
-pub mod generator;
+mod agent_adapter;
 pub mod openai;
-
-pub use generator::OpenAiAnswerGenerator;
 pub use openai::{LlmClient, OpenAiClient, OpenAiClientConfig};

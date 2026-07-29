@@ -1,228 +1,67 @@
-# Router 路由机制
+# 模型原生路由
 
-Router 是 Agent Kernel 的调度中枢，负责把用户问题映射到合适的**角色模式**、**检索策略**和**工具链**。它是 Agent “灵魂”落地的关键工程组件：既要快（避免每次都走 LLM），又要准（复杂问题不能选错模式），还要可解释（每次路由决策可审计）。
+DocuMind 不再使用规则 Mode Router、Retrieval Router 和固定 Tool Router 串接每个请求。路由由同一次模型对话通过原生 `content + tool_calls` 完成，Kernel 负责确定性执行和安全约束。
 
-## 1. 为什么需要 Router
-
-Agent 不是单一路径的问答脚本。同一用户会话中，问题可能是：
-
-- 明确的事实查询 → 直接回答
-- 指代不明的追问 → 澄清
-- 跨文档比较 → 多路检索 + 对比模板
-- 风险判断 → 分析模式 + 证据边界
-
-如果没有显式 Router，这些决策会散落在 prompt 和 handler 中，导致不可预测、难以调试、难以评估。
-
-## 2. Router 三层架构
+## 路由协议
 
 ```text
-User Request
-    │
-    ▼
-┌─────────────┐
-│ Mode Router │  决定角色模式：answerer / clarifier / summarizer / comparer / analyst / navigator / reviewer
-└──────┬──────┘
-       │
-       ▼
-┌────────────────┐
-│ Retrieval Router │  决定检索策略：single / multi-query / hyde / clarification-only
-└───────┬────────┘
-        │
-        ▼
-┌──────────────┐
-│ Tool Router  │  决定工具链：rewrite → retrieve → rerank → generate → verify
-└──────────────┘
+model response
+  ├── content only
+  │     ├── no evidence: direct response
+  │     └── evidence exists: grounded finalization
+  └── tool_calls
+        ├── knowledge_search
+        └── ask_clarification
 ```
 
-## 3. Mode Router（角色路由）
+这避免“你好”也依次经过分类、改写、检索、生成和多轮验证，同时保留复杂问题多步检索的能力。
 
-### 3.1 输入
+## 语义决策表
 
-```json
-{
-  "original_query": "帮我对比一下 A 合同和 B 合同的付款节点",
-  "history": [...],
-  "effective_kb_ids": ["kb_001"],
-  "resolved_refs": [...]
-}
-```
-
-### 3.2 路由表
-
-| 模式 | 规则匹配（优先级高） | LLM 判断（规则不确定时） |
+| 用户意图 | 模型行为 | Runtime 结果 |
 |---|---|---|
-| `clarifier` | 指代词存在且 unresolved；多个候选对象；用户说“这个”“那个”但无明确引用 | 规则命中即可，不走 LLM |
-| `summarizer` | 包含“总结”“概要”“讲了什么”“主要内容” | 确认意图后切换 |
-| `comparer` | 包含“对比”“比较”“区别”“差异”“A 和 B” | 确认比较对象后切换 |
-| `analyst` | 包含“风险”“是否合理”“是否合规”“能不能签”“建议” | 确认是文档内分析而非通用建议 |
-| `navigator` | 包含“在哪一页”“哪里提到”“第几页” | 规则命中即可 |
-| `reviewer` | 包含“检查”“遗漏”“完整吗”“有没有问题” | 确认检查范围 |
-| `answerer` | 默认兜底 | 明确事实查询 |
+| 问候、闲聊、确认 | 直接 content | 一次调用完成 |
+| 通用写作/解释 | 直接 content | 不进入企业检索 |
+| 企业文档事实 | `knowledge_search` | hybrid retrieval + rerank |
+| 多对象比较 | 一次多 query 或多轮 search | 证据稳定合并 |
+| 后续依赖前文的文档问题 | 自包含 search query | 重新获取当前证据 |
+| 真正的指代歧义 | `ask_clarification` | 等待用户，不检索 |
+| 首次检索弱 | 换查询再 search 或说明无结果 | 不允许相同调用循环 |
 
-### 3.3 分类器实现
+## response mode
 
-```text
-ModeSelector
-  │
-  ├── Rule-based fast path
-  │     ├── 关键词 / 正则 / 历史状态匹配
-  │     └── 命中则直接返回 mode
-  │
-  └── LLM-based classifier
-        ├── 输入：original_query + 最近 2 轮历史
-        ├── 输出：{ "mode": "comparer", "reason": "..." }
-        └── 仅当规则不确定时调用
-```
+Mode 由显式请求配置或 `knowledge_search.response_mode` 产生。它决定最终表达结构，不改变权限与证据边界。默认是 `answerer`。
 
-### 3.4 输出
+模型可选择：
 
-```json
-{
-  "mode": "comparer",
-  "reason": "user explicitly asked to compare A and B",
-  "confidence": "high",
-  "requires_citation": true
-}
-```
+- `answerer`
+- `summarizer`
+- `comparer`
+- `analyst`
+- `navigator`
+- `reviewer`
 
-## 4. Retrieval Router（检索策略路由）
+`clarifier` 只由终止型澄清工具产生。`allow_analyst_mode=false` 时工具执行会返回明确错误。
 
-### 4.1 决策输入
+## 多步行为
 
-- 当前 `mode`
-- `original_query` 长度与复杂度
-- 是否包含多实体、多条件、比较结构
-- 历史上下文是否完整
-- 配置开关：`hyde_enabled`、`multi_query_enabled`
+- 同一模型轮次可以发出多个独立 tool call；
+- 依赖上一次 observation 的搜索放到下一轮；
+- 每个搜索可包含多个自包含 query；
+- evidence ID 在整个 ReAct 过程中只追加不重排；
+- 最大步数由 `max_react_steps` 控制；
+- 完全相同调用通过指纹去重。
 
-### 4.2 策略表
+## 可审计性
 
-| 模式 | 默认检索策略 | 说明 |
-|---|---|---|
-| `answerer` | single query + HyDE | 直接回答，优先准排 |
-| `clarifier` | no retrieval | 只生成澄清问题 |
-| `summarizer` | single query + 文档范围扩展 | 检索文档关键章节 |
-| `comparer` | multi-query（每个对象一个子查询） | 分别检索 A/B |
-| `analyst` | single query + 可选 multi-query | 检索相关风险/条款 |
-| `navigator` | single query + BM25 增强 | 精确定位位置 |
-| `reviewer` | multi-query（检查清单逐项检索） | 逐项核对 |
+路由不等于黑盒。Agent Trace 记录：
 
-### 4.3 输出
+- 模型和 Prompt 版本；
+- 每步 action 和时间；
+- search queries、rerank query、HyDE；
+- retrieved / accepted chunk IDs；
+- keywords、resolved refs 和 warnings；
+- mode、stop reason、usage；
+- tool started/completed/failed Atom events。
 
-```json
-{
-  "strategy": "multi_query",
-  "sub_queries": [
-    { "query": "A合同付款节点", "target": "A" },
-    { "query": "B合同付款节点", "target": "B" }
-  ],
-  "hyde_enabled": false,
-  "reason": "comparer mode requires separate retrieval for each object"
-}
-```
-
-## 5. Tool Router（工具链路由）
-
-### 5.1 默认工具链
-
-```text
-mode -> rewrite -> plan -> retrieve -> rerank -> generate -> verify
-```
-
-### 5.2 各模式工具链
-
-| 模式 | 工具链 | 特殊说明 |
-|---|---|---|
-| `answerer` | rewrite → retrieve → rerank → generate → verify | 标准链路 |
-| `clarifier` | rewrite → ask_clarification | 不检索、不生成答案 |
-| `summarizer` | rewrite → retrieve → rerank → generate → verify | retrieve 时扩大 Top-K |
-| `comparer` | rewrite → plan(multi-query) → retrieve × N → merge → rerank → generate → verify | 多路结果合并 |
-| `analyst` | rewrite → retrieve → rerank → generate → verify | 生成时加入风险边界 |
-| `navigator` | rewrite → retrieve → rerank → generate → verify | 输出格式侧重位置 |
-| `reviewer` | rewrite → plan(checklist) → retrieve × N → merge → rerank → generate → verify | 输出检查清单 |
-
-### 5.3 动态重试
-
-以下场景允许在 Tool Router 内触发一次重试：
-
-- 第一次检索无结果，可换同义词再试一次。
-- Multi-Query 某子查询无结果，其他子查询仍继续。
-
-默认最多 2 轮检索，避免成本和不可控行为。
-
-## 6. Router 与 Agent Kernel 集成
-
-```text
-AgentRequest
-  │
-  ▼
-load_policy
-  │
-  ▼
-ModeRouter.select_mode(req) ──► AgentMode
-  │
-  ▼
-RetrievalRouter.plan(req, mode) ──► RetrievalPlan
-  │
-  ▼
-ToolRouter.execute(plan) ──► AgentRun
-  │
-  ▼
-verify_claims + persist_trace
-```
-
-## 7. Router 接口设计
-
-```rust
-pub trait ModeRouter: Send + Sync {
-    async fn select_mode(&self, input: ModeRouterInput) -> Result<ModeDecision>;
-}
-
-pub trait RetrievalRouter: Send + Sync {
-    async fn plan(&self, mode: AgentMode, input: RetrievalRouterInput) -> Result<RetrievalPlan>;
-}
-
-pub trait ToolRouter: Send + Sync {
-    async fn execute(&self, plan: RetrievalPlan, ctx: AgentContext) -> Result<AgentRun>;
-}
-```
-
-## 8. 路由决策记录
-
-每条 assistant message 保存完整路由决策，便于复盘：
-
-```json
-{
-  "message_id": "msg_001",
-  "router_decisions": {
-    "mode": { "selected": "comparer", "reason": "...", "classifier": "rule" },
-    "retrieval": { "strategy": "multi_query", "sub_queries": 2 },
-    "tool_chain": ["rewrite", "plan", "retrieve", "rerank", "generate", "verify"]
-  }
-}
-```
-
-## 9. Fallback 与重路由
-
-| 场景 | 处理 |
-|---|---|
-| Mode 分类器超时 | 回退到 `answerer` |
-| Retrieval plan 生成失败 | 回退到 single query |
-| 某模式检索无结果 | 可重路由到 `clarifier` 或返回无结果 |
-| LLM 输出无法解析 | 记录错误，回退到默认链路 |
-
-## 10. 评估指标
-
-| 指标 | 说明 |
-|---|---|
-| `router.mode_accuracy` | 模式选择准确率（对比人工标注） |
-| `router.rule_hit_rate` | 规则快速路径命中率 |
-| `router.llm_classifier_calls` | LLM 分类器调用次数 |
-| `router.retrieval_plan_success_rate` | 检索规划成功率 |
-| `router.reroute_count` | 重路由次数 |
-
-## 11. 相关文档
-
-- [角色灵活度](./role-flexibility.md)
-- [技术框架](./technical-framework.md)
-- [Agent 智能体](./agent.md)
+因此可以直接从 CLI 判断某次 `你好` 是否错误调用了检索，也可以复盘复杂问题每一轮为什么拿到这些证据。
