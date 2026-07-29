@@ -2,7 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { acceptInvitation, defaultRouteForRole } from "@/lib/auth";
+import { acceptInvitation, AUTHENTICATED_HOME_PATH } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 
 export function InviteAcceptView() {
@@ -18,8 +18,8 @@ export function InviteAcceptView() {
     setSubmitting(true);
     setError(null);
     try {
-      const me = await acceptInvitation(token, name, password);
-      router.replace(defaultRouteForRole(me.roles[0] ?? "user"));
+      await acceptInvitation(token, name, password);
+      router.replace(AUTHENTICATED_HOME_PATH);
     } catch (err) {
       setError(err instanceof Error ? err.message : "接受邀请失败");
     } finally {

@@ -15,6 +15,8 @@ use crate::error::AppError;
 use crate::models::identity::{MeResponse, TenantProfile, UserProfile};
 use crate::state::AppState;
 
+const AUTHENTICATED_HOME_PATH: &str = "/chat";
+
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
     pub username: Option<String>,
@@ -500,7 +502,7 @@ fn portal_success_html(token: &str, actor: &crate::models::CurrentActor) -> Resp
         "roles": actor.roles,
     });
     let auth_json = serde_json::to_string(&auth).unwrap_or_else(|_| "{}".to_string());
-    let target = default_route_for_roles(&actor.roles);
+    let target = AUTHENTICATED_HOME_PATH;
     let target_json = serde_json::to_string(target).unwrap_or_else(|_| "\"/chat\"".to_string());
     let html = format!(
         r#"<!doctype html>
@@ -564,23 +566,6 @@ fn portal_error_code(err: &AppError) -> &'static str {
         AppError::BadRequest { .. } => "bad_request",
         AppError::Unauthorized { .. } => "unauthorized",
         AppError::Internal(_) => "internal_error",
-    }
-}
-
-fn default_route_for_roles(roles: &[String]) -> &'static str {
-    if roles.iter().any(|r| r == "super_admin") {
-        "/system"
-    } else if roles.iter().any(|r| {
-        matches!(
-            r.as_str(),
-            "tenant_owner" | "tenant_admin" | "enterprise_admin" | "team_admin" | "data_admin"
-        )
-    }) {
-        "/admin"
-    } else if roles.iter().any(|r| r == "viewer") {
-        "/knowledge"
-    } else {
-        "/chat"
     }
 }
 

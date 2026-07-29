@@ -58,6 +58,8 @@ export interface TenantLoginContext {
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const AUTH_KEY = "documind-auth";
 
+export const AUTHENTICATED_HOME_PATH = "/chat";
+
 export interface StoredAuth {
   token: string;
   userId: string;
@@ -239,24 +241,4 @@ export function isTenantAdminRole(roles: UserRole[] | string[]): boolean {
 
 export function canAccessAdmin(roles: UserRole[] | string[]): boolean {
   return !isSuperAdminRole(roles) && isTenantAdminRole(roles);
-}
-
-export function defaultRouteForRole(role: UserRole): string {
-  switch (role) {
-    case "super_admin":
-      return "/system";
-    case "enterprise_admin":
-    case "team_admin":
-    case "data_admin":
-    case "tenant_owner":
-    case "tenant_admin":
-      return "/admin";
-    case "viewer":
-      return "/knowledge";
-    case "user":
-    case "analyst":
-    case "end_user":
-    default:
-      return "/chat";
-  }
 }

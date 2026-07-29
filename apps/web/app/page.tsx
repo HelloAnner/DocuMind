@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import { defaultRouteForRole } from "@/lib/auth";
+import { AUTHENTICATED_HOME_PATH } from "@/lib/auth";
 
 export default function HomePage() {
   const router = useRouter();
@@ -12,7 +12,7 @@ export default function HomePage() {
   useEffect(() => {
     if (loading) return;
     if (me) {
-      router.replace(defaultRouteForRole(me.roles[0]));
+      router.replace(AUTHENTICATED_HOME_PATH);
     } else {
       router.replace("/login");
     }
@@ -20,7 +20,7 @@ export default function HomePage() {
 
   return (
     <main style={{ height: "100vh", display: "grid", placeItems: "center", color: "var(--text-muted)" }}>
-      <span>正在打开 DocuMind 登录页…</span>
+      <span>正在打开 DocuMind…</span>
     </main>
   );
 }

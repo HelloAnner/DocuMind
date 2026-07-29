@@ -2,7 +2,15 @@
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { defaultRouteForRole, getMe, getStoredAuth, loginWithPassword, logoutRequest, type MeResponse, type UserRole } from "@/lib/auth";
+import {
+  AUTHENTICATED_HOME_PATH,
+  getMe,
+  getStoredAuth,
+  loginWithPassword,
+  logoutRequest,
+  type MeResponse,
+  type UserRole,
+} from "@/lib/auth";
 
 interface AuthContextValue {
   me: MeResponse | null;
@@ -44,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (username: string, password: string, tenantSlug?: string) => {
       const data = await loginWithPassword(username, password, tenantSlug);
       setMe(data);
-      router.replace(defaultRouteForRole(data.roles[0] ?? "user"));
+      router.replace(AUTHENTICATED_HOME_PATH);
     },
     [router]
   );
