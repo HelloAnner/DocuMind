@@ -2680,10 +2680,6 @@ body > .hiddenCanvasElement {
     margin-left: -6px;
   }
 
-  .dm-chat-header-theme {
-    display: inline-flex;
-  }
-
   .dm-chat-session-header {
     height: 56px;
     padding: 0 12px;

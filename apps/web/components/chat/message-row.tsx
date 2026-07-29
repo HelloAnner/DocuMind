@@ -143,7 +143,6 @@ function AgentMeta({
 }) {
   const meta = [
     hasCitations ? `基于 ${message.citations.length} 个来源` : "",
-    message.confidence ? `置信度 ${confidenceLabel(message.confidence)}` : "",
     deletedAll ? "来源已删除" : "",
   ].filter(Boolean);
 
@@ -159,7 +158,7 @@ function AgentMeta({
           <strong>DocuMind</strong>
           {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
         </div>
-        <p>{meta.length > 0 ? meta.join(" · ") : "企业知识问答"}</p>
+        {meta.length > 0 ? <p>{meta.join(" · ")}</p> : null}
       </div>
     </div>
   );
@@ -313,10 +312,4 @@ export function MessageRow({
       </div>
     </article>
   );
-}
-
-function confidenceLabel(c: "high" | "medium" | "low") {
-  if (c === "high") return "高";
-  if (c === "medium") return "中";
-  return "低";
 }

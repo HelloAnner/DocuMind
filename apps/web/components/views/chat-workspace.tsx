@@ -24,7 +24,6 @@ import { useConversation } from "@/components/providers/conversation-provider";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useAuth } from "@/components/providers/auth-provider";
 
 const suggestions = [
@@ -247,7 +246,6 @@ export function ChatWorkspace() {
               </IconButton>
             </div>
             <div className="dm-chat-session-actions">
-              <ThemeToggle className="dm-chat-header-theme" />
               <IconButton
                 aria-label={rightOpen ? "收起文件预览" : "展开文件预览"}
                 className={`dm-file-preview-toggle ${rightOpen ? "active" : ""}`}
