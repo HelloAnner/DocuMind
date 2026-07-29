@@ -5,6 +5,8 @@ import {
   Children,
   cloneElement,
   isValidElement,
+  memo,
+  useDeferredValue,
   useState,
   type ReactElement,
   type ReactNode,
@@ -12,19 +14,22 @@ import {
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { copyToClipboard } from "@/lib/clipboard";
-import type { Citation } from "@/lib/types";
 
 interface AnswerContentProps {
   content: string;
-  citations: Citation[];
+  isStreaming?: boolean;
   onCitationClick?: (index: number) => void;
 }
 
 interface MarkdownContentProps {
   content: string;
   className: string;
+  isStreaming?: boolean;
+  realtime?: boolean;
   onCitationClick?: (index: number) => void;
 }
+
+const remarkPlugins = [remarkGfm];
 
 function CitationBadge({ index, onClick }: { index: number; onClick?: () => void }) {
   return (
@@ -89,15 +94,20 @@ function CodeBlock({ code, lang }: { code: string; lang?: string }) {
   );
 }
 
-export function MarkdownContent({
+export const MarkdownContent = memo(function MarkdownContent({
   content,
   className,
+  isStreaming = false,
+  realtime = false,
   onCitationClick,
 }: MarkdownContentProps) {
+  const deferredContent = useDeferredValue(content);
+  const renderContent = realtime ? content : deferredContent;
+
   return (
-    <div className={className}>
+    <div className={`${className} ${isStreaming ? "is-streaming" : ""}`}>
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={remarkPlugins}
         components={{
           h1: ({ children }) => <h1>{renderCitations(children, onCitationClick)}</h1>,
           h2: ({ children }) => <h2>{renderCitations(children, onCitationClick)}</h2>,
@@ -129,18 +139,30 @@ export function MarkdownContent({
           ),
         }}
       >
-        {content}
+        {renderContent}
       </ReactMarkdown>
+      {isStreaming ? (
+        <div className="dm-answer-streaming-status" aria-live="polite">
+          <span className="dm-streaming-pulse-dot" aria-hidden="true" />
+          <span>生成中</span>
+        </div>
+      ) : null}
     </div>
   );
-}
+});
 
-export function AnswerContent({ content, onCitationClick }: AnswerContentProps) {
+export const AnswerContent = memo(function AnswerContent({
+  content,
+  isStreaming = false,
+  onCitationClick,
+}: AnswerContentProps) {
   return (
     <MarkdownContent
       content={content}
       className="dm-answer-content dm-markdown-content"
+      isStreaming={isStreaming}
+      realtime={isStreaming}
       onCitationClick={onCitationClick}
     />
   );
-}
+});

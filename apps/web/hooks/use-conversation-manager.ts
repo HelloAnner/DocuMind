@@ -42,6 +42,8 @@ export type FeedbackState = {
   correction?: string;
 };
 
+type MessageListUpdate = (messages: Message[]) => Message[];
+
 function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
   if (!data || typeof data !== "object") return false;
   const event = data as Partial<RuntimeEventEnvelope>;
@@ -255,9 +257,37 @@ export function useConversationManager() {
       ]);
 
       let assistantId = assistantTempId;
+      let pendingMessageUpdates: MessageListUpdate[] = [];
+      let pendingMessageFrame: number | null = null;
+      const applyPendingMessageUpdates = () => {
+        const updates = pendingMessageUpdates;
+        pendingMessageUpdates = [];
+        if (updates.length === 0) return;
+        setMessages((current) => updates.reduce((messages, update) => update(messages), current));
+      };
+      const flushPendingMessageUpdates = () => {
+        if (pendingMessageFrame !== null && typeof window !== "undefined") {
+          window.cancelAnimationFrame(pendingMessageFrame);
+        }
+        pendingMessageFrame = null;
+        applyPendingMessageUpdates();
+      };
+      const queueMessageUpdate = (update: MessageListUpdate) => {
+        pendingMessageUpdates.push(update);
+        if (pendingMessageFrame !== null) return;
+        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+          applyPendingMessageUpdates();
+          return;
+        }
+        // 与 Moss 一致：把同一动画帧内的 token、thinking 和工具事件合并成一次 React 提交。
+        pendingMessageFrame = window.requestAnimationFrame(() => {
+          pendingMessageFrame = null;
+          applyPendingMessageUpdates();
+        });
+      };
       const updateAssistantInStream = (patch: Partial<Message>) => {
         const messageId = assistantId;
-        setMessages((prev) =>
+        queueMessageUpdate((prev) =>
           prev.map((m) =>
             m.message_id === messageId || m.message_id === assistantTempId ? { ...m, ...patch } : m
           )
@@ -268,7 +298,7 @@ export function useConversationManager() {
         recipe: (tool?: RuntimeToolCall) => RuntimeToolCall
       ) => {
         const messageId = assistantId;
-        setMessages((prev) =>
+        queueMessageUpdate((prev) =>
           prev.map((m) => {
             if (m.message_id !== messageId && m.message_id !== assistantTempId) return m;
             const tools = m.tool_calls ?? [];
@@ -307,7 +337,7 @@ export function useConversationManager() {
               const delta = runtime.payload.delta;
               if (typeof delta === "string") {
                 const messageId = assistantId;
-                setMessages((prev) =>
+                queueMessageUpdate((prev) =>
                   prev.map((m) =>
                     m.message_id === messageId || m.message_id === assistantTempId
                       ? { ...m, thinking: `${m.thinking ?? ""}${delta}` }
@@ -429,7 +459,7 @@ export function useConversationManager() {
               const delta = runtime.payload.delta;
               if (typeof delta !== "string") continue;
               const messageId = runtime.response_message_id;
-              setMessages((prev) =>
+              queueMessageUpdate((prev) =>
                 prev.map((m) =>
                   m.message_id === messageId || m.message_id === assistantTempId
                     ? { ...m, content: m.content + delta }
@@ -451,7 +481,7 @@ export function useConversationManager() {
                 .filter((citation): citation is Citation => !!citation);
               if (citations.length === 0) continue;
               const messageId = runtime.response_message_id;
-              setMessages((prev) =>
+              queueMessageUpdate((prev) =>
                 prev.map((m) =>
                   m.message_id === messageId || m.message_id === assistantTempId
                     ? { ...m, citations: [...m.citations, ...citations] }
@@ -462,6 +492,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "response.completed") {
+              flushPendingMessageUpdates();
               const confidence = confidenceFromRuntime(runtime.payload.confidence);
               updateMessage(runtime.response_message_id, {
                 status: "completed",
@@ -521,6 +552,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "execution.completed") {
+              flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, {
                 status: "completed",
                 duration_ms:
@@ -533,12 +565,14 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "execution.cancelled") {
+              flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, { status: "cancelled" as MessageStatus });
               setStages((s) => s.map((stage) => ({ ...stage, running: false })));
               continue;
             }
 
             if (runtime.event_type === "execution.failed") {
+              flushPendingMessageUpdates();
               const error = runtime.payload.error as { message?: string } | undefined;
               updateMessage(runtime.response_message_id, {
                 status: "failed",
@@ -615,7 +649,7 @@ export function useConversationManager() {
             );
           } else if (sse.event === "answer.delta") {
             const data = sse.data as { message_id: string; text: string };
-            setMessages((prev) =>
+            queueMessageUpdate((prev) =>
               prev.map((m) =>
                 m.message_id === data.message_id || m.message_id === assistantTempId
                   ? { ...m, content: m.content + data.text }
@@ -624,7 +658,7 @@ export function useConversationManager() {
             );
           } else if (sse.event === "citation.delta") {
             const data = sse.data as { message_id: string; citation: Citation };
-            setMessages((prev) =>
+            queueMessageUpdate((prev) =>
               prev.map((m) =>
                 m.message_id === data.message_id || m.message_id === assistantTempId
                   ? { ...m, citations: [...m.citations, data.citation] }
@@ -632,6 +666,7 @@ export function useConversationManager() {
               )
             );
           } else if (sse.event === "answer.completed") {
+            flushPendingMessageUpdates();
             const data = sse.data as {
               message_id: string;
               confidence: "high" | "medium" | "low";
@@ -646,6 +681,7 @@ export function useConversationManager() {
               )
             );
           } else if (sse.event === "answer.failed") {
+            flushPendingMessageUpdates();
             const data = sse.data as { message_id: string; code: string; message: string };
             updateMessage(data.message_id, {
               status: "failed",
@@ -655,6 +691,7 @@ export function useConversationManager() {
           }
         }
       } catch (e) {
+        flushPendingMessageUpdates();
         if ((e as Error).name === "AbortError") {
           updateMessage(assistantId, { status: "cancelled" as MessageStatus });
         } else {
@@ -665,6 +702,7 @@ export function useConversationManager() {
           });
         }
       } finally {
+        flushPendingMessageUpdates();
         abortControllersRef.current.delete(assistantId);
         setStreamingId(null);
         pendingRef.current = null;
