@@ -141,19 +141,6 @@ interface MessageRowProps {
   stages?: PipelineStage[];
 }
 
-function StreamingIndicator() {
-  return (
-    <div className="dm-streaming-indicator action-feed-running">
-      <span className="action-feed-running-text">正在思考...</span>
-      <span className="dm-streaming-dots" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
-    </div>
-  );
-}
-
 function AgentMeta({
   message,
   hasCitations,
@@ -217,12 +204,14 @@ function ReasoningTrace({
   if (!isStreaming && !hasMeaningfulTrace) return null;
   if (!hasAtomTrace && (!stages || stages.length === 0)) return null;
 
-  const statusText = isStreaming
-    ? runningText(thinking, toolCalls)
-    : durationMs
-      ? `全部工作已完成，耗时 ${formatDuration(durationMs)}`
-      : "全部工作已完成";
-  const canExpand = hasAtomTrace || Boolean(isStreaming && stages?.length);
+  // 生成中只保留回答卡片与停止操作，避免重复展示“思考/准备”状态。
+  // 完成后仍可展开真实的思考与工具轨迹，不丢失诊断能力。
+  if (isStreaming) return null;
+
+  const statusText = durationMs
+    ? `全部工作已完成，耗时 ${formatDuration(durationMs)}`
+    : "全部工作已完成";
+  const canExpand = hasAtomTrace;
 
   return (
     <section className={`dm-reasoning-trace ${expanded ? "expanded" : ""}`}>
@@ -239,21 +228,10 @@ function ReasoningTrace({
       </button>
       {expanded ? (
         <div className="dm-reasoning-detail">
-          {isStreaming && stages?.length ? (
-            <div className="dm-pipeline-stages">
-              {stages.map((stage) => (
-                <span className={stage.done ? "done" : stage.running ? "running" : ""} key={stage.label}>
-                  {stage.done ? <Check size={12} /> : stage.running ? <Loader2 className="spin" size={12} /> : <Circle size={10} />}
-                  {stage.label}
-                </span>
-              ))}
-            </div>
-          ) : null}
           {hasAtomTrace ? (
             <ActionFeed
               thinking={thinking ?? ""}
               toolCalls={meaningfulToolCalls ?? []}
-              isRunning={isStreaming}
             />
           ) : null}
         </div>
@@ -265,11 +243,9 @@ function ReasoningTrace({
 function ActionFeed({
   thinking,
   toolCalls,
-  isRunning,
 }: {
   thinking: string;
   toolCalls: RuntimeToolCall[];
-  isRunning: boolean;
 }) {
   const thinkingLines = thinking
     .split(/\n+/)
@@ -278,14 +254,6 @@ function ActionFeed({
 
   return (
     <div className="action-feed-panel">
-      {isRunning && (
-        <div className="action-feed-running">
-          <span className="action-feed-running-text">
-            {toolCalls.some((tool) => tool.status === "running") ? "正在处理中..." : "正在思考..."}
-          </span>
-        </div>
-      )}
-
       {thinkingLines.map((line, index) => (
         <TimelineRow key={`${line}-${index}`} iconKind="tool" text={line} muted />
       ))}
@@ -512,7 +480,9 @@ export function MessageRow({
           {cancelled ? "生成已取消" : message.content || "生成失败，请重试"}
         </div>
       ) : isStreaming && !hasContent ? (
-        <StreamingIndicator />
+        <span className="dm-screen-reader-only" role="status" aria-live="polite">
+          DocuMind 正在生成回答
+        </span>
       ) : hasContent ? (
         <AnswerContent
           content={message.content}
@@ -578,12 +548,6 @@ function confidenceLabel(c: "high" | "medium" | "low") {
   if (c === "high") return "高";
   if (c === "medium") return "中";
   return "低";
-}
-
-function runningText(thinking?: string, toolCalls?: RuntimeToolCall[]) {
-  if (toolCalls?.some((tool) => tool.status === "running")) return "正在处理中...";
-  if (thinking?.trim()) return "正在思考...";
-  return "正在准备...";
 }
 
 function timelineIconKind(

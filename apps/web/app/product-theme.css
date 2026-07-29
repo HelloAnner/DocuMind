@@ -1731,8 +1731,7 @@ select:focus-visible {
 .dm-follow-up-questions,
 .dm-reasoning-trace,
 .dm-answer-actions,
-.dm-answer-error,
-.dm-streaming-indicator {
+.dm-answer-error {
   margin-left: 42px;
   max-width: 85%;
 }
@@ -1765,7 +1764,6 @@ select:focus-visible {
 }
 
 .dm-reasoning-toggle,
-.action-feed-running,
 .action-feed-duration {
   color: var(--text-muted);
 }
@@ -1821,10 +1819,6 @@ select:focus-visible {
 
 .dm-pipeline-stages span.running {
   color: var(--text-secondary);
-}
-
-.action-feed-running-text {
-  background-image: linear-gradient(90deg, var(--text-muted), var(--text-primary), var(--text-muted));
 }
 
 .action-feed-row-text,
@@ -2771,8 +2765,7 @@ body > .hiddenCanvasElement {
   .dm-follow-up-questions,
   .dm-reasoning-trace,
   .dm-answer-actions,
-  .dm-answer-error,
-  .dm-streaming-indicator {
+  .dm-answer-error {
     max-width: calc(100% - 44px);
   }
 
@@ -2901,7 +2894,6 @@ body > .hiddenCanvasElement {
     transition-duration: 0.01ms !important;
   }
 
-  .action-feed-running-text,
   .dm-anchor-box,
   .dm-login-story-copy {
     animation: none !important;
