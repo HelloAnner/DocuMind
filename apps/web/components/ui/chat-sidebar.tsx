@@ -93,6 +93,7 @@ export function ChatSidebar() {
   const [menuId, setMenuId] = useState<string | null>(null);
   const { aliases, setAlias } = useAliases();
   const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const openMenuRef = useRef<HTMLDivElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
@@ -112,12 +113,14 @@ export function ChatSidebar() {
   const dateGroups = useMemo(() => groupByDate(nonFavorites), [nonFavorites]);
 
   const handleCreate = () => {
+    setMenuId(null);
     setCurrentId(null);
     closeMobile();
     router.push("/chat");
   };
 
   const handleSelect = (id: string) => {
+    setMenuId(null);
     setCurrentId(id);
     closeMobile();
     setUnreadIds((prev) => {
@@ -142,6 +145,25 @@ export function ChatSidebar() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [conversations, currentId]);
+
+  useEffect(() => {
+    if (!menuId) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.target instanceof Node && openMenuRef.current?.contains(event.target)) return;
+      setMenuId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuId(null);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuId]);
 
   const handleRename = (conv: Conversation) => {
     setRenamingId(conv.conversation_id);
@@ -196,7 +218,7 @@ export function ChatSidebar() {
     return (
       <div
         key={conv.conversation_id}
-        className={`dm-history-item ${active ? "active" : ""}`}
+        className={`dm-history-item ${active ? "active" : ""} ${menuOpen ? "menu-open" : ""}`}
         onMouseEnter={() => setHoveredId(conv.conversation_id)}
         onMouseLeave={() => setHoveredId((id) => (id === conv.conversation_id ? null : id))}
       >
@@ -228,10 +250,12 @@ export function ChatSidebar() {
           {unread && <span className="dm-history-item-dot" aria-hidden="true" />}
         </button>
 
-        <div className="dm-history-item-actions">
+        <div className="dm-history-item-actions" ref={menuOpen ? openMenuRef : undefined}>
           {(hovered || menuOpen || renaming) && !renaming && (
             <IconButton
               aria-label="会话操作"
+              aria-expanded={menuOpen}
+              aria-haspopup="menu"
               className="dm-history-item-action dm-history-menu-trigger"
               onClick={(e) => {
                 e.stopPropagation();
@@ -242,8 +266,9 @@ export function ChatSidebar() {
             </IconButton>
           )}
           {menuOpen && (
-            <div className="dm-history-menu" onClick={(e) => e.stopPropagation()}>
+            <div className="dm-history-menu" onClick={(e) => e.stopPropagation()} role="menu">
               <button
+                role="menuitem"
                 type="button"
                 onClick={() => {
                   setMenuId(null);
@@ -254,6 +279,7 @@ export function ChatSidebar() {
                 <span>重命名</span>
               </button>
               <button
+                role="menuitem"
                 type="button"
                 onClick={() => {
                   setMenuId(null);
@@ -266,6 +292,7 @@ export function ChatSidebar() {
               <button
                 type="button"
                 className="danger"
+                role="menuitem"
                 onClick={() => {
                   setMenuId(null);
                   handleDelete(conv);

@@ -5396,7 +5396,7 @@ a {
 
 .dm-history-item:hover .dm-history-item-actions,
 .dm-history-item.active .dm-history-item-actions,
-.dm-history-item:has(.dm-history-menu[data-open="true"]) .dm-history-item-actions {
+.dm-history-item.menu-open .dm-history-item-actions {
   opacity: 1;
 }
 
