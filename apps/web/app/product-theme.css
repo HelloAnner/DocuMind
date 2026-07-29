@@ -3091,16 +3091,18 @@ body > .hiddenCanvasElement {
 
 .dm-answer-streaming-status {
   align-items: center;
-  bottom: 10px;
+  bottom: 12px;
   color: var(--text-muted);
   display: inline-flex;
   font-size: 11px;
   gap: 5px;
   line-height: 16px;
+  margin: 8px 0 0 auto;
   opacity: 0.72;
   pointer-events: none;
-  position: absolute;
-  right: 14px;
+  position: sticky;
+  width: max-content;
+  z-index: 2;
 }
 
 .dm-streaming-pulse-dot {
