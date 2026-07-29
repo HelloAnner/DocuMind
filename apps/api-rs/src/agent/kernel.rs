@@ -282,6 +282,19 @@ impl AgentKernel {
                 let content = response
                     .content
                     .ok_or_else(|| anyhow!("agent response content disappeared"))?;
+                if evidence.is_empty() && !cited_evidence_indexes(&content).is_empty() {
+                    messages.push(AgentMessage::assistant(content));
+                    messages.push(AgentMessage::user(
+                        "Runtime grounding guard: citation markers are invalid because this turn has no document evidence. Call knowledge_search to obtain current evidence, or answer without document claims and citations.",
+                    ));
+                    trace.react_steps.push(failed_tool_step(
+                        step,
+                        "respond",
+                        "citation markers rejected because this turn has no document evidence",
+                        now(),
+                    ));
+                    continue;
+                }
                 emit(
                     &progress,
                     AgentProgress::ReactStepStarted {
@@ -296,13 +309,6 @@ impl AgentKernel {
                 );
                 trace.react_steps.push(response_step(step, &content));
                 if evidence.is_empty() {
-                    let content = if document_search_attempted
-                        && !cited_evidence_indexes(&content).is_empty()
-                    {
-                        "未检索到可以支持该结论的文档证据。".to_string()
-                    } else {
-                        content
-                    };
                     let confidence = if document_search_attempted {
                         no_answer_reason = Some(NoAnswerReason::NoRelevantChunks);
                         Confidence::Low

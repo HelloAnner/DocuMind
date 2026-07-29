@@ -268,6 +268,35 @@ async fn current_greeting_remains_last_user_message_after_document_history() -> 
     Ok(())
 }
 
+#[tokio::test]
+async fn history_citation_cannot_bypass_current_turn_retrieval() -> Result<()> {
+    let model = queued_model(vec![
+        text_response("历史里说城市是 HANGZHOU [1]。"),
+        tool_response(search_call("search-current", "PVSMOKE-747FE38D 城市")),
+        text_response("当前证据显示城市是 HANGZHOU [1]。"),
+    ]);
+    let retriever = recording_retriever(true);
+    let mut req = request("刚才那个 OCR 文档的城市呢？");
+    req.history.push(crate::models::agent::ConversationTurn {
+        user_message: "OCR 文档 PVSMOKE-747FE38D 的验证码是什么？".to_string(),
+        assistant_answer: "验证码是 73941。[1]".to_string(),
+        citations: vec!["ocr-smoke-PVSMOKE-747FE38D".to_string()],
+    });
+    let mut run = kernel(model.clone(), retriever.clone()).run(req).await?;
+    let (answer, citations, confidence) = collect_answer(&mut run).await;
+
+    assert_eq!(retriever.calls.lock().await.len(), 1);
+    assert!(answer.contains("当前证据"));
+    assert_eq!(citations.len(), 1);
+    assert_eq!(confidence, Some(Confidence::High));
+    assert_eq!(model.requests.lock().await.len(), 3);
+    assert!(run.trace.react_steps[0]
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("no document evidence")));
+    Ok(())
+}
+
 fn kernel(model: Arc<QueuedModel>, retriever: Arc<RecordingRetriever>) -> AgentKernel {
     let reranker: Arc<dyn Reranker> = Arc::new(PassingReranker);
     let tools = AgentToolRegistry::new(vec![
