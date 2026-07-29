@@ -419,6 +419,7 @@ async fn collect_answer(
     while let Some(item) = run.answer_stream.recv().await {
         match item {
             AnswerStreamItem::Delta { text } => answer.push_str(&text),
+            AnswerStreamItem::Replace { text } => answer = text,
             AnswerStreamItem::Citation { citation } => citations.push(citation),
             AnswerStreamItem::Completed { confidence: c, .. } => confidence = Some(c),
             AnswerStreamItem::Failed { .. } => {}

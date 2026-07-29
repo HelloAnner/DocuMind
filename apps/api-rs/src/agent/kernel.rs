@@ -11,7 +11,9 @@ use super::kernel_support::{
     response_step, single_text_stream, successful_tool_step, tool_arguments_value,
     tool_step_summary, ToolState,
 };
-use super::model::{AgentMessage, AgentModel, AgentModelRequest};
+use super::model::{
+    AgentMessage, AgentModel, AgentModelRequest, AgentModelResponse, AgentModelStreamEvent,
+};
 use super::prompt::{Prompt, PromptRegistry};
 use super::tools::{AgentToolRegistry, ToolExecutionContext};
 use crate::models::agent::{AgentMode, AgentRequest, AgentRun, ConversationTurn};
@@ -136,13 +138,15 @@ impl AgentKernel {
 
         for step in 1..=request.options.runtime.max_react_steps.max(1) {
             let response = self
-                .model
-                .complete(AgentModelRequest {
-                    messages: messages.clone(),
-                    tools: definitions.clone(),
-                    temperature: request.options.generation.temperature,
-                    max_tokens: request.options.generation.max_output_tokens,
-                })
+                .complete_model(
+                    AgentModelRequest {
+                        messages: messages.clone(),
+                        tools: definitions.clone(),
+                        temperature: request.options.generation.temperature,
+                        max_tokens: request.options.generation.max_output_tokens,
+                    },
+                    &progress,
+                )
                 .await?;
             if let Some(turn_usage) = response.usage.as_ref() {
                 usage.input_tokens = usage.input_tokens.saturating_add(turn_usage.input_tokens);
@@ -390,6 +394,51 @@ impl AgentKernel {
             answer_stream,
             no_answer_reason,
         ))
+    }
+
+    async fn complete_model(
+        &self,
+        request: AgentModelRequest,
+        progress: &ProgressSender,
+    ) -> Result<AgentModelResponse> {
+        let Some(progress_sender) = progress.as_ref() else {
+            return self.model.complete(request).await;
+        };
+        let (stream_sender, mut stream_receiver) = tokio::sync::mpsc::unbounded_channel();
+        let relay_sender = progress_sender.clone();
+        let relay = tokio::spawn(async move {
+            while let Some(event) = stream_receiver.recv().await {
+                let progress = match event {
+                    AgentModelStreamEvent::ResponseDelta(delta) => {
+                        AgentProgress::ResponseDelta { delta }
+                    }
+                    AgentModelStreamEvent::ThinkingDelta(delta) => {
+                        AgentProgress::ThinkingDelta { delta }
+                    }
+                };
+                if relay_sender.send(progress).is_err() {
+                    break;
+                }
+            }
+        });
+        let response = self
+            .model
+            .complete_streamed(request, Some(stream_sender))
+            .await;
+        relay
+            .await
+            .map_err(|error| anyhow!("model stream relay failed: {error}"))?;
+
+        let (acknowledgement, flushed) = tokio::sync::oneshot::channel();
+        if progress_sender
+            .send(AgentProgress::Flush { acknowledgement })
+            .is_ok()
+        {
+            flushed
+                .await
+                .map_err(|_| anyhow!("model stream flush acknowledgement was dropped"))?;
+        }
+        response
     }
 }
 

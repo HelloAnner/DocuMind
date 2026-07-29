@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::models::Usage;
 
@@ -93,6 +94,12 @@ pub struct AgentModelResponse {
     pub finish_reason: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentModelStreamEvent {
+    ResponseDelta(String),
+    ThinkingDelta(String),
+}
+
 impl AgentModelResponse {
     pub fn has_content(&self) -> bool {
         self.content
@@ -104,6 +111,20 @@ impl AgentModelResponse {
 #[async_trait::async_trait]
 pub trait AgentModel: Send + Sync {
     async fn complete(&self, request: AgentModelRequest) -> Result<AgentModelResponse>;
+
+    async fn complete_streamed(
+        &self,
+        request: AgentModelRequest,
+        events: Option<UnboundedSender<AgentModelStreamEvent>>,
+    ) -> Result<AgentModelResponse> {
+        let response = self.complete(request).await?;
+        if let (Some(sender), Some(content)) = (events, response.content.as_ref()) {
+            if !content.is_empty() {
+                let _ = sender.send(AgentModelStreamEvent::ResponseDelta(content.clone()));
+            }
+        }
+        Ok(response)
+    }
 
     fn component_name(&self) -> String;
 }

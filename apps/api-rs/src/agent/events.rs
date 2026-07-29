@@ -1,4 +1,4 @@
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum AgentProgress {
     StatusUpdated {
         status: &'static str,
@@ -33,6 +33,15 @@ pub enum AgentProgress {
     },
     RerankCompleted {
         top_chunk_ids: Vec<uuid::Uuid>,
+    },
+    ResponseDelta {
+        delta: String,
+    },
+    ThinkingDelta {
+        delta: String,
+    },
+    Flush {
+        acknowledgement: tokio::sync::oneshot::Sender<()>,
     },
 }
 

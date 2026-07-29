@@ -179,15 +179,13 @@ pub(super) fn single_text_stream(
     let (sender, receiver) = unbounded_channel();
     let output_tokens = text.chars().count() as u32 / 2;
     tokio::spawn(async move {
-        let _ = sender.send(AnswerStreamItem::Delta { text });
+        let _ = sender.send(AnswerStreamItem::Replace { text });
         let _ = sender.send(AnswerStreamItem::Completed {
             confidence,
-            usage: usage.or_else(|| {
-                Some(Usage {
-                    input_tokens: 0,
-                    output_tokens,
-                })
-            }),
+            usage: usage.or(Some(Usage {
+                input_tokens: 0,
+                output_tokens,
+            })),
         });
     });
     receiver

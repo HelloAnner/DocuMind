@@ -1,12 +1,15 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use tokio::sync::mpsc::UnboundedSender;
 
+use super::agent_stream::{apply_stream_frame, find_stream_separator, AgentStreamState};
 use super::OpenAiClient;
 use crate::agent::model::{
     AgentMessage, AgentMessageRole, AgentModel, AgentModelRequest, AgentModelResponse,
-    AgentToolCall, AgentToolDefinition,
+    AgentModelStreamEvent, AgentToolCall, AgentToolDefinition,
 };
 use crate::models::Usage;
 
@@ -100,7 +103,7 @@ struct ToolChatUsage {
 #[async_trait]
 impl AgentModel for OpenAiClient {
     async fn complete(&self, request: AgentModelRequest) -> Result<AgentModelResponse> {
-        let payload = request_payload(&self.config.model, request)?;
+        let payload = request_payload(&self.config.model, request, false)?;
         let response = self
             .http
             .post(self.chat_url())
@@ -113,12 +116,63 @@ impl AgentModel for OpenAiClient {
         parse_response(response.json().await?)
     }
 
+    async fn complete_streamed(
+        &self,
+        request: AgentModelRequest,
+        events: Option<UnboundedSender<AgentModelStreamEvent>>,
+    ) -> Result<AgentModelResponse> {
+        let payload = request_payload(&self.config.model, request, true)?;
+        let response = self
+            .http
+            .post(self.chat_url())
+            .header("Authorization", self.auth_header())
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .await?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "unreadable provider error".to_string());
+            return Err(anyhow!("agent stream provider returned {status}: {body}"));
+        }
+
+        let mut state = AgentStreamState::default();
+        let mut bytes = response.bytes_stream();
+        let mut buffer = String::new();
+        let mut done = false;
+        while !done {
+            let Some(chunk) = bytes.next().await else {
+                break;
+            };
+            buffer.push_str(&String::from_utf8_lossy(&chunk?));
+            while let Some((position, separator_length)) = find_stream_separator(&buffer) {
+                let frame = buffer[..position].to_string();
+                buffer = buffer[position + separator_length..].to_string();
+                done = apply_stream_frame(&frame, &mut state, events.as_ref())?;
+                if done {
+                    break;
+                }
+            }
+        }
+        if !done && !buffer.trim().is_empty() {
+            apply_stream_frame(buffer.trim(), &mut state, events.as_ref())?;
+        }
+        state.into_response()
+    }
+
     fn component_name(&self) -> String {
         format!("openai-compatible-agent:{}", self.config.model)
     }
 }
 
-fn request_payload(model: &str, request: AgentModelRequest) -> Result<ToolChatCompletionRequest> {
+fn request_payload(
+    model: &str,
+    request: AgentModelRequest,
+    stream: bool,
+) -> Result<ToolChatCompletionRequest> {
     let messages = request
         .messages
         .into_iter()
@@ -136,7 +190,7 @@ fn request_payload(model: &str, request: AgentModelRequest) -> Result<ToolChatCo
         tool_choice: "auto",
         temperature: request.temperature,
         max_tokens: request.max_tokens,
-        stream: false,
+        stream,
     })
 }
 
@@ -243,6 +297,7 @@ mod tests {
                 temperature: 0.1,
                 max_tokens: 800,
             },
+            false,
         )
         .expect("request should serialize");
         let value = serde_json::to_value(payload).expect("payload should be JSON");

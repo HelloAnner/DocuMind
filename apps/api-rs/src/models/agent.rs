@@ -257,6 +257,9 @@ pub enum AnswerStreamItem {
     Delta {
         text: String,
     },
+    Replace {
+        text: String,
+    },
     Citation {
         citation: CitationOutput,
     },

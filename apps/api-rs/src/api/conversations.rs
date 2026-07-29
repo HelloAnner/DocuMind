@@ -705,6 +705,10 @@ async fn run_agent_pipeline_inner(
                 answer_text.push_str(&text);
                 send_answer_delta(&tx, protocol, &runtime_events, assistant_message_id, text);
             }
+            AnswerStreamItem::Replace { text } => {
+                answer_text.clone_from(&text);
+                send_answer_replace(&tx, protocol, &runtime_events, assistant_message_id, text);
+            }
             AnswerStreamItem::Citation { citation } => {
                 citations.push(citation.clone());
                 send_citation_delta(
@@ -892,7 +896,13 @@ fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> Option<Ss
         AgentProgress::ReactStepStarted { .. }
         | AgentProgress::ToolCallStarted { .. }
         | AgentProgress::ToolCallCompleted { .. }
-        | AgentProgress::ToolCallFailed { .. } => None,
+        | AgentProgress::ToolCallFailed { .. }
+        | AgentProgress::ResponseDelta { .. }
+        | AgentProgress::ThinkingDelta { .. } => None,
+        AgentProgress::Flush { acknowledgement } => {
+            let _ = acknowledgement.send(());
+            None
+        }
     }
 }
 
@@ -1023,6 +1033,13 @@ fn send_progress_event(
     message_id: Uuid,
     progress: AgentProgress,
 ) {
+    let progress = match progress {
+        AgentProgress::Flush { acknowledgement } => {
+            let _ = acknowledgement.send(());
+            return;
+        }
+        progress => progress,
+    };
     if protocol == SseProtocol::Legacy {
         if let Some(event) = progress_to_sse_event(message_id, progress) {
             send_legacy_event(tx, event);
@@ -1128,6 +1145,21 @@ fn send_progress_event(
             "rerank.completed",
             json!({ "top_chunk_ids": top_chunk_ids }),
         ),
+        AgentProgress::ResponseDelta { delta } => send_runtime_event(
+            tx,
+            runtime_events,
+            "response.delta",
+            json!({ "delta": delta }),
+        ),
+        AgentProgress::ThinkingDelta { delta } => send_runtime_event(
+            tx,
+            runtime_events,
+            "thinking.delta",
+            json!({ "delta": delta }),
+        ),
+        AgentProgress::Flush { acknowledgement } => {
+            let _ = acknowledgement.send(());
+        }
     }
 }
 
@@ -1145,6 +1177,26 @@ fn send_answer_delta(
             runtime_events,
             "response.delta",
             json!({ "delta": text }),
+        ),
+    }
+}
+
+fn send_answer_replace(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    message_id: Uuid,
+    text: String,
+) {
+    match protocol {
+        SseProtocol::Legacy => {
+            send_legacy_event(tx, SseEvent::AnswerDelta { message_id, text });
+        }
+        SseProtocol::Atom => send_runtime_event(
+            tx,
+            runtime_events,
+            "response.replace",
+            json!({ "content": text }),
         ),
     }
 }

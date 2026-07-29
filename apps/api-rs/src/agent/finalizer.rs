@@ -46,7 +46,7 @@ impl GroundedAnswerFinalizer {
         };
         let citations = resolve_citations(&answer, &evidence);
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
-        sender.send(AnswerStreamItem::Delta {
+        sender.send(AnswerStreamItem::Replace {
             text: answer.clone(),
         })?;
         for citation in citations {
@@ -187,6 +187,7 @@ mod tests {
         while let Some(item) = stream.recv().await {
             match item {
                 AnswerStreamItem::Delta { text } => answer.push_str(&text),
+                AnswerStreamItem::Replace { text } => answer = text,
                 AnswerStreamItem::Citation { .. } => citation_count += 1,
                 AnswerStreamItem::Completed {
                     confidence: value, ..
