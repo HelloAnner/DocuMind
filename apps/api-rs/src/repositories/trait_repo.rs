@@ -24,6 +24,14 @@ pub trait ConversationRepository: Send + Sync {
         conversation_id: Uuid,
     ) -> anyhow::Result<Option<ConversationSession>>;
     async fn update_session(&self, session: ConversationSession) -> anyhow::Result<()>;
+    async fn update_session_title(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        title: &str,
+        manual: bool,
+    ) -> anyhow::Result<bool>;
 
     async fn create_message(&self, message: ConversationMessage) -> anyhow::Result<()>;
     async fn get_message(

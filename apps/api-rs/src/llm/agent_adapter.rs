@@ -54,8 +54,10 @@ struct ToolDefinitionRequest {
 struct ToolChatCompletionRequest {
     model: String,
     messages: Vec<ToolChatMessage>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
     tools: Vec<ToolDefinitionRequest>,
-    tool_choice: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tool_choice: Option<&'static str>,
     temperature: f64,
     max_tokens: u32,
     stream: bool,
@@ -182,12 +184,13 @@ fn request_payload(
         .tools
         .into_iter()
         .map(tool_definition_request)
-        .collect();
+        .collect::<Vec<_>>();
+    let tool_choice = (!tools.is_empty()).then_some("auto");
     Ok(ToolChatCompletionRequest {
         model: model.to_string(),
         messages,
         tools,
-        tool_choice: "auto",
+        tool_choice,
         temperature: request.temperature,
         max_tokens: request.max_tokens,
         stream,
@@ -305,6 +308,24 @@ mod tests {
         assert_eq!(value["messages"][1]["tool_calls"][0]["id"], "call-1");
         assert_eq!(value["messages"][2]["tool_call_id"], "call-1");
         assert_eq!(value["tools"][0]["function"]["name"], "knowledge_search");
+    }
+
+    #[test]
+    fn request_without_tools_omits_tool_protocol_fields() {
+        let payload = request_payload(
+            "qwen",
+            AgentModelRequest {
+                messages: vec![AgentMessage::user("生成标题")],
+                tools: vec![],
+                temperature: 0.2,
+                max_tokens: 32,
+            },
+            false,
+        )
+        .expect("request should serialize");
+        let value = serde_json::to_value(payload).expect("payload should be JSON");
+        assert!(value.get("tools").is_none());
+        assert!(value.get("tool_choice").is_none());
     }
 
     #[test]

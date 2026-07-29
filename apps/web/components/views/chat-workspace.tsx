@@ -50,7 +50,6 @@ export function ChatWorkspace() {
     conversations,
     loading,
     streamingId,
-    stages,
     rightOpen,
     setRightOpen,
     currentId,
@@ -195,12 +194,6 @@ export function ChatWorkspace() {
             onFeedback={(id) => setFeedbackMessageId(id)}
             onCitationClick={handleCitationClick}
             onFollowUp={(text) => sendMessage(text)}
-            stages={
-              message.message_id === streamingId ||
-              (message.role === "assistant" && message.message_id === latestAssistant?.message_id)
-                ? stages
-                : undefined
-            }
           />
         </div>
       ))}

@@ -20,6 +20,7 @@ import { UserAccountMenu } from "./user-account-menu";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { BrandMark } from "./brand-mark";
 import { ThemeToggle } from "./theme-toggle";
+import { ConfirmDialog } from "./confirm-dialog";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
 
@@ -84,6 +85,7 @@ export function ChatSidebar() {
     setCurrentId,
     isFavorite,
     toggleFavorite,
+    renameConversation,
     deleteConversation,
   } = useConversation();
 
@@ -93,6 +95,9 @@ export function ChatSidebar() {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
+  const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const filtered = useMemo(() => conversations, [conversations]);
 
@@ -143,20 +148,39 @@ export function ChatSidebar() {
     setTimeout(() => renameInputRef.current?.focus(), 0);
   };
 
-  const finishRename = (conv: Conversation, value: string) => {
+  const finishRename = async (conv: Conversation, value: string) => {
     const title = value.trim();
-    if (title && title !== conv.title) {
-      setAlias(conv.conversation_id, title);
+    if (title && title !== displayTitle(conv)) {
+      const renamed = await renameConversation(conv.conversation_id, title);
+      if (renamed) {
+        setAlias(conv.conversation_id, null);
+      }
     }
     setRenamingId(null);
   };
 
-  const handleDelete = async (conv: Conversation) => {
-    if (!confirm(`确定删除会话「${conv.title}」吗？`)) return;
-    await deleteConversation(conv.conversation_id);
-    if (currentId === conv.conversation_id) {
-      router.push("/chat");
+  const handleDelete = (conv: Conversation) => {
+    setDeleteError(null);
+    setDeleteTarget({ ...conv, title: displayTitle(conv) });
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteTarget || deleting) return;
+    const target = deleteTarget;
+    setDeleting(true);
+    setDeleteError(null);
+    const deleted = await deleteConversation(target.conversation_id);
+    if (deleted) {
+      setAlias(target.conversation_id, null);
+      setDeleteTarget(null);
+      if (currentId === target.conversation_id) {
+        closeMobile();
+        router.replace("/chat");
+      }
+    } else {
+      setDeleteError("删除失败，请稍后重试。");
     }
+    setDeleting(false);
   };
 
   const displayTitle = (conv: Conversation) => aliases[conv.conversation_id] || conv.title;
@@ -186,9 +210,14 @@ export function ChatSidebar() {
               ref={renameInputRef}
               className="dm-history-item-input"
               defaultValue={displayTitle(conv)}
-              onBlur={(e) => finishRename(conv, e.target.value)}
+              onBlur={(e) => {
+                void finishRename(conv, e.target.value);
+              }}
               onKeyDown={(e) => {
-                if (e.key === "Enter") finishRename(conv, e.currentTarget.value);
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  e.currentTarget.blur();
+                }
                 if (e.key === "Escape") setRenamingId(null);
               }}
               onClick={(e) => e.stopPropagation()}
@@ -237,9 +266,9 @@ export function ChatSidebar() {
               <button
                 type="button"
                 className="danger"
-                onClick={async () => {
+                onClick={() => {
                   setMenuId(null);
-                  await handleDelete(conv);
+                  handleDelete(conv);
                 }}
               >
                 <Trash2 size={18} />
@@ -308,6 +337,23 @@ export function ChatSidebar() {
         <UserAccountMenu />
       </div>
 
+      <ConfirmDialog
+        cancelText="取消"
+        confirmText="删除"
+        description={`确定要删除“${deleteTarget?.title ?? "未命名会话"}”吗？此操作无法撤销。`}
+        error={deleteError}
+        loading={deleting}
+        onCancel={() => {
+          if (deleting) return;
+          setDeleteTarget(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => {
+          void confirmDelete();
+        }}
+        open={deleteTarget !== null}
+        title="删除会话"
+      />
     </aside>
   );
 }

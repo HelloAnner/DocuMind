@@ -9,6 +9,7 @@ import {
   getMessages,
   listConversations,
   listKnowledgeBases,
+  renameConversation,
   retryMessageStreamUrl,
   sendMessageStreamUrl,
   submitFeedback,
@@ -28,12 +29,6 @@ import type {
   SendMessageRequest,
 } from "@/lib/types";
 
-export type PipelineStage = {
-  label: string;
-  done: boolean;
-  running?: boolean;
-};
-
 export type FeedbackState = {
   messageId: string;
   rating: Rating;
@@ -48,27 +43,6 @@ function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
   if (!data || typeof data !== "object") return false;
   const event = data as Partial<RuntimeEventEnvelope>;
   return event.schema_version === "moss.execution.event.v1" && typeof event.event_type === "string";
-}
-
-function stageLabelFromRuntime(event: RuntimeEventEnvelope): string | null {
-  const display = event.payload.display;
-  if (display && typeof display === "object") {
-    const data = (display as { data?: unknown }).data;
-    if (data && typeof data === "object") {
-      const label = (data as { label?: unknown }).label;
-      if (typeof label === "string") return label;
-    }
-  }
-
-  const displayName = event.payload.display_name;
-  if (typeof displayName === "string") return displayName;
-
-  const name = event.step?.name ?? event.payload.name;
-  if (name === "query_rewrite") return "查询改写";
-  if (name === "hybrid_retrieval") return "混合检索";
-  if (name === "rerank") return "重排序";
-  if (name === "answer_generation") return "生成答案";
-  return null;
 }
 
 function confidenceFromRuntime(value: unknown): "high" | "medium" | "low" {
@@ -102,12 +76,6 @@ export function useConversationManager() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
   const [streamingId, setStreamingId] = useState<string | null>(null);
-  const [stages, setStages] = useState<PipelineStage[]>([
-    { label: "查询改写", done: false },
-    { label: "混合检索", done: false },
-    { label: "重排序", done: false },
-    { label: "生成答案", done: false },
-  ]);
   const [rightOpen, setRightOpen] = useState(false);
   const [availableKbs, setAvailableKbs] = useState<KnowledgeBase[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
@@ -249,13 +217,6 @@ export function useConversationManager() {
         ]);
       }
 
-      setStages([
-        { label: "查询改写", done: false, running: true },
-        { label: "混合检索", done: false },
-        { label: "重排序", done: false },
-        { label: "生成答案", done: false },
-      ]);
-
       let assistantId = assistantTempId;
       let pendingMessageUpdates: MessageListUpdate[] = [];
       let pendingMessageFrame: number | null = null;
@@ -374,16 +335,6 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "tool.call.started") {
-              const label = stageLabelFromRuntime(runtime);
-              if (label) {
-                setStages((prev) =>
-                  prev.map((stage) => ({
-                    ...stage,
-                    running: stage.label === label,
-                    done: stage.label === label ? false : stage.done,
-                  }))
-                );
-              }
               const toolId = runtimeToolId(runtime);
               if (toolId) {
                 updateToolCallInStream(toolId, (tool) => ({
@@ -419,14 +370,6 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "tool.call.result") {
-              const label = stageLabelFromRuntime(runtime);
-              if (label) {
-                setStages((prev) =>
-                  prev.map((stage) =>
-                    stage.label === label ? { ...stage, done: true, running: false } : stage
-                  )
-                );
-              }
               const toolId = runtimeToolId(runtime);
               if (toolId) {
                 updateToolCallInStream(toolId, (tool) => ({
@@ -498,11 +441,24 @@ export function useConversationManager() {
                 status: "completed",
                 confidence,
               });
-              setStages((s) =>
-                s.map((stage) =>
-                  stage.label === "生成答案" ? { ...stage, done: true, running: false } : stage
-                )
-              );
+              continue;
+            }
+
+            if (runtime.event_type === "conversation.title.updated") {
+              const conversationTitle = runtime.payload.title;
+              const updatedConversationId = runtime.payload.conversation_id;
+              if (
+                typeof conversationTitle === "string" &&
+                typeof updatedConversationId === "string"
+              ) {
+                setConversations((current) =>
+                  current.map((conversation) =>
+                    conversation.conversation_id === updatedConversationId
+                      ? { ...conversation, title: conversationTitle }
+                      : conversation
+                  )
+                );
+              }
               continue;
             }
 
@@ -560,14 +516,16 @@ export function useConversationManager() {
                     ? runtime.payload.duration_ms
                     : undefined,
               });
-              setStages((s) => s.map((stage) => ({ ...stage, done: true, running: false })));
+              abortControllersRef.current.delete(runtime.response_message_id);
+              setStreamingId((current) =>
+                current === runtime.response_message_id ? null : current
+              );
               continue;
             }
 
             if (runtime.event_type === "execution.cancelled") {
               flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, { status: "cancelled" as MessageStatus });
-              setStages((s) => s.map((stage) => ({ ...stage, running: false })));
               continue;
             }
 
@@ -578,7 +536,6 @@ export function useConversationManager() {
                 status: "failed",
                 content: error?.message ?? "生成失败，请重试",
               });
-              setStages((s) => s.map((stage) => ({ ...stage, running: false })));
               continue;
             }
 
@@ -597,56 +554,6 @@ export function useConversationManager() {
             assistantId = data.assistant_message_id;
             abortControllersRef.current.set(assistantId, controller);
             setStreamingId(assistantId);
-          } else if (sse.event === "status.updated") {
-            const data = sse.data as { message_id: string; status: string };
-            if (data.message_id !== assistantId && data.message_id !== assistantTempId) continue;
-            if (data.status === "rewriting") {
-              setStages([
-                { label: "查询改写", done: false, running: true },
-                { label: "混合检索", done: false },
-                { label: "重排序", done: false },
-                { label: "生成答案", done: false },
-              ]);
-            } else if (data.status === "retrieving") {
-              setStages([
-                { label: "查询改写", done: true },
-                { label: "混合检索", done: false, running: true },
-                { label: "重排序", done: false },
-                { label: "生成答案", done: false },
-              ]);
-            } else if (data.status === "reranking") {
-              setStages([
-                { label: "查询改写", done: true },
-                { label: "混合检索", done: true },
-                { label: "重排序", done: false, running: true },
-                { label: "生成答案", done: false },
-              ]);
-            } else if (data.status === "generating") {
-              setStages([
-                { label: "查询改写", done: true },
-                { label: "混合检索", done: true },
-                { label: "重排序", done: true },
-                { label: "生成答案", done: false, running: true },
-              ]);
-            }
-          } else if (sse.event === "rewrite.completed") {
-            setStages((s) =>
-              s.map((stage) =>
-                stage.label === "查询改写" ? { ...stage, done: true, running: false } : stage
-              )
-            );
-          } else if (sse.event === "retrieval.completed") {
-            setStages((s) =>
-              s.map((stage) =>
-                stage.label === "混合检索" ? { ...stage, done: true, running: false } : stage
-              )
-            );
-          } else if (sse.event === "rerank.completed") {
-            setStages((s) =>
-              s.map((stage) =>
-                stage.label === "重排序" ? { ...stage, done: true, running: false } : stage
-              )
-            );
           } else if (sse.event === "answer.delta") {
             const data = sse.data as { message_id: string; text: string };
             queueMessageUpdate((prev) =>
@@ -675,11 +582,19 @@ export function useConversationManager() {
               status: "completed",
               confidence: data.confidence,
             });
-            setStages((s) =>
-              s.map((stage) =>
-                stage.label === "生成答案" ? { ...stage, done: true, running: false } : stage
-              )
-            );
+            abortControllersRef.current.delete(data.message_id);
+            setStreamingId((current) => (current === data.message_id ? null : current));
+          } else if (sse.event === "conversation.title.updated") {
+            const data = sse.data as { conversation_id?: string; title?: string };
+            if (data.conversation_id && data.title) {
+              setConversations((current) =>
+                current.map((conversation) =>
+                  conversation.conversation_id === data.conversation_id
+                    ? { ...conversation, title: data.title as string }
+                    : conversation
+                )
+              );
+            }
           } else if (sse.event === "answer.failed") {
             flushPendingMessageUpdates();
             const data = sse.data as { message_id: string; code: string; message: string };
@@ -687,7 +602,6 @@ export function useConversationManager() {
               status: "failed",
               content: data.message,
             });
-            setStages((s) => s.map((stage) => ({ ...stage, running: false })));
           }
         }
       } catch (e) {
@@ -813,7 +727,13 @@ export function useConversationManager() {
         await deleteConversation(conversationId);
         setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
         if (currentId === conversationId) {
+          if (streamingId) {
+            abortControllersRef.current.get(streamingId)?.abort();
+            abortControllersRef.current.delete(streamingId);
+            setStreamingId(null);
+          }
           setCurrentId(null);
+          setMessages([]);
         }
         setFavorites((prev) => {
           const next = new Set(prev);
@@ -828,12 +748,33 @@ export function useConversationManager() {
           }
           return next;
         });
+        return true;
       } catch (e) {
         console.error("delete conversation failed", e);
+        return false;
       }
     },
-    [currentId]
+    [currentId, streamingId]
   );
+
+  const doRenameConversation = useCallback(async (conversationId: string, title: string) => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return false;
+    try {
+      const updated = await renameConversation(conversationId, nextTitle);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id === conversationId
+            ? { ...conversation, title: updated.title }
+            : conversation
+        )
+      );
+      return true;
+    } catch (error) {
+      console.error("rename conversation failed", error);
+      return false;
+    }
+  }, []);
 
   return {
     conversations,
@@ -841,7 +782,6 @@ export function useConversationManager() {
     messages,
     loading,
     streamingId,
-    stages,
     rightOpen,
     setRightOpen,
     setCurrentId,
@@ -854,6 +794,7 @@ export function useConversationManager() {
     refreshConversations: loadConversations,
     isFavorite,
     toggleFavorite,
+    renameConversation: doRenameConversation,
     deleteConversation: doDeleteConversation,
   };
 }

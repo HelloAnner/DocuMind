@@ -58,6 +58,16 @@ export async function deleteConversation(
   return fetchJson(`/api/conversations/${conversationId}`, { method: "DELETE" });
 }
 
+export async function renameConversation(
+  conversationId: string,
+  title: string
+): Promise<{ conversation_id: string; title: string }> {
+  return fetchJson(`/api/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ title }),
+  });
+}
+
 export async function getMessageTraces(
   conversationId: string,
   messageId: string

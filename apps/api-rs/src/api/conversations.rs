@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::agent::{AgentKernel, AgentProgress};
 use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
 use crate::auth::ActorExtractor;
+use crate::conversation_title::spawn_title_update;
 use crate::error::AppError;
 use crate::models::agent::{
     AgentOptions, AgentRequest, AgentRuntimeConfig, AnswerStreamItem, CitationOutput,
@@ -44,6 +45,11 @@ pub struct ListConversationsQuery {
     cursor: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct UpdateConversationTitleRequest {
+    title: String,
+}
+
 fn default_limit() -> usize {
     20
 }
@@ -56,7 +62,9 @@ pub fn router() -> axum::Router<AppState> {
         )
         .route(
             "/api/conversations/:conversation_id",
-            axum::routing::get(get_conversation).delete(delete_conversation),
+            axum::routing::get(get_conversation)
+                .patch(update_conversation_title)
+                .delete(delete_conversation),
         )
         .route(
             "/api/conversations/:conversation_id/messages",
@@ -221,6 +229,10 @@ enum SseEvent {
         code: String,
         message: String,
     },
+    ConversationTitleUpdated {
+        conversation_id: Uuid,
+        title: String,
+    },
 }
 
 impl SseEvent {
@@ -235,6 +247,7 @@ impl SseEvent {
             SseEvent::CitationDelta { .. } => "citation.delta",
             SseEvent::AnswerCompleted { .. } => "answer.completed",
             SseEvent::AnswerFailed { .. } => "answer.failed",
+            SseEvent::ConversationTitleUpdated { .. } => "conversation.title.updated",
         }
     }
 
@@ -304,6 +317,13 @@ impl SseEvent {
                 "message_id": message_id,
                 "code": code,
                 "message": message,
+            }),
+            SseEvent::ConversationTitleUpdated {
+                conversation_id,
+                title,
+            } => json!({
+                "conversation_id": conversation_id,
+                "title": title,
             }),
         }
     }
@@ -401,6 +421,13 @@ async fn send_message(
     let config = state.config.clone();
     let db_pool = state.db_pool.clone();
     let protocol = SseProtocol::from_headers(&headers);
+    let title_update = spawn_title_update(
+        repo.clone(),
+        kernel.model.clone(),
+        actor.tenant_id,
+        actor.user_id,
+        session.id,
+    );
     let mut runtime_event_factory = RuntimeEventFactory::new(
         actor.tenant_id,
         actor.user_id,
@@ -434,6 +461,7 @@ async fn send_message(
             tx2,
             protocol,
             runtime_events,
+            Some(title_update),
         )
         .await
         {
@@ -460,6 +488,7 @@ async fn run_agent_pipeline(
     tx: tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
     protocol: SseProtocol,
     runtime_events: Arc<Mutex<RuntimeEventFactory>>,
+    title_update: Option<tokio::task::JoinHandle<Option<String>>>,
 ) -> Result<(), AppError> {
     let timeout_seconds = config.agent.total_timeout_seconds.max(1);
     let tenant_id = actor.tenant_id;
@@ -479,36 +508,56 @@ async fn run_agent_pipeline(
         protocol,
         runtime_events.clone(),
     );
-    match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), pipeline).await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(err)) => {
-            error!(error = ?err, "agent pipeline returned an error");
-            fail_assistant_message(
-                &repo,
-                tenant_id,
-                assistant_message_id,
-                "PIPELINE_ERROR".to_string(),
-                "Agent pipeline failed; retry this message".to_string(),
+    let result =
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_seconds), pipeline).await
+        {
+            Ok(Ok(())) => Ok(()),
+            Ok(Err(err)) => {
+                error!(error = ?err, "agent pipeline returned an error");
+                fail_assistant_message(
+                    &repo,
+                    tenant_id,
+                    assistant_message_id,
+                    "PIPELINE_ERROR".to_string(),
+                    "Agent pipeline failed; retry this message".to_string(),
+                    &tx,
+                    protocol,
+                    &runtime_events,
+                )
+                .await
+            }
+            Err(_) => {
+                fail_assistant_message(
+                    &repo,
+                    tenant_id,
+                    assistant_message_id,
+                    "PIPELINE_TIMEOUT".to_string(),
+                    format!("Agent execution exceeded {timeout_seconds} seconds"),
+                    &tx,
+                    protocol,
+                    &runtime_events,
+                )
+                .await
+            }
+        };
+
+    if let Some(title_update) = title_update {
+        match title_update.await {
+            Ok(Some(title)) => send_conversation_title_updated(
                 &tx,
                 protocol,
                 &runtime_events,
-            )
-            .await
-        }
-        Err(_) => {
-            fail_assistant_message(
-                &repo,
-                tenant_id,
-                assistant_message_id,
-                "PIPELINE_TIMEOUT".to_string(),
-                format!("Agent execution exceeded {timeout_seconds} seconds"),
-                &tx,
-                protocol,
-                &runtime_events,
-            )
-            .await
+                conversation_id,
+                title,
+            ),
+            Ok(None) => {}
+            Err(error) => {
+                error!(%conversation_id, error = %error, "conversation title task failed")
+            }
         }
     }
+
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1662,6 +1711,7 @@ async fn retry_message(
             tx2,
             protocol,
             runtime_events,
+            None,
         )
         .await
         {
@@ -1743,6 +1793,38 @@ async fn get_conversation(
     })))
 }
 
+async fn update_conversation_title(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(conversation_id): Path<Uuid>,
+    Json(request): Json<UpdateConversationTitleRequest>,
+) -> Result<impl IntoResponse, AppError> {
+    let title = request.title.trim();
+    if title.is_empty() {
+        return Err(AppError::bad_request(
+            "EMPTY_CONVERSATION_TITLE",
+            "会话标题不能为空",
+        ));
+    }
+    if title.chars().count() > 200 {
+        return Err(AppError::bad_request(
+            "CONVERSATION_TITLE_TOO_LONG",
+            "会话标题不能超过 200 个字",
+        ));
+    }
+    let updated = state
+        .repository
+        .update_session_title(actor.tenant_id, actor.user_id, conversation_id, title, true)
+        .await?;
+    if !updated {
+        return Err(AppError::conversation_not_found());
+    }
+    Ok(Json(json!({
+        "conversation_id": conversation_id,
+        "title": title,
+    })))
+}
+
 async fn delete_conversation(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
@@ -1753,12 +1835,44 @@ async fn delete_conversation(
         .get_session(actor.tenant_id, conversation_id)
         .await?
         .ok_or_else(AppError::conversation_not_found)?;
+    if session.user_id != actor.user_id
+        || session.status != crate::models::ConversationStatus::Active
+    {
+        return Err(AppError::conversation_not_found());
+    }
     session.status = crate::models::ConversationStatus::Deleted;
     session.updated_at = now();
     state.repository.update_session(session).await?;
     Ok(Json(
         json!({"conversation_id": conversation_id, "status": "deleted"}),
     ))
+}
+
+fn send_conversation_title_updated(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    protocol: SseProtocol,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    conversation_id: Uuid,
+    title: String,
+) {
+    match protocol {
+        SseProtocol::Legacy => send_legacy_event(
+            tx,
+            SseEvent::ConversationTitleUpdated {
+                conversation_id,
+                title,
+            },
+        ),
+        SseProtocol::Atom => send_runtime_event(
+            tx,
+            runtime_events,
+            "conversation.title.updated",
+            json!({
+                "conversation_id": conversation_id,
+                "title": title,
+            }),
+        ),
+    }
 }
 
 async fn get_message_traces(

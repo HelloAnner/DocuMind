@@ -19,7 +19,6 @@ import {
 import { AnswerContent } from "./answer-content";
 import { ReasoningTrace } from "./reasoning-trace";
 import type { Citation, Message } from "@/lib/types";
-import type { PipelineStage } from "@/hooks/use-conversation-manager";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -131,7 +130,6 @@ interface MessageRowProps {
   onFeedback: (id: string) => void;
   onCitationClick: (c: Citation) => void;
   onFollowUp: (text: string) => void;
-  stages?: PipelineStage[];
 }
 
 function AgentMeta({
@@ -200,7 +198,6 @@ export function MessageRow({
   onFeedback,
   onCitationClick,
   onFollowUp,
-  stages,
 }: MessageRowProps) {
   const { me } = useAuth();
   const [copied, setCopied] = useState(false);
@@ -257,7 +254,6 @@ export function MessageRow({
       <ReasoningTrace
         thinking={message.thinking}
         toolCalls={message.tool_calls}
-        stages={stages}
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
         status={message.status}

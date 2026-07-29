@@ -10,30 +10,20 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
-import type { PipelineStage } from "@/hooks/use-conversation-manager";
 import type { MessageStatus, RuntimeToolCall } from "@/lib/types";
 
 interface ReasoningTraceProps {
   thinking?: string;
   toolCalls?: RuntimeToolCall[];
-  stages?: PipelineStage[];
   isStreaming: boolean;
   durationMs?: number;
   status: MessageStatus;
   processingStarted: boolean;
 }
 
-const PIPELINE_TOOL_NAMES = new Set([
-  "query_rewrite",
-  "hybrid_retrieval",
-  "rerank",
-  "answer_generation",
-]);
-
 export function ReasoningTrace({
   thinking,
   toolCalls,
-  stages,
   isStreaming,
   durationMs,
   status,
@@ -43,10 +33,7 @@ export function ReasoningTrace({
   const [observedDurationMs, setObservedDurationMs] = useState(durationMs);
   const startedAtRef = useRef<number | null>(isStreaming ? Date.now() : null);
   const wasStreamingRef = useRef(isStreaming);
-  const visibleTools = useMemo(
-    () => mergeRuntimeAndPipelineTools(toolCalls ?? [], stages),
-    [stages, toolCalls]
-  );
+  const visibleTools = useMemo(() => toolCalls ?? [], [toolCalls]);
   const thinkingLines = useMemo(() => splitThinkingLines(thinking ?? ""), [thinking]);
   const hasTrace = thinkingLines.length > 0 || visibleTools.length > 0;
 
@@ -173,56 +160,14 @@ function ToolTimelineRow({ tool }: { tool: RuntimeToolCall }) {
   const isFailed = tool.status === "failed" || tool.status === "cancelled";
   const duration =
     tool.duration_ms !== undefined && !isRunning ? formatDuration(tool.duration_ms) : null;
-  const hasDetails =
-    tool.arguments !== undefined ||
-    Boolean(tool.arguments_preview) ||
-    Boolean(tool.result) ||
-    Boolean(tool.message) ||
-    tool.progress !== undefined ||
-    Boolean(tool.display);
 
   return (
-    <div className="action-feed-tool-row">
-      <div className="action-feed-row">
-        <TimelineIconSlot kind={timelineIconKind(tool, isRunning, isFailed)} />
-        <span className={`action-feed-row-text ${isRunning ? "is-strong" : ""}`}>
-          {formatToolAction(tool)}
-        </span>
-        {duration ? <span className="action-feed-duration">{duration}</span> : null}
-      </div>
-      {hasDetails ? (
-        <details className="action-feed-details">
-          <summary>查看调用细节</summary>
-          {tool.message ? (
-            <div className="action-feed-detail-block">
-              <div className="action-feed-detail-label">状态</div>
-              <pre>{tool.message}</pre>
-            </div>
-          ) : null}
-          {tool.progress !== undefined ? (
-            <div className="action-feed-progress">
-              <span style={{ width: `${Math.min(100, Math.max(0, tool.progress))}%` }} />
-            </div>
-          ) : null}
-          {tool.arguments !== undefined || tool.arguments_preview ? (
-            <div className="action-feed-detail-block">
-              <div className="action-feed-detail-label">参数</div>
-              <pre>
-                {tool.arguments !== undefined
-                  ? formatValue(tool.arguments)
-                  : tool.arguments_preview}
-              </pre>
-            </div>
-          ) : null}
-          {tool.display !== undefined ? <ToolDisplayCard display={tool.display} /> : null}
-          {tool.result ? (
-            <div className="action-feed-detail-block">
-              <div className="action-feed-detail-label">结果</div>
-              <pre>{tool.result}</pre>
-            </div>
-          ) : null}
-        </details>
-      ) : null}
+    <div className="action-feed-row">
+      <TimelineIconSlot kind={timelineIconKind(tool, isRunning, isFailed)} />
+      <span className={`action-feed-row-text ${isRunning ? "is-strong" : ""}`}>
+        {formatToolAction(tool)}
+      </span>
+      {duration ? <span className="action-feed-duration">{duration}</span> : null}
     </div>
   );
 }
@@ -253,71 +198,6 @@ function TimelineIconSlot({ kind }: { kind: TimelineIconKind }) {
       <span className="action-feed-icon-line action-feed-icon-line-bottom" />
     </span>
   );
-}
-
-function ToolDisplayCard({ display }: { display: unknown }) {
-  if (!display || typeof display !== "object") return null;
-  const value = display as { component?: unknown; data?: unknown };
-  const title = typeof value.component === "string" ? value.component : "工具结果";
-  const data =
-    value.data && typeof value.data === "object"
-      ? (value.data as Record<string, unknown>)
-      : {};
-  const label = firstString(data.label, data.title, data.name, title);
-  const rows = Object.entries(data).filter(
-    ([key]) => key !== "label" && key !== "title" && key !== "name"
-  );
-
-  return (
-    <div className="dm-tool-display-card">
-      <div className="dm-tool-display-head">
-        <span>{label}</span>
-        <small>{title}</small>
-      </div>
-      {rows.length > 0 ? (
-        <div className="dm-tool-display-grid">
-          {rows.slice(0, 6).map(([key, rowValue]) => (
-            <div key={key}>
-              <small>{humanizeKey(key)}</small>
-              <span>{formatCompactValue(rowValue)}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function mergeRuntimeAndPipelineTools(
-  toolCalls: RuntimeToolCall[],
-  stages?: PipelineStage[]
-): RuntimeToolCall[] {
-  const runtimePipelineNames = new Set(
-    toolCalls
-      .map((tool) => tool.name.toLowerCase())
-      .filter((name) => PIPELINE_TOOL_NAMES.has(name))
-  );
-  const pipelineTools = (stages ?? [])
-    .filter((stage) => stage.done || stage.running)
-    .map((stage): RuntimeToolCall => {
-      const name = pipelineToolName(stage.label);
-      return {
-        id: `pipeline-${name}`,
-        name,
-        status: stage.done ? "succeeded" : "running",
-      };
-    })
-    .filter((tool) => !runtimePipelineNames.has(tool.name));
-
-  return [...pipelineTools, ...toolCalls];
-}
-
-function pipelineToolName(label: string) {
-  if (label === "查询改写") return "query_rewrite";
-  if (label === "混合检索") return "hybrid_retrieval";
-  if (label === "重排序") return "rerank";
-  if (label === "生成答案") return "answer_generation";
-  return label;
 }
 
 function splitThinkingLines(content: string) {
@@ -443,31 +323,4 @@ function formatDuration(ms: number) {
   const minutes = Math.floor(seconds / 60);
   const rest = seconds % 60;
   return rest > 0 ? `${minutes}m ${rest}s` : `${minutes}m`;
-}
-
-function formatValue(value: unknown) {
-  if (typeof value === "string") return value;
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch {
-    return String(value);
-  }
-}
-
-function humanizeKey(key: string) {
-  return key.replace(/[_-]+/g, " ");
-}
-
-function formatCompactValue(value: unknown) {
-  if (value === null || value === undefined) return "-";
-  if (
-    typeof value === "string" ||
-    typeof value === "number" ||
-    typeof value === "boolean"
-  ) {
-    return String(value);
-  }
-  if (Array.isArray(value)) return `${value.length} 项`;
-  if (typeof value === "object") return JSON.stringify(value);
-  return String(value);
 }

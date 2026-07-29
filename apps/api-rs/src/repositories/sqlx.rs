@@ -135,13 +135,15 @@ fn sha256_hex(bytes: &[u8]) -> String {
 impl ConversationRepository for SqlxConversationRepository {
     async fn create_session(&self, session: ConversationSession) -> anyhow::Result<()> {
         sqlx::query(
-            "INSERT INTO conversation_sessions (id, tenant_id, user_id, title, kb_ids, status, summary, created_at, updated_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+            "INSERT INTO conversation_sessions (
+                id, tenant_id, user_id, title, title_locked, kb_ids, status, summary, created_at, updated_at
+             ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)",
         )
         .bind(session.id)
         .bind(session.tenant_id)
         .bind(session.user_id)
-        .bind(session.title)
+        .bind(&session.title)
+        .bind(session.title.trim() != "新会话")
         .bind(&session.kb_ids)
         .bind(session.status.to_string())
         .bind(session.summary)
@@ -150,6 +152,35 @@ impl ConversationRepository for SqlxConversationRepository {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn update_session_title(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        title: &str,
+        manual: bool,
+    ) -> anyhow::Result<bool> {
+        let result = sqlx::query(
+            "UPDATE conversation_sessions
+             SET title = $1,
+                 title_locked = CASE WHEN $2 THEN TRUE ELSE title_locked END,
+                 updated_at = NOW()
+             WHERE id = $3
+               AND tenant_id = $4
+               AND user_id = $5
+               AND status = 'active'
+               AND ($2 OR title_locked = FALSE)",
+        )
+        .bind(title)
+        .bind(manual)
+        .bind(conversation_id)
+        .bind(tenant_id)
+        .bind(user_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() == 1)
     }
 
     async fn list_sessions(

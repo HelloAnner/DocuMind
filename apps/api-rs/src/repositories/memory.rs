@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
@@ -20,6 +20,7 @@ type ClientRequestMap = HashMap<(Uuid, Uuid, String), Uuid>;
 
 pub struct InMemoryConversationRepository {
     sessions: Arc<RwLock<HashMap<Uuid, ConversationSession>>>,
+    title_locks: Arc<RwLock<HashSet<Uuid>>>,
     messages: Arc<RwLock<HashMap<Uuid, ConversationMessage>>>,
     client_request_ids: Arc<RwLock<ClientRequestMap>>,
     query_traces: Arc<RwLock<HashMap<Uuid, QueryTrace>>>,
@@ -39,6 +40,7 @@ impl InMemoryConversationRepository {
     pub fn new() -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            title_locks: Arc::new(RwLock::new(HashSet::new())),
             messages: Arc::new(RwLock::new(HashMap::new())),
             client_request_ids: Arc::new(RwLock::new(HashMap::new())),
             query_traces: Arc::new(RwLock::new(HashMap::new())),
@@ -53,6 +55,9 @@ impl InMemoryConversationRepository {
 #[async_trait]
 impl ConversationRepository for InMemoryConversationRepository {
     async fn create_session(&self, session: ConversationSession) -> anyhow::Result<()> {
+        if session.title.trim() != "新会话" {
+            self.title_locks.write().unwrap().insert(session.id);
+        }
         let mut sessions = self.sessions.write().unwrap();
         sessions.insert(session.id, session);
         Ok(())
@@ -132,6 +137,36 @@ impl ConversationRepository for InMemoryConversationRepository {
         let mut sessions = self.sessions.write().unwrap();
         sessions.insert(session.id, session);
         Ok(())
+    }
+
+    async fn update_session_title(
+        &self,
+        tenant_id: Uuid,
+        user_id: Uuid,
+        conversation_id: Uuid,
+        title: &str,
+        manual: bool,
+    ) -> anyhow::Result<bool> {
+        let mut locks = self.title_locks.write().unwrap();
+        if !manual && locks.contains(&conversation_id) {
+            return Ok(false);
+        }
+        let mut sessions = self.sessions.write().unwrap();
+        let Some(session) = sessions.get_mut(&conversation_id) else {
+            return Ok(false);
+        };
+        if session.tenant_id != tenant_id
+            || session.user_id != user_id
+            || session.status != ConversationStatus::Active
+        {
+            return Ok(false);
+        }
+        session.title = title.to_string();
+        session.updated_at = crate::models::now();
+        if manual {
+            locks.insert(conversation_id);
+        }
+        Ok(true)
     }
 
     async fn create_message(&self, message: ConversationMessage) -> anyhow::Result<()> {
@@ -329,6 +364,42 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(dup.map(|m| m.id), Some(msg.id));
+    }
+
+    #[tokio::test]
+    async fn manual_title_prevents_later_automatic_updates() {
+        let repo = InMemoryConversationRepository::new();
+        let tenant = Uuid::new_v4();
+        let user = Uuid::new_v4();
+        let session = ConversationSession {
+            id: Uuid::new_v4(),
+            tenant_id: tenant,
+            user_id: user,
+            title: "新会话".to_string(),
+            kb_ids: vec![],
+            status: ConversationStatus::Active,
+            summary: None,
+            created_at: now(),
+            updated_at: now(),
+        };
+        repo.create_session(session.clone()).await.unwrap();
+
+        assert!(repo
+            .update_session_title(tenant, user, session.id, "手动标题", true)
+            .await
+            .unwrap());
+        assert!(!repo
+            .update_session_title(tenant, user, session.id, "自动标题", false)
+            .await
+            .unwrap());
+        assert_eq!(
+            repo.get_session(tenant, session.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .title,
+            "手动标题"
+        );
     }
 
     #[tokio::test]
