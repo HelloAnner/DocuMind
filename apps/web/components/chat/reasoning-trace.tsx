@@ -42,8 +42,8 @@ export function ReasoningTrace({
   const [expanded, setExpanded] = useState(isStreaming);
   const wasStreamingRef = useRef(isStreaming);
   const visibleTools = useMemo(
-    () => mergeRuntimeAndPipelineTools(toolCalls ?? [], isStreaming ? stages : undefined),
-    [isStreaming, stages, toolCalls]
+    () => mergeRuntimeAndPipelineTools(toolCalls ?? [], stages),
+    [stages, toolCalls]
   );
   const thinkingLines = useMemo(() => splitThinkingLines(thinking ?? ""), [thinking]);
   const hasTrace = thinkingLines.length > 0 || visibleTools.length > 0;
