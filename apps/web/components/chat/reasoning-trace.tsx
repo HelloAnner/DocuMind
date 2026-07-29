@@ -40,6 +40,8 @@ export function ReasoningTrace({
   processingStarted,
 }: ReasoningTraceProps) {
   const [expanded, setExpanded] = useState(isStreaming);
+  const [observedDurationMs, setObservedDurationMs] = useState(durationMs);
+  const startedAtRef = useRef<number | null>(isStreaming ? Date.now() : null);
   const wasStreamingRef = useRef(isStreaming);
   const visibleTools = useMemo(
     () => mergeRuntimeAndPipelineTools(toolCalls ?? [], stages),
@@ -50,12 +52,26 @@ export function ReasoningTrace({
 
   useEffect(() => {
     if (isStreaming) {
+      if (startedAtRef.current === null) {
+        startedAtRef.current = Date.now();
+      }
       setExpanded(true);
     } else if (wasStreamingRef.current) {
+      const startedAt = startedAtRef.current;
+      if (durationMs === undefined && startedAt !== null) {
+        setObservedDurationMs(Math.max(1, Date.now() - startedAt));
+      }
+      startedAtRef.current = null;
       setExpanded(false);
     }
     wasStreamingRef.current = isStreaming;
-  }, [isStreaming]);
+  }, [durationMs, isStreaming]);
+
+  useEffect(() => {
+    if (durationMs !== undefined) {
+      setObservedDurationMs(durationMs);
+    }
+  }, [durationMs]);
 
   if (!isStreaming && !hasTrace) return null;
 
@@ -83,7 +99,7 @@ export function ReasoningTrace({
           title={canExpand ? "展开或收起工作过程" : undefined}
           type="button"
         >
-          <span>{completedLabel(status, durationMs)}</span>
+          <span>{completedLabel(status, observedDurationMs)}</span>
           {canExpand ? <ChevronDown className="dm-reasoning-chevron" size={16} /> : null}
         </button>
       )}
