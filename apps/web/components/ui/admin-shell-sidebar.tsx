@@ -104,20 +104,31 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const homeHref = isPlatform ? "/system" : "/admin";
   const tenantName = me?.tenant.name;
   const tenantSlug = me?.tenant.slug;
+  const showTenantContext = !isPlatform && Boolean(tenantName);
 
   return (
     <aside className="dm-admin-sidebar">
-      <div className="dm-sidebar-top dm-admin-brand-row">
-        <Link className="dm-admin-logo" href={homeHref} onClick={onNavigate}>
-          <BrandMark />
-          {!isPlatform && tenantName ? (
-            <span className="dm-admin-context">
+      <div className={`dm-sidebar-top dm-admin-sidebar-header${showTenantContext ? " has-context" : ""}`}>
+        <div className="dm-admin-brand-line">
+          <Link className="dm-admin-logo" href={homeHref} onClick={onNavigate}>
+            <BrandMark />
+          </Link>
+          <ThemeToggle />
+        </div>
+        {showTenantContext ? (
+          <Link
+            aria-label={`返回${tenantName}租户总览`}
+            className="dm-admin-context"
+            href={homeHref}
+            onClick={onNavigate}
+          >
+            <Building2 aria-hidden="true" size={15} />
+            <span className="dm-admin-context-copy">
               <strong>{tenantName}</strong>
               {tenantSlug ? <small>{tenantSlug}</small> : null}
             </span>
-          ) : null}
-        </Link>
-        <ThemeToggle />
+          </Link>
+        ) : null}
       </div>
 
       <nav className="dm-nav">
