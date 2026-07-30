@@ -4567,6 +4567,17 @@ body > .hiddenCanvasElement {
 }
 
 @media (max-width: 767px) {
+  .dm-kb-document-panel .dm-panel-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .dm-kb-document-panel .dm-panel-action,
+  .dm-document-panel-actions .dm-button {
+    width: 100%;
+  }
+
   .dm-document-panel-actions,
   .dm-document-toolbar,
   .dm-upload-file-card {
