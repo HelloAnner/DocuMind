@@ -8,7 +8,26 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { DocumentViewer } from "./document-viewer";
 
 interface DocumentPreviewProps {
-  citation: Citation;
+  target: DocumentPreviewTarget;
+}
+
+export interface DocumentPreviewTarget {
+  doc_id: string;
+  doc_title: string;
+  file_type?: string;
+  page_range?: number[];
+  source_status?: "available" | "deleted" | string;
+  anchor?: Citation["anchor"];
+}
+
+export function previewTargetFromCitation(citation: Citation): DocumentPreviewTarget {
+  return {
+    doc_id: citation.doc_id,
+    doc_title: citation.doc_title,
+    page_range: citation.page_range,
+    source_status: citation.source_status,
+    anchor: citation.anchor,
+  };
 }
 
 type PreviewState =
@@ -21,10 +40,10 @@ type PreviewState =
     }
   | { status: "failed"; error: string };
 
-function fileType(citation: Citation) {
-  const explicit = citation.anchor?.format;
+function fileType(target: DocumentPreviewTarget) {
+  const explicit = target.file_type || target.anchor?.format;
   if (explicit) return explicit.toLowerCase();
-  const title = citation.doc_title.toLowerCase();
+  const title = target.doc_title.toLowerCase();
   if (title.endsWith(".pdf")) return "pdf";
   if (title.endsWith(".pptx") || title.endsWith(".ppt")) return "pptx";
   if (title.endsWith(".docx") || title.endsWith(".doc")) return "docx";
@@ -47,13 +66,15 @@ function mimeTypeFromType(type: string, blob: Blob): string {
   return "application/octet-stream";
 }
 
-function targetPage(citation: Citation) {
-  return citation.anchor?.page ?? citation.anchor?.slide ?? citation.page_range[0] ?? null;
+function targetPage(target: DocumentPreviewTarget) {
+  return target.anchor?.page ?? target.anchor?.slide ?? target.page_range?.[0] ?? null;
 }
 
-function locationStatus(citation: Citation) {
-  if (citation.source_status === "deleted") return "unavailable";
-  return citation.anchor?.location_status ?? "unavailable";
+function locationStatus(target: DocumentPreviewTarget) {
+  if (target.source_status === "deleted") return "unavailable";
+  if (target.anchor?.location_status) return target.anchor.location_status;
+  if (targetPage(target)) return "page_only";
+  return "available";
 }
 
 function locationStatusCopy(status: string) {
@@ -78,6 +99,11 @@ function locationStatusCopy(status: string) {
         label: "仅幻灯片",
         detail: "只能打开对应幻灯片，未获得可高亮的原文坐标。",
       };
+    case "available":
+      return {
+        label: "完整文件",
+        detail: "从文件开头打开真实原文。",
+      };
     default:
       return {
         label: "不可定位",
@@ -86,23 +112,23 @@ function locationStatusCopy(status: string) {
   }
 }
 
-function citationAnchorBox(citation: Citation) {
-  return citation.anchor?.bbox ?? null;
+function citationAnchorBox(target: DocumentPreviewTarget) {
+  return target.anchor?.bbox ?? null;
 }
 
-function citationCharRange(citation: Citation) {
-  return citation.anchor?.char_range ?? null;
+function citationCharRange(target: DocumentPreviewTarget) {
+  return target.anchor?.char_range ?? null;
 }
 
-export function DocumentPreview({ citation }: DocumentPreviewProps) {
+export function DocumentPreview({ target }: DocumentPreviewProps) {
   const [state, setState] = useState<PreviewState>({ status: "loading" });
-  const type = fileType(citation);
-  const page = targetPage(citation);
-  const status = locationStatus(citation);
+  const type = fileType(target);
+  const page = targetPage(target);
+  const status = locationStatus(target);
   const statusCopy = locationStatusCopy(status);
-  const anchorBox = useMemo(() => citationAnchorBox(citation), [citation]);
+  const anchorBox = useMemo(() => citationAnchorBox(target), [target]);
   const exactAnchorBox = status === "exact" ? anchorBox : null;
-  const charRange = useMemo(() => citationCharRange(citation), [citation]);
+  const charRange = useMemo(() => citationCharRange(target), [target]);
   const canOpenSource = status !== "unavailable";
 
   useEffect(() => {
@@ -117,7 +143,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
       };
     }
 
-    getFilePreview(citation.doc_id)
+    getFilePreview(target.doc_id)
       .then((preview) => {
         if (revoked) return;
         if (preview.source_status === "unavailable") {
@@ -128,11 +154,11 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
             status: "ready",
             blobUrl: "",
             mimeType: "application/pdf",
-            fileName: preview.file_name || citation.doc_title,
+            fileName: preview.file_name || target.doc_title,
           });
           return null;
         }
-        return fetchFilePreviewBlob(citation.doc_id).then((blob) => ({ blob, preview }));
+        return fetchFilePreviewBlob(target.doc_id).then((blob) => ({ blob, preview }));
       })
       .then((result) => {
         if (revoked || result == null) return;
@@ -144,7 +170,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
           status: "ready",
           blobUrl: currentBlobUrl,
           mimeType: mime,
-          fileName: preview.file_name || citation.doc_title,
+          fileName: preview.file_name || target.doc_title,
         });
       })
       .catch((error: unknown) => {
@@ -160,7 +186,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
       revoked = true;
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [citation.doc_id, type, citation.doc_title, canOpenSource, statusCopy.detail]);
+  }, [target.doc_id, type, target.doc_title, canOpenSource, statusCopy.detail]);
 
   return (
     <div className="dm-original-document-preview">
@@ -168,7 +194,7 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
         <div className="dm-document-preview-title">
           <FileText className="dm-document-preview-icon" size={18} />
           <div className="dm-document-preview-meta">
-            <strong>{citation.doc_title}</strong>
+            <strong>{target.doc_title}</strong>
             {page ? <span>第 {page} 页</span> : null}
           </div>
         </div>
@@ -189,8 +215,8 @@ export function DocumentPreview({ citation }: DocumentPreviewProps) {
           <ErrorBoundary>
             <DocumentViewer
               blobUrl={state.blobUrl}
-              docId={state.mimeType === "application/pdf" ? citation.doc_id : undefined}
-              cacheKey={citation.doc_id}
+              docId={state.mimeType === "application/pdf" ? target.doc_id : undefined}
+              cacheKey={target.doc_id}
               mimeType={state.mimeType}
               fileName={state.fileName}
               initialPage={page}

@@ -26,6 +26,7 @@ use crate::models::citation::Citation;
 use crate::models::conversation::{
     ConversationListResponse, ConversationSession, CreateConversationRequest,
 };
+use crate::models::conversation_file::ConversationFileListResponse;
 use crate::models::feedback::{
     DeleteFeedbackResponse, Feedback, FeedbackResponse, SubmitFeedbackRequest,
 };
@@ -71,6 +72,10 @@ pub fn router() -> axum::Router<AppState> {
         .route(
             "/api/conversations/:conversation_id/messages",
             axum::routing::get(get_messages).post(send_message),
+        )
+        .route(
+            "/api/conversations/:conversation_id/files",
+            axum::routing::get(list_conversation_files),
         )
         .route(
             "/api/conversations/:conversation_id/messages/:message_id/traces",
@@ -159,6 +164,37 @@ async fn get_messages(
     Ok(Json(MessageListResponse {
         conversation_id: session.id,
         messages: responses,
+    }))
+}
+
+async fn list_conversation_files(
+    State(state): State<AppState>,
+    ActorExtractor(actor): ActorExtractor,
+    Path(conversation_id): Path<Uuid>,
+) -> Result<Json<ConversationFileListResponse>, AppError> {
+    let session = state
+        .repository
+        .get_session(actor.tenant_id, conversation_id)
+        .await?
+        .filter(|session| {
+            session.user_id == actor.user_id
+                && session.status == crate::models::ConversationStatus::Active
+        })
+        .ok_or_else(AppError::conversation_not_found)?;
+    let configured_kb_ids = if session.kb_ids.is_empty() {
+        actor.allowed_kb_ids.clone()
+    } else {
+        session.kb_ids.clone()
+    };
+    let effective_kb_ids = intersect_kb_ids(&configured_kb_ids, &actor.allowed_kb_ids);
+    let files = state
+        .repository
+        .list_conversation_files(actor.tenant_id, session.id, &effective_kb_ids)
+        .await?;
+
+    Ok(Json(ConversationFileListResponse {
+        conversation_id: session.id,
+        files,
     }))
 }
 

@@ -12,12 +12,15 @@ import {
   MessageSquareText,
   Paperclip,
   Square,
-  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { MessageRow } from "@/components/chat/message-row";
-import { DocumentPreview } from "@/components/chat/document-preview";
+import {
+  previewTargetFromCitation,
+  type DocumentPreviewTarget,
+} from "@/components/chat/document-preview";
+import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
@@ -67,17 +70,17 @@ export function ChatWorkspace() {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const previousMessageCountRef = useRef(0);
-  const [selectedCitation, setSelectedCitation] = useState<Citation | null>(null);
+  const [previewTarget, setPreviewTarget] = useState<DocumentPreviewTarget | null>(null);
 
-  const latestAssistant = messages.filter((m) => m.role === "assistant").pop();
-  const sourceDocs = latestAssistant?.citations ?? [];
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
-  const activeCitation = selectedCitation ?? sourceDocs[0] ?? null;
   const currentFavorite = currentId ? isFavorite(currentId) : false;
   const userName = me?.user.name?.trim() || me?.user.email?.split("@")[0] || "你";
+  const filesRefreshKey = messages
+    .map((message) => `${message.message_id}:${message.status}:${message.citations.length}`)
+    .join("|");
 
   useEffect(() => {
-    setSelectedCitation(null);
+    setPreviewTarget(null);
   }, [currentId]);
 
   useEffect(() => {
@@ -142,7 +145,7 @@ export function ChatWorkspace() {
   };
 
   const handleCitationClick = (c: Citation) => {
-    setSelectedCitation(c);
+    setPreviewTarget(previewTargetFromCitation(c));
     setRightOpen(true);
   };
 
@@ -196,28 +199,6 @@ export function ChatWorkspace() {
     </div>
   );
 
-  const renderRightRail = () => (
-    <aside className={`dm-right-rail ${rightOpen ? "open" : ""}`}>
-      <div className="dm-right-rail-inner">
-        <IconButton
-          aria-label="关闭文件预览"
-          className="dm-right-rail-close"
-          onClick={() => setRightOpen(false)}
-        >
-          <X size={16} />
-        </IconButton>
-
-        <div className="dm-right-rail-body">
-          {activeCitation ? (
-            <DocumentPreview citation={activeCitation} />
-          ) : (
-            <p className="dm-rail-empty">点击答案下方来源后预览原文</p>
-          )}
-        </div>
-      </div>
-    </aside>
-  );
-
   return (
     <>
       <div className={`dm-chat-workspace ${rightOpen ? "has-right-rail" : ""}`}>
@@ -243,13 +224,15 @@ export function ChatWorkspace() {
             </div>
             <div className="dm-chat-session-actions">
               <IconButton
-                aria-label={rightOpen ? "收起文件预览" : "展开文件预览"}
+                aria-label={rightOpen ? "关闭会话文件" : "打开会话文件"}
                 className={`dm-file-preview-toggle ${rightOpen ? "active" : ""}`}
                 onClick={() => {
-                  if (!rightOpen && !selectedCitation && sourceDocs[0]) {
-                    setSelectedCitation(sourceDocs[0]);
+                  if (rightOpen) {
+                    setRightOpen(false);
+                  } else {
+                    setPreviewTarget(null);
+                    setRightOpen(true);
                   }
-                  setRightOpen(!rightOpen);
                 }}
               >
                 <Folder size={19} />
@@ -320,7 +303,14 @@ export function ChatWorkspace() {
           <div className="dm-chat-footer-note">内容由 AI 生成，请仔细甄别</div>
         </div>
 
-        {renderRightRail()}
+        <ConversationFilesPanel
+          conversationId={currentId}
+          open={rightOpen}
+          previewTarget={previewTarget}
+          refreshKey={filesRefreshKey}
+          onPreviewTargetChange={setPreviewTarget}
+          onClose={() => setRightOpen(false)}
+        />
       </div>
 
     </>

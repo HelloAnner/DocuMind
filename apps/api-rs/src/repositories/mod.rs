@@ -1,4 +1,5 @@
 pub mod cache;
+mod conversation_files;
 pub mod memory;
 pub mod sqlx;
 pub mod trait_repo;

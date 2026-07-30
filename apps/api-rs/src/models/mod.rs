@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod citation;
 pub mod conversation;
+pub mod conversation_file;
 pub mod feedback;
 pub mod identity;
 pub mod message;

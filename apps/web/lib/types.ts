@@ -55,6 +55,27 @@ export interface CitationAnchor {
   location_status?: "exact" | "structural_only" | "page_only" | "slide_only" | "unavailable" | string;
 }
 
+export interface ConversationFile {
+  doc_id: UUID;
+  doc_title: string;
+  file_name: string;
+  file_type: string;
+  kb_id?: UUID;
+  kb_name?: string;
+  source_status: "available" | "deleted" | string;
+  retrieval_count: number;
+  citation_count: number;
+  last_used_at: string;
+  preview_page_range: number[];
+  preview_quote: string;
+  preview_anchor?: CitationAnchor;
+}
+
+export interface ConversationFileListResponse {
+  conversation_id: UUID;
+  files: ConversationFile[];
+}
+
 export interface PromptVersions {
   persona: string;
   guardrail: string;

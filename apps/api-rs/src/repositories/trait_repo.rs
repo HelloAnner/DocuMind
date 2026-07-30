@@ -4,12 +4,23 @@ use uuid::Uuid;
 use crate::models::agent::{AgentTrace, CitationOutput};
 use crate::models::citation::Citation;
 use crate::models::conversation::{ConversationListResponse, ConversationSession};
+use crate::models::conversation_file::ConversationFile;
 use crate::models::feedback::Feedback;
 use crate::models::message::ConversationMessage;
 use crate::models::trace::{QueryTrace, RetrievalTrace};
 
 #[async_trait]
-pub trait ConversationRepository: Send + Sync {
+pub trait ConversationFileRepository: Send + Sync {
+    async fn list_conversation_files(
+        &self,
+        tenant_id: Uuid,
+        conversation_id: Uuid,
+        allowed_kb_ids: &[Uuid],
+    ) -> anyhow::Result<Vec<ConversationFile>>;
+}
+
+#[async_trait]
+pub trait ConversationRepository: ConversationFileRepository + Send + Sync {
     async fn create_session(&self, session: ConversationSession) -> anyhow::Result<()>;
     async fn list_sessions(
         &self,
@@ -60,7 +71,6 @@ pub trait ConversationRepository: Send + Sync {
 
     async fn save_citations(&self, citations: Vec<Citation>) -> anyhow::Result<()>;
     async fn get_citations(&self, assistant_message_id: Uuid) -> anyhow::Result<Vec<Citation>>;
-
     async fn save_agent_trace(
         &self,
         assistant_message_id: Uuid,

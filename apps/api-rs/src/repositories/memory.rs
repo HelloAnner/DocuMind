@@ -21,11 +21,11 @@ type ClientRequestMap = HashMap<(Uuid, Uuid, String), Uuid>;
 pub struct InMemoryConversationRepository {
     sessions: Arc<RwLock<HashMap<Uuid, ConversationSession>>>,
     title_locks: Arc<RwLock<HashSet<Uuid>>>,
-    messages: Arc<RwLock<HashMap<Uuid, ConversationMessage>>>,
+    pub(super) messages: Arc<RwLock<HashMap<Uuid, ConversationMessage>>>,
     client_request_ids: Arc<RwLock<ClientRequestMap>>,
     query_traces: Arc<RwLock<HashMap<Uuid, QueryTrace>>>,
-    retrieval_traces: Arc<RwLock<HashMap<Uuid, Vec<RetrievalTrace>>>>,
-    citations: Arc<RwLock<HashMap<Uuid, Vec<Citation>>>>,
+    pub(super) retrieval_traces: Arc<RwLock<HashMap<Uuid, Vec<RetrievalTrace>>>>,
+    pub(super) citations: Arc<RwLock<HashMap<Uuid, Vec<Citation>>>>,
     agent_traces: Arc<RwLock<HashMap<Uuid, AgentTrace>>>,
     feedback: Arc<RwLock<HashMap<(Uuid, Uuid), Feedback>>>,
 }

@@ -17,7 +17,7 @@ use crate::models::{MessageRole, MessageStatus};
 use super::trait_repo::ConversationRepository;
 
 pub struct SqlxConversationRepository {
-    pool: Pool<Postgres>,
+    pub(super) pool: Pool<Postgres>,
 }
 
 impl SqlxConversationRepository {

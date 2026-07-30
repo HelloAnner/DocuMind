@@ -1,6 +1,7 @@
 import { getAuthHeaders } from "./auth";
 import type {
   Conversation,
+  ConversationFileListResponse,
   CreateConversationRequest,
   FeedbackResponse,
   MessageTraceResponse,
@@ -50,6 +51,12 @@ export async function createConversation(
 
 export async function getMessages(conversationId: string): Promise<MessageListResponse> {
   return fetchJson(`/api/conversations/${conversationId}/messages`);
+}
+
+export async function getConversationFiles(
+  conversationId: string
+): Promise<ConversationFileListResponse> {
+  return fetchJson(`/api/conversations/${conversationId}/files`);
 }
 
 export async function deleteConversation(
