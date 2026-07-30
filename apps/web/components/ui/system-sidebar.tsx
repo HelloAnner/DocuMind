@@ -8,7 +8,6 @@ import {
   ClipboardList,
   Cpu,
   Database,
-  FileText,
   FolderOpen,
   LayoutDashboard,
   ListChecks,
@@ -31,7 +30,6 @@ const systemNav = [
 
 const knowledgeNav = [
   { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
-  { label: "文档管理", href: "/admin/documents", icon: FileText },
   { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
   { label: "用户管理", href: "/admin/members", icon: Users },
 ];

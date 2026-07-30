@@ -73,18 +73,18 @@ export function DocumentRow({
           {meta ? <small>{meta}</small> : null}
         </span>
       </span>
-      <span className="dm-document-cell">{type}</span>
-      <span className="dm-document-cell">{size}</span>
-      <span className="dm-document-cell">{pages ?? "—"}</span>
-      <span className="dm-document-cell">{status === "失败" ? "—" : chunks}</span>
-      <span className="dm-document-cell">{tables ?? 0}</span>
-      <span className="dm-document-cell">{quality == null ? "—" : `${Math.round(quality * 100)}%`}</span>
-      <span className="dm-document-cell">
+      <span className="dm-document-cell" data-label="类型">{type}</span>
+      <span className="dm-document-cell" data-label="大小">{size}</span>
+      <span className="dm-document-cell" data-label="页数">{pages ?? "—"}</span>
+      <span className="dm-document-cell" data-label="切片">{status === "失败" ? "—" : chunks}</span>
+      <span className="dm-document-cell" data-label="表格">{tables ?? 0}</span>
+      <span className="dm-document-cell" data-label="质量">{quality == null ? "—" : `${Math.round(quality * 100)}%`}</span>
+      <span className="dm-document-cell" data-label="状态">
         <Badge tone={tone}>{status}</Badge>
       </span>
-      <span className="dm-document-cell">{updated}</span>
+      <span className="dm-document-cell" data-label="更新时间">{updated}</span>
       {actions ? (
-        <span className="dm-document-actions" onClick={(event) => event.stopPropagation()}>
+        <span className="dm-document-actions" data-label="操作" onClick={(event) => event.stopPropagation()}>
           {actions}
         </span>
       ) : null}

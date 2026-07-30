@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Pencil, Plus, Trash2, X } from "lucide-react";
+import { FileText, Pencil, Plus, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { KnowledgeCard } from "@/components/ui/knowledge-card";
 import { SearchInput } from "@/components/ui/search-input";
@@ -148,13 +148,23 @@ export function AdminKnowledge() {
                 <>
                   <Button
                     variant="secondary"
+                    icon={<FileText size={13} />}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      openKnowledgeBase(kb.id);
+                    }}
+                  >
+                    文档列表
+                  </Button>
+                  <Button
+                    variant="ghost"
                     icon={<Pencil size={13} />}
                     onClick={(event) => {
                       event.stopPropagation();
                       openEdit(kb);
                     }}
                   >
-                    管理
+                    设置
                   </Button>
                   <Button
                     variant="ghost"

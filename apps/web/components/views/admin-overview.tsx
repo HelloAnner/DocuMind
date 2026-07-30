@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { FileText, Upload } from "lucide-react";
+import { FileText, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Panel } from "@/components/ui/panel";
@@ -39,8 +39,8 @@ export function AdminOverview() {
   return (
     <>
       <Topbar title="概览">
-        <Link href="/admin/documents">
-          <Button icon={<Upload size={14} />}>上传文档</Button>
+        <Link href="/admin/knowledge">
+          <Button icon={<FolderOpen size={14} />}>进入知识库</Button>
         </Link>
       </Topbar>
 

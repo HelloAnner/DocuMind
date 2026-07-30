@@ -9,7 +9,6 @@ import {
   ClipboardList,
   Cpu,
   Database,
-  FileText,
   FolderOpen,
   LayoutDashboard,
   ListChecks,
@@ -69,7 +68,6 @@ const tenantSections: NavSection[] = [
     title: "知识库",
     items: [
       { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
-      { label: "文档与解析", href: "/admin/documents", icon: FileText },
       { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
     ],
   },
@@ -93,6 +91,7 @@ const tenantSections: NavSection[] = [
 
 function isActive(pathname: string, item: NavEntry) {
   if (item.exact) return pathname === item.href;
+  if (item.href === "/admin/knowledge" && pathname.startsWith("/admin/documents")) return true;
   return pathname === item.href || pathname.startsWith(`${item.href}/`);
 }
 

@@ -847,19 +847,68 @@ export async function downloadAdminDocumentOriginal(docId: string, fileName: str
   URL.revokeObjectURL(url);
 }
 
-export async function uploadAdminDocument(kbId: string, file: File): Promise<AdminDocument> {
-  const form = new FormData();
-  form.set("file", file);
-  const response = await fetch(`${BASE}/api/knowledge-bases/${kbId}/documents`, {
-    method: "POST",
-    headers: getAuthHeaders(),
-    body: form,
+export interface DocumentUploadProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+}
+
+export function uploadAdminDocumentWithProgress(
+  kbId: string,
+  file: File,
+  onProgress: (progress: DocumentUploadProgress) => void,
+  signal?: AbortSignal
+): Promise<UploadDocumentResponse> {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+    form.set("file", file);
+    const request = new XMLHttpRequest();
+    const abortRequest = () => request.abort();
+    const cleanup = () => signal?.removeEventListener("abort", abortRequest);
+
+    request.open("POST", `${BASE}/api/knowledge-bases/${kbId}/documents`);
+    Object.entries(getAuthHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
+
+    request.upload.addEventListener("progress", (event) => {
+      const total = event.lengthComputable && event.total > 0 ? event.total : file.size;
+      const loaded = Math.min(event.loaded, total);
+      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+      onProgress({ loaded, total, percent });
+    });
+
+    request.addEventListener("load", () => {
+      cleanup();
+      if (request.status < 200 || request.status >= 300) {
+        reject(new Error(`API error ${request.status}: ${request.responseText || "上传失败"}`));
+        return;
+      }
+      try {
+        resolve(JSON.parse(request.responseText) as UploadDocumentResponse);
+      } catch {
+        reject(new Error("上传响应格式无效"));
+      }
+    });
+    request.addEventListener("error", () => {
+      cleanup();
+      reject(new Error("网络连接异常，文件上传失败"));
+    });
+    request.addEventListener("abort", () => {
+      cleanup();
+      reject(new DOMException("上传已取消", "AbortError"));
+    });
+
+    if (signal?.aborted) {
+      reject(new DOMException("上传已取消", "AbortError"));
+      return;
+    }
+    signal?.addEventListener("abort", abortRequest, { once: true });
+    onProgress({ loaded: 0, total: file.size, percent: 0 });
+    request.send(form);
   });
-  if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    throw new Error(`API error ${response.status}: ${text}`);
-  }
-  const uploaded = (await response.json()) as UploadDocumentResponse;
+}
+
+export async function uploadAdminDocument(kbId: string, file: File): Promise<AdminDocument> {
+  const uploaded = await uploadAdminDocumentWithProgress(kbId, file, () => undefined);
   const detail = await getAdminDocument(uploaded.document_id);
   return detail.document;
 }

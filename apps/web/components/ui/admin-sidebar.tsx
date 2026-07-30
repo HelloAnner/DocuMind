@@ -6,7 +6,6 @@ import {
   ArrowLeft,
   BrainCircuit,
   Cpu,
-  FileText,
   FolderOpen,
   LayoutDashboard,
   MessageSquare,
@@ -20,7 +19,6 @@ import { NavItem } from "./nav-item";
 const manageNav = [
   { label: "概览", href: "/admin", icon: LayoutDashboard },
   { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
-  { label: "文档管理", href: "/admin/documents", icon: FileText },
   { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
   { label: "用户管理", href: "/admin/members", icon: Users },
   { label: "权限策略", href: "/admin/permissions", icon: Shield },
