@@ -4312,7 +4312,7 @@ body > .hiddenCanvasElement {
 .dm-kb-document-panel .dm-document-row,
 .dm-kb-document-panel .dm-document-table-head {
   gap: 8px;
-  grid-template-columns: minmax(220px, 1fr) 56px 72px 48px 56px 56px 64px 76px 88px 64px;
+  grid-template-columns: 36px minmax(200px, 1fr) 52px 68px 46px 52px 52px 60px 72px 84px 60px;
 }
 
 .dm-upload-page-content {
@@ -4542,13 +4542,18 @@ body > .hiddenCanvasElement {
 
   .dm-kb-document-panel .dm-document-row {
     gap: 8px 16px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: auto 1fr 1fr;
     padding: 14px 0;
+  }
+
+  .dm-kb-document-panel .dm-document-checkbox {
+    grid-column: 1;
+    grid-row: 1 / span 3;
   }
 
   .dm-kb-document-panel .dm-document-name,
   .dm-kb-document-panel .dm-document-actions {
-    grid-column: 1 / -1;
+    grid-column: 2 / -1;
   }
 
   .dm-kb-document-panel .dm-document-cell,
@@ -4631,5 +4636,147 @@ body > .hiddenCanvasElement {
   .dm-upload-drop-zone,
   .dm-upload-real-progress span {
     transition-duration: 1ms;
+  }
+}
+
+/* Document selection checkbox */
+
+.dm-document-checkbox {
+  align-items: center;
+  display: flex;
+  flex-shrink: 0;
+  justify-content: center;
+  width: 36px;
+}
+
+.dm-document-checkbox input[type="checkbox"] {
+  accent-color: var(--accent-action);
+  cursor: pointer;
+  height: 16px;
+  width: 16px;
+}
+
+.dm-document-row.is-selected {
+  background: var(--accent-bg);
+}
+
+.dm-document-row.is-selected:hover {
+  background: color-mix(in srgb, var(--accent-bg) 80%, var(--hover-bg));
+}
+
+/* Batch action bar */
+
+.dm-batch-action-bar {
+  align-items: center;
+  background: var(--surface-raised);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  bottom: 24px;
+  box-shadow: var(--overlay-shadow);
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  left: 50%;
+  padding: 12px 16px;
+  position: fixed;
+  transform: translateX(-50%);
+  z-index: 100;
+}
+
+.dm-batch-action-count {
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.dm-batch-action-buttons {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+/* Upload modal */
+
+.dm-upload-modal {
+  max-height: 85vh;
+  max-width: 600px;
+  overflow-y: auto;
+  width: 100%;
+}
+
+.dm-upload-modal .dm-upload-intro {
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr);
+  padding: 12px;
+}
+
+.dm-upload-modal .dm-upload-intro > span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.dm-upload-modal .dm-upload-intro strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.dm-upload-modal .dm-upload-intro p {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.dm-upload-modal .dm-upload-drop-zone {
+  min-height: 160px;
+  padding: 20px;
+}
+
+.dm-upload-modal .dm-upload-file-card {
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  display: flex;
+  justify-content: space-between;
+  padding: 14px;
+}
+
+.dm-upload-modal .dm-upload-progress-panel {
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-faint);
+  border-radius: 10px;
+  padding: 14px;
+}
+
+@media (max-width: 767px) {
+  .dm-batch-action-bar {
+    border-radius: 0;
+    bottom: 0;
+    flex-direction: column;
+    gap: 10px;
+    left: 0;
+    padding: 14px;
+    right: 0;
+    transform: none;
+  }
+
+  .dm-batch-action-buttons {
+    width: 100%;
+  }
+
+  .dm-batch-action-buttons .dm-button {
+    flex: 1;
+  }
+
+  .dm-upload-modal {
+    border-radius: 0;
+    margin: 0;
+    max-height: 100dvh;
+    max-width: 100%;
   }
 }

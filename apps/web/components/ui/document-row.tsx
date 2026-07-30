@@ -28,6 +28,8 @@ export function DocumentRow({
   meta,
   actions,
   onClick,
+  selected,
+  onSelect,
 }: {
   name: string;
   type: string;
@@ -42,6 +44,8 @@ export function DocumentRow({
   meta?: string;
   actions?: ReactNode;
   onClick?: () => void;
+  selected?: boolean;
+  onSelect?: (checked: boolean) => void;
 }) {
   const tone =
     status === "已完成"
@@ -54,7 +58,7 @@ export function DocumentRow({
 
   return (
     <div
-      className="dm-document-row"
+      className={`dm-document-row${selected ? " is-selected" : ""}`}
       onClick={onClick}
       onKeyDown={(event) => {
         if ((event.key === "Enter" || event.key === " ") && onClick) {
@@ -65,6 +69,16 @@ export function DocumentRow({
       role={onClick ? "button" : undefined}
       tabIndex={onClick ? 0 : undefined}
     >
+      {onSelect ? (
+        <span className="dm-document-checkbox" onClick={(event) => event.stopPropagation()}>
+          <input
+            type="checkbox"
+            checked={selected ?? false}
+            onChange={(event) => onSelect(event.target.checked)}
+            aria-label={`选择 ${name}`}
+          />
+        </span>
+      ) : null}
       <span className="dm-document-name">
         <FileText size={18} />
         <span>

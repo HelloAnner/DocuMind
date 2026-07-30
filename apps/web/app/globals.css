@@ -676,8 +676,8 @@ a {
   border-bottom: 1px solid var(--border-faint);
   color: var(--text-tertiary);
   display: grid;
-  gap: 12px;
-  grid-template-columns: minmax(260px, 1fr) 64px 80px 54px 64px 64px 70px 86px 100px 82px;
+  gap: 8px;
+  grid-template-columns: 36px minmax(220px, 1fr) 56px 72px 48px 56px 56px 64px 76px 88px 64px;
   min-height: 50px;
   padding: 8px 0;
   text-align: left;
@@ -686,7 +686,7 @@ a {
 }
 
 .dm-document-table-head {
-  grid-template-columns: minmax(260px, 1fr) 64px 80px 54px 64px 64px 70px 86px 100px 82px;
+  grid-template-columns: 36px minmax(220px, 1fr) 56px 72px 48px 56px 56px 64px 76px 88px 64px;
 }
 
 .dm-document-row:hover {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeft, RefreshCw, Trash2, Upload } from "lucide-react";
+import { ArrowLeft, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import {
   deleteAdminDocument,
   listAdminDocuments,
@@ -19,6 +19,7 @@ import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Segmented } from "@/components/ui/segmented";
 import { Topbar } from "@/components/ui/topbar";
+import { AdminDocumentUploadModal } from "./admin-document-upload-modal";
 import { ManagedDocumentDrawer } from "./managed-document-drawer";
 
 const filters = [
@@ -52,6 +53,9 @@ export function AdminDocuments() {
   const [loading, setLoading] = useState(true);
   const [busyDocId, setBusyDocId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice>();
+  const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const [batchBusy, setBatchBusy] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -116,6 +120,76 @@ export function AdminDocuments() {
     return documents.filter((doc) => PROCESSING_STATUSES.has(doc.parse_status));
   }, [documents, filter]);
 
+  const allSelected = visibleDocuments.length > 0 && visibleDocuments.every((doc) => selectedDocIds.has(doc.doc_id));
+  const someSelected = visibleDocuments.some((doc) => selectedDocIds.has(doc.doc_id));
+
+  function toggleSelectAll() {
+    if (allSelected) {
+      setSelectedDocIds(new Set());
+    } else {
+      setSelectedDocIds(new Set(visibleDocuments.map((doc) => doc.doc_id)));
+    }
+  }
+
+  function toggleSelectDoc(docId: string, checked: boolean) {
+    setSelectedDocIds((prev) => {
+      const next = new Set(prev);
+      if (checked) {
+        next.add(docId);
+      } else {
+        next.delete(docId);
+      }
+      return next;
+    });
+  }
+
+  async function handleBatchDelete() {
+    const selectedIds = Array.from(selectedDocIds);
+    if (selectedIds.length === 0) return;
+    if (!window.confirm(`确认删除选中的 ${selectedIds.length} 个文档及其切片和引用索引？`)) return;
+    setBatchBusy(true);
+    setNotice(undefined);
+    let deleted = 0;
+    let failed = 0;
+    for (const docId of selectedIds) {
+      try {
+        await deleteAdminDocument(docId);
+        deleted++;
+        if (selectedDocId === docId) setSelectedDocId(undefined);
+      } catch {
+        failed++;
+      }
+    }
+    setSelectedDocIds(new Set());
+    if (failed === 0) {
+      setNotice({ tone: "info", message: `已删除 ${deleted} 个文档` });
+    } else {
+      setNotice({ tone: "error", message: `成功删除 ${deleted} 个，${failed} 个失败` });
+    }
+    setBatchBusy(false);
+    await refresh();
+  }
+
+  async function handleBatchRetry() {
+    const selectedIds = Array.from(selectedDocIds);
+    if (selectedIds.length === 0) return;
+    setBatchBusy(true);
+    setNotice(undefined);
+    try {
+      await retryAdminDocuments(selectedIds);
+      setNotice({ tone: "info", message: `已重新提交 ${selectedIds.length} 个文档解析` });
+      setSelectedDocIds(new Set());
+    } catch (error) {
+      setNotice({
+        tone: "error",
+        message: error instanceof Error ? error.message : "批量重试失败",
+      });
+    } finally {
+      setBatchBusy(false);
+      await refresh();
+    }
+  }
+
   async function handleReprocess(doc: AdminDocument) {
     setBusyDocId(doc.doc_id);
     setNotice(undefined);
@@ -173,8 +247,6 @@ export function AdminDocuments() {
     }
   }
 
-  const uploadHref = `/admin/documents/upload?kb_id=${encodeURIComponent(kbId)}`;
-
   return (
     <>
       <Topbar
@@ -195,9 +267,9 @@ export function AdminDocuments() {
           刷新
         </Button>
         {kbId ? (
-          <Link href={uploadHref}>
-            <Button icon={<Upload size={14} />}>上传文档</Button>
-          </Link>
+          <Button icon={<Upload size={14} />} onClick={() => setShowUploadModal(true)}>
+            上传文档
+          </Button>
         ) : null}
       </Topbar>
 
@@ -253,6 +325,17 @@ export function AdminDocuments() {
             ) : null}
 
             <div className="dm-table-head dm-document-table-head">
+              <span className="dm-document-checkbox">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someSelected && !allSelected;
+                  }}
+                  onChange={toggleSelectAll}
+                  aria-label="全选"
+                />
+              </span>
               <span>文件名</span>
               <span>类型</span>
               <span>大小</span>
@@ -270,9 +353,9 @@ export function AdminDocuments() {
                 <strong>{query ? "没有匹配的文档" : "这个知识库还没有文档"}</strong>
                 <p>{query ? "请尝试其他关键词。" : "上传第一个文档后，解析状态会显示在这里。"}</p>
                 {!query && kbId ? (
-                  <Link href={uploadHref}>
-                    <Button icon={<Upload size={14} />}>上传文档</Button>
-                  </Link>
+                  <Button icon={<Upload size={14} />} onClick={() => setShowUploadModal(true)}>
+                    上传文档
+                  </Button>
                 ) : null}
               </div>
             ) : null}
@@ -291,6 +374,8 @@ export function AdminDocuments() {
                     updated={new Date(doc.updated_at).toLocaleDateString()}
                     meta={`v${doc.parse_version} · ${doc.latest_parse_job_id?.slice(0, 8) ?? "no job"}`}
                     onClick={() => setSelectedDocId(doc.doc_id)}
+                    selected={selectedDocIds.has(doc.doc_id)}
+                    onSelect={(checked) => toggleSelectDoc(doc.doc_id, checked)}
                     actions={
                       <>
                         <button
@@ -332,6 +417,47 @@ export function AdminDocuments() {
           onNotice={handleDrawerNotice}
         />
       ) : null}
+
+      {showUploadModal && kbId ? (
+        <AdminDocumentUploadModal
+          kbId={kbId}
+          kbName={knowledgeBase?.name ?? "知识库"}
+          onClose={() => setShowUploadModal(false)}
+          onUploaded={() => refresh()}
+        />
+      ) : null}
+
+      {selectedDocIds.size > 0 ? (
+        <div className="dm-batch-action-bar" role="toolbar" aria-label="批量操作">
+          <span className="dm-batch-action-count">已选择 {selectedDocIds.size} 个文档</span>
+          <div className="dm-batch-action-buttons">
+            <Button
+              icon={<RefreshCw size={14} />}
+              disabled={batchBusy}
+              onClick={() => handleBatchRetry().catch(console.error)}
+              variant="secondary"
+            >
+              批量重试
+            </Button>
+            <Button
+              icon={<Trash2 size={14} />}
+              disabled={batchBusy}
+              onClick={() => handleBatchDelete().catch(console.error)}
+              variant="secondary"
+            >
+              批量删除
+            </Button>
+            <Button
+              icon={<X size={14} />}
+              onClick={() => setSelectedDocIds(new Set())}
+              variant="ghost"
+            >
+              取消选择
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <span className="dm-screen-reader-only" aria-live="polite">
         {loading ? "正在加载文档" : `已显示 ${visibleDocuments.length} 个文档`}
       </span>
