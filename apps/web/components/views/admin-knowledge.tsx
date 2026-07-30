@@ -156,26 +156,30 @@ export function AdminKnowledge() {
                   >
                     文档列表
                   </Button>
-                  <Button
-                    variant="ghost"
-                    icon={<Pencil size={13} />}
+                  <button
+                    aria-label={`设置知识库 ${kb.name}`}
+                    className="dm-icon-button"
                     onClick={(event) => {
                       event.stopPropagation();
                       openEdit(kb);
                     }}
+                    title="设置"
+                    type="button"
                   >
-                    设置
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    icon={<Trash2 size={13} />}
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    aria-label={`删除知识库 ${kb.name}`}
+                    className="dm-icon-button"
                     onClick={(event) => {
                       event.stopPropagation();
                       removeKnowledgeBase(kb).catch(console.error);
                     }}
+                    title="删除"
+                    type="button"
                   >
-                    删除
-                  </Button>
+                    <Trash2 size={14} />
+                  </button>
                 </>
               }
             />

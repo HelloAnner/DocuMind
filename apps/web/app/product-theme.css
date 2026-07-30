@@ -4309,6 +4309,12 @@ body > .hiddenCanvasElement {
   border-bottom: 1px solid var(--border-faint);
 }
 
+.dm-kb-document-panel .dm-document-row,
+.dm-kb-document-panel .dm-document-table-head {
+  gap: 8px;
+  grid-template-columns: minmax(220px, 1fr) 56px 72px 48px 56px 56px 64px 76px 88px 64px;
+}
+
 .dm-upload-page-content {
   padding: 24px;
 }
@@ -4529,7 +4535,7 @@ body > .hiddenCanvasElement {
   padding-top: 12px;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1180px) {
   .dm-kb-document-panel .dm-document-table-head {
     display: none;
   }
