@@ -8,6 +8,7 @@ import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 interface PdfViewerProps {
   docId: string;
   cacheKey?: string;
+  conversationId?: string;
   initialPage?: number | null;
   anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   fileName?: string;
@@ -20,14 +21,15 @@ const objectUrlCache = new Map<string, string>();
 
 async function getCachedPageBlob(
   docId: string,
-  pageNumber: number
+  pageNumber: number,
+  conversationId?: string
 ): Promise<{ blob: Blob; totalPages?: number }> {
-  const key = `${docId}:page:${pageNumber}`;
+  const key = `${conversationId ?? "direct"}:${docId}:page:${pageNumber}`;
   const cached = pageBlobCache.get(key);
   if (cached) return cached;
 
   const promise = (async () => {
-    const response = await fetch(filePreviewPagePdfUrl(docId, pageNumber), {
+    const response = await fetch(filePreviewPagePdfUrl(docId, pageNumber, conversationId), {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -76,6 +78,7 @@ async function getCachedPdf(sourceKey: string, url: string): Promise<PDFDocument
 export function PdfViewer({
   docId,
   cacheKey,
+  conversationId,
   initialPage,
   anchorBox,
   onReady,
@@ -92,7 +95,11 @@ export function PdfViewer({
     async function bootstrap() {
       try {
         const target = Math.max(1, initialPage ?? 1);
-        const { blob, totalPages: totalHeader } = await getCachedPageBlob(docId, target);
+        const { blob, totalPages: totalHeader } = await getCachedPageBlob(
+          docId,
+          target,
+          conversationId
+        );
 
         const url = await getCachedObjectUrl(docId, target, blob);
         const sourceKey = `${cacheKey ?? docId}:page:${target}`;
@@ -120,7 +127,7 @@ export function PdfViewer({
     return () => {
       cancelled = true;
     };
-  }, [docId, cacheKey, initialPage, onReady]);
+  }, [docId, cacheKey, initialPage, onReady, conversationId]);
 
   // 滚动懒加载：只加载进入可视区域的 skeleton 及其相邻 1 页
   useEffect(() => {
@@ -183,6 +190,7 @@ export function PdfViewer({
               <SinglePdfPage
                 docId={docId}
                 cacheKey={cacheKey}
+                conversationId={conversationId}
                 pageNumber={pageNumber}
                 totalPages={totalPages}
                 isTarget={isTarget}
@@ -221,6 +229,7 @@ export function PdfViewer({
 interface SinglePdfPageProps {
   docId: string;
   cacheKey?: string;
+  conversationId?: string;
   pageNumber: number;
   totalPages: number;
   isTarget: boolean;
@@ -239,6 +248,7 @@ interface PageSize {
 function SinglePdfPage({
   docId,
   cacheKey,
+  conversationId,
   pageNumber,
   totalPages,
   isTarget,
@@ -259,7 +269,7 @@ function SinglePdfPage({
 
     async function prepare() {
       try {
-        const { blob } = await getCachedPageBlob(docId, pageNumber);
+        const { blob } = await getCachedPageBlob(docId, pageNumber, conversationId);
         const url = await getCachedObjectUrl(docId, pageNumber, blob);
         const sourceKey = `${cacheKey ?? docId}:page:${pageNumber}`;
         const pdf = await getCachedPdf(sourceKey, url);
@@ -306,7 +316,7 @@ function SinglePdfPage({
       pageRef.current?.cleanup();
       pageRef.current = null;
     };
-  }, [docId, cacheKey, pageNumber]);
+  }, [docId, cacheKey, pageNumber, conversationId]);
 
   // canvas 尺寸确定后绘制页面与可选文本层
   useEffect(() => {

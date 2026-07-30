@@ -9,6 +9,7 @@ import { DocumentViewer } from "./document-viewer";
 
 interface DocumentPreviewProps {
   target: DocumentPreviewTarget;
+  conversationId?: string;
 }
 
 export interface DocumentPreviewTarget {
@@ -120,7 +121,7 @@ function citationCharRange(target: DocumentPreviewTarget) {
   return target.anchor?.char_range ?? null;
 }
 
-export function DocumentPreview({ target }: DocumentPreviewProps) {
+export function DocumentPreview({ target, conversationId }: DocumentPreviewProps) {
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const type = fileType(target);
   const page = targetPage(target);
@@ -143,7 +144,7 @@ export function DocumentPreview({ target }: DocumentPreviewProps) {
       };
     }
 
-    getFilePreview(target.doc_id)
+    getFilePreview(target.doc_id, conversationId)
       .then((preview) => {
         if (revoked) return;
         if (preview.source_status === "unavailable") {
@@ -158,7 +159,10 @@ export function DocumentPreview({ target }: DocumentPreviewProps) {
           });
           return null;
         }
-        return fetchFilePreviewBlob(target.doc_id).then((blob) => ({ blob, preview }));
+        return fetchFilePreviewBlob(target.doc_id, conversationId).then((blob) => ({
+          blob,
+          preview,
+        }));
       })
       .then((result) => {
         if (revoked || result == null) return;
@@ -186,7 +190,14 @@ export function DocumentPreview({ target }: DocumentPreviewProps) {
       revoked = true;
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [target.doc_id, type, target.doc_title, canOpenSource, statusCopy.detail]);
+  }, [
+    target.doc_id,
+    type,
+    target.doc_title,
+    canOpenSource,
+    statusCopy.detail,
+    conversationId,
+  ]);
 
   return (
     <div className="dm-original-document-preview">
@@ -217,6 +228,7 @@ export function DocumentPreview({ target }: DocumentPreviewProps) {
               blobUrl={state.blobUrl}
               docId={state.mimeType === "application/pdf" ? target.doc_id : undefined}
               cacheKey={target.doc_id}
+              conversationId={conversationId}
               mimeType={state.mimeType}
               fileName={state.fileName}
               initialPage={page}

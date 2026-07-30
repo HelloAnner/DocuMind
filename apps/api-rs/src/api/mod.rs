@@ -2,6 +2,7 @@ pub mod account;
 pub mod admin;
 pub mod admin_members;
 pub mod auth;
+mod conversation_file_access;
 pub mod conversations;
 pub mod documents;
 pub mod history;

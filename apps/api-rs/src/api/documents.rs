@@ -255,6 +255,7 @@ struct FilePreviewAccessClaims {
 #[derive(Debug, Deserialize)]
 struct PreviewAccessQuery {
     preview_token: Option<String>,
+    conversation_id: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1543,18 +1544,27 @@ async fn download_original(
 async fn get_file_preview(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
+    Query(query): Query<PreviewAccessQuery>,
     AxumPath(doc_id): AxumPath<Uuid>,
 ) -> Result<Json<FilePreviewResponse>, AppError> {
-    let doc = fetch_readable_document(&state, &actor, doc_id).await?;
+    let doc = fetch_readable_document(&state, &actor, doc_id, query.conversation_id).await?;
     let preview_type = preview_type_for(&doc.file_type);
+    let preview_url = contextual_preview_url(
+        &format!("/api/files/{doc_id}/preview/content"),
+        query.conversation_id,
+    );
+    let manifest_url = contextual_preview_url(
+        &format!("/api/files/{doc_id}/preview/manifest"),
+        query.conversation_id,
+    );
     Ok(Json(FilePreviewResponse {
         doc_id: doc.id,
         parse_job_id: doc.latest_parse_job_id,
         file_name: doc.file_name,
         format: doc.file_type,
         preview_type,
-        preview_url: format!("/api/files/{doc_id}/preview/content"),
-        manifest_url: format!("/api/files/{doc_id}/preview/manifest"),
+        preview_url,
+        manifest_url,
         source_status: source_status_for(&doc.parse_status).to_string(),
     }))
 }
@@ -1562,9 +1572,10 @@ async fn get_file_preview(
 async fn get_file_preview_url(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
+    Query(query): Query<PreviewAccessQuery>,
     AxumPath(doc_id): AxumPath<Uuid>,
 ) -> Result<Json<FilePreviewUrlResponse>, AppError> {
-    let doc = fetch_readable_document(&state, &actor, doc_id).await?;
+    let doc = fetch_readable_document(&state, &actor, doc_id, query.conversation_id).await?;
     let expires_in_seconds = state.config.object_storage_presign_expire_seconds;
     let expires_at =
         Utc::now() + ChronoDuration::seconds(i64::try_from(expires_in_seconds).unwrap_or(i64::MAX));
@@ -1593,8 +1604,14 @@ async fn get_file_preview_manifest(
     AxumPath(doc_id): AxumPath<Uuid>,
     headers: HeaderMap,
 ) -> Result<Json<FilePreviewManifest>, AppError> {
-    let doc =
-        fetch_preview_document(&state, &headers, doc_id, query.preview_token.as_deref()).await?;
+    let doc = fetch_preview_document(
+        &state,
+        &headers,
+        doc_id,
+        query.preview_token.as_deref(),
+        query.conversation_id,
+    )
+    .await?;
     let page_count = fetch_preview_page_count(&state, &doc).await?;
     let preview_type = preview_type_for(&doc.file_type);
     let text_layer_available = matches!(doc.file_type.as_str(), "pdf" | "txt" | "md");
@@ -1636,8 +1653,14 @@ async fn download_file_preview_page_pdf(
     AxumPath((doc_id, page)): AxumPath<(Uuid, u32)>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let doc =
-        fetch_preview_document(&state, &headers, doc_id, query.preview_token.as_deref()).await?;
+    let doc = fetch_preview_document(
+        &state,
+        &headers,
+        doc_id,
+        query.preview_token.as_deref(),
+        query.conversation_id,
+    )
+    .await?;
     if doc.file_type == "pdf" {
         return download_pdf_page_from_document(&state, &doc, page).await;
     }
@@ -1656,8 +1679,14 @@ async fn download_file_preview_content(
     Query(query): Query<PreviewAccessQuery>,
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
-    let doc =
-        fetch_preview_document(&state, &headers, doc_id, query.preview_token.as_deref()).await?;
+    let doc = fetch_preview_document(
+        &state,
+        &headers,
+        doc_id,
+        query.preview_token.as_deref(),
+        query.conversation_id,
+    )
+    .await?;
     if is_office_preview_type(&doc.file_type) {
         return download_office_preview_pdf(&state, &doc).await;
     }
@@ -2023,6 +2052,7 @@ async fn fetch_readable_document(
     state: &AppState,
     actor: &crate::models::CurrentActor,
     doc_id: Uuid,
+    conversation_id: Option<Uuid>,
 ) -> Result<DocumentRecord, AppError> {
     let pool = state.db_pool.as_ref().ok_or_else(|| {
         AppError::bad_request(
@@ -2031,7 +2061,22 @@ async fn fetch_readable_document(
         )
     })?;
     let doc = fetch_document(pool, actor.tenant_id, doc_id).await?;
-    require_kb_permission(actor, doc.kb_id, "read")?;
+    if let Err(access_error) = require_kb_permission(actor, doc.kb_id, "read") {
+        let Some(conversation_id) = conversation_id else {
+            return Err(access_error);
+        };
+        let allowed = super::conversation_file_access::is_conversation_file_accessible(
+            pool,
+            actor,
+            conversation_id,
+            doc.id,
+            doc.kb_id,
+        )
+        .await?;
+        if !allowed {
+            return Err(access_error);
+        }
+    }
     if doc.parse_status == "excluded_from_search" {
         return Err(AppError::InvalidState {
             code: "DOCUMENT_EXCLUDED_FROM_SEARCH".to_string(),
@@ -2046,9 +2091,10 @@ async fn fetch_preview_document(
     headers: &HeaderMap,
     doc_id: Uuid,
     preview_token: Option<&str>,
+    conversation_id: Option<Uuid>,
 ) -> Result<DocumentRecord, AppError> {
     if let Some(actor) = actor_from_bearer_token(state, headers).await? {
-        return fetch_readable_document(state, &actor, doc_id).await;
+        return fetch_readable_document(state, &actor, doc_id, conversation_id).await;
     }
 
     let token = preview_token.ok_or_else(AppError::unauthorized)?;
@@ -2116,6 +2162,12 @@ fn decode_preview_access_token(
 
 fn signed_preview_url(path: &str, token: &str) -> String {
     format!("{path}?preview_token={token}")
+}
+
+fn contextual_preview_url(path: &str, conversation_id: Option<Uuid>) -> String {
+    conversation_id
+        .map(|conversation_id| format!("{path}?conversation_id={conversation_id}"))
+        .unwrap_or_else(|| path.to_string())
 }
 
 async fn fetch_preview_page_count(

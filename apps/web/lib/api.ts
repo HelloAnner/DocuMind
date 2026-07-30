@@ -734,24 +734,52 @@ export function adminDocumentPagePdfUrl(docId: string, page: number): string {
   return `${BASE}/api/admin/documents/${docId}/pages/${page}/pdf`;
 }
 
-export function filePreviewPagePdfUrl(docId: string, page: number): string {
-  return `${BASE}/api/files/${docId}/preview/pages/${page}/pdf`;
+function withConversationContext(path: string, conversationId?: string): string {
+  if (!conversationId) return path;
+  const separator = path.includes("?") ? "&" : "?";
+  return `${path}${separator}conversation_id=${encodeURIComponent(conversationId)}`;
 }
 
-export function filePreviewContentUrl(docId: string): string {
-  return `${BASE}/api/files/${docId}/preview/content`;
+export function filePreviewPagePdfUrl(
+  docId: string,
+  page: number,
+  conversationId?: string
+): string {
+  return withConversationContext(
+    `${BASE}/api/files/${docId}/preview/pages/${page}/pdf`,
+    conversationId
+  );
 }
 
-export async function getFilePreview(docId: string): Promise<FilePreviewResponse> {
-  return fetchJson(`/api/files/${docId}/preview`);
+export function filePreviewContentUrl(docId: string, conversationId?: string): string {
+  return withConversationContext(`${BASE}/api/files/${docId}/preview/content`, conversationId);
 }
 
-export async function getFilePreviewUrl(docId: string): Promise<FilePreviewUrlResponse> {
-  return fetchJson(`/api/files/${docId}/preview-url`);
+export async function getFilePreview(
+  docId: string,
+  conversationId?: string
+): Promise<FilePreviewResponse> {
+  return fetchJson(
+    withConversationContext(`/api/files/${docId}/preview`, conversationId)
+  );
 }
 
-export async function getFilePreviewManifest(docId: string): Promise<FilePreviewManifest> {
-  return fetchJson(`/api/files/${docId}/preview/manifest`);
+export async function getFilePreviewUrl(
+  docId: string,
+  conversationId?: string
+): Promise<FilePreviewUrlResponse> {
+  return fetchJson(
+    withConversationContext(`/api/files/${docId}/preview-url`, conversationId)
+  );
+}
+
+export async function getFilePreviewManifest(
+  docId: string,
+  conversationId?: string
+): Promise<FilePreviewManifest> {
+  return fetchJson(
+    withConversationContext(`/api/files/${docId}/preview/manifest`, conversationId)
+  );
 }
 
 const originalBlobCache = new Map<string, Promise<Blob>>();
@@ -780,12 +808,16 @@ export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blo
   return promise;
 }
 
-export async function fetchFilePreviewBlob(docId: string): Promise<Blob> {
-  const cached = filePreviewBlobCache.get(docId);
+export async function fetchFilePreviewBlob(
+  docId: string,
+  conversationId?: string
+): Promise<Blob> {
+  const cacheKey = `${conversationId ?? "direct"}:${docId}`;
+  const cached = filePreviewBlobCache.get(cacheKey);
   if (cached) return cached;
 
   const promise = (async () => {
-    const response = await fetch(filePreviewContentUrl(docId), {
+    const response = await fetch(filePreviewContentUrl(docId, conversationId), {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
@@ -795,9 +827,9 @@ export async function fetchFilePreviewBlob(docId: string): Promise<Blob> {
     return response.blob();
   })();
 
-  filePreviewBlobCache.set(docId, promise);
+  filePreviewBlobCache.set(cacheKey, promise);
   promise.catch(() => {
-    filePreviewBlobCache.delete(docId);
+    filePreviewBlobCache.delete(cacheKey);
   });
 
   return promise;

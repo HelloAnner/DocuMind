@@ -14,6 +14,7 @@ export interface DocumentViewerProps {
   charRange?: { start: number; end: number };
   docId?: string;
   cacheKey?: string;
+  conversationId?: string;
   onReady?: () => void;
 }
 
@@ -26,6 +27,7 @@ export function DocumentViewer({
   charRange,
   docId,
   cacheKey,
+  conversationId,
   onReady,
 }: DocumentViewerProps) {
   if (mimeType === "application/pdf" && docId) {
@@ -33,6 +35,7 @@ export function DocumentViewer({
       <PdfViewer
         docId={docId}
         cacheKey={cacheKey}
+        conversationId={conversationId}
         initialPage={initialPage}
         anchorBox={anchorBox}
         fileName={fileName}

@@ -145,7 +145,10 @@ export function ConversationFilesPanel({
 
         <div className="dm-right-rail-body">
           {previewTarget ? (
-            <DocumentPreview target={previewTarget} />
+            <DocumentPreview
+              conversationId={conversationId ?? undefined}
+              target={previewTarget}
+            />
           ) : (
             <div className="dm-conversation-files">
               {state.files.length > 0 ? (
