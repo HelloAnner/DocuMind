@@ -275,8 +275,8 @@ function processNote(round: ReasoningRound) {
 function humanizeDecisionSummary(summary: string) {
   if (!summary || summary === "direct response without tools") return "";
   if (summary === "grounded response from accumulated evidence") return "根据已获得的证据生成回复。";
-  if (/^model selected tools:/i.test(summary)) return "调用工具进行深度洞察...";
-  return summary.replace(/^executed\s+/i, "已调用 ");
+  if (/^(model selected tools:|executed\s+)/i.test(summary)) return "调用工具进行深度洞察...";
+  return summary;
 }
 
 function thinkingPreview(text: string) {
