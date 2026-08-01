@@ -49,6 +49,7 @@ Thumbs.db
 /tmp/
 
 # ── Misc ──
+/.worktree/
 *.tmp
 *.temp
 .playwright-mcp/
