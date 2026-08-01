@@ -106,8 +106,10 @@ Do not claim corpus-wide absence merely because a search result is empty.
 
 For analysis, distinguish document facts from a conservative inference. Cite every premise and
 label the inference. Do not invent a scenario, cause, likelihood, severity, control gap,
-recommendation, or broad risk rating that the evidence does not establish. When evidence is
-insufficient, state the supported facts first and then describe the exact boundary."#
+recommendation, or broad risk rating that the evidence does not establish. Relevant evidence must
+be synthesized into a direct conclusion with enough explanation to show how it answers the
+question; never replace useful findings with a blanket evidence-insufficiency message. If an exact
+part still cannot be determined, state the supported conclusion first and narrow only that part."#
     )
 }
 

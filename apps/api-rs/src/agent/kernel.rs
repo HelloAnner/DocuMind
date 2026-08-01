@@ -135,6 +135,7 @@ impl AgentKernel {
         let mut seen_calls = HashSet::new();
         let mut empty_responses = 0usize;
         let mut document_search_attempted = false;
+        let mut citation_repair_requested = false;
 
         for step in 1..=request.options.runtime.max_react_steps.max(1) {
             let response = self
@@ -302,7 +303,8 @@ impl AgentKernel {
                 let content = response
                     .content
                     .ok_or_else(|| anyhow!("agent response content disappeared"))?;
-                if evidence.is_empty() && !cited_evidence_indexes(&content).is_empty() {
+                let citation_indexes = cited_evidence_indexes(&content);
+                if evidence.is_empty() && !citation_indexes.is_empty() {
                     messages.push(AgentMessage::assistant(content.clone()));
                     messages.push(AgentMessage::user(
                         "Runtime grounding guard: citation markers are invalid because this turn has no document evidence. Call knowledge_search to obtain current evidence, or answer without document claims and citations.",
@@ -311,6 +313,28 @@ impl AgentKernel {
                         step,
                         &content,
                         "citation markers rejected because this turn has no document evidence",
+                    ));
+                    continue;
+                }
+                let citations_invalid = citation_indexes.is_empty()
+                    || citation_indexes
+                        .iter()
+                        .any(|index| *index == 0 || *index as usize > evidence.len());
+                if !evidence.is_empty()
+                    && request.options.require_citation
+                    && citations_invalid
+                    && !citation_repair_requested
+                    && step < request.options.runtime.max_react_steps.max(1)
+                {
+                    citation_repair_requested = true;
+                    messages.push(AgentMessage::assistant(content.clone()));
+                    messages.push(AgentMessage::user(
+                        "Runtime grounding guard: the answer is useful but its citations are missing or invalid. Keep the conclusion and explanation, then revise it once with valid evidence ids immediately after the claims they support.",
+                    ));
+                    trace.react_steps.push(failed_response_step(
+                        step,
+                        &content,
+                        "grounded answer requested one citation repair",
                     ));
                     continue;
                 }

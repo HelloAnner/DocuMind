@@ -40,7 +40,7 @@ impl GroundedAnswerFinalizer {
             (candidate, report.confidence)
         } else if allow_verifier_correction {
             corrected_answer(&report.corrected_answer, &evidence, require_citation)
-                .unwrap_or_else(insufficient_answer)
+                .unwrap_or((candidate, Confidence::Medium))
         } else {
             insufficient_answer()
         };
@@ -156,6 +156,47 @@ mod tests {
             &evidence,
             false
         ));
+    }
+
+    #[tokio::test]
+    async fn relevant_answer_is_kept_when_verifier_cannot_correct_it() -> Result<()> {
+        let verifier = Arc::new(CountingVerifier {
+            calls: AtomicUsize::new(0),
+            report: VerificationReport {
+                supported: false,
+                confidence: Confidence::Low,
+                issues: vec!["citations are missing".to_string()],
+                claims: Vec::new(),
+                corrected_answer: None,
+            },
+        });
+        let finalizer = GroundedAnswerFinalizer::new(verifier);
+        let mut stream = finalizer
+            .finalize(
+                "有哪些岗位职责？",
+                "钻井大组长负责任务分发和自检，承包商负责班组任务。".to_string(),
+                evidence_pack(),
+                true,
+                true,
+                None,
+            )
+            .await?;
+        let mut answer = String::new();
+        let mut confidence = None;
+        while let Some(item) = stream.recv().await {
+            match item {
+                AnswerStreamItem::Replace { text } => answer = text,
+                AnswerStreamItem::Completed {
+                    confidence: value, ..
+                } => confidence = Some(value),
+                _ => {}
+            }
+        }
+
+        assert!(answer.contains("钻井大组长"));
+        assert!(!answer.contains("证据不足"));
+        assert_eq!(confidence, Some(Confidence::Medium));
+        Ok(())
     }
 
     #[tokio::test]

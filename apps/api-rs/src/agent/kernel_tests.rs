@@ -171,6 +171,31 @@ async fn model_can_search_twice_then_answer_with_citations() -> Result<()> {
 }
 
 #[tokio::test]
+async fn grounded_answer_gets_one_citation_repair_instead_of_being_discarded() -> Result<()> {
+    let model = queued_model(vec![
+        tool_response(search_call("search-roles", "钻井模块岗位职责")),
+        text_response("钻井大组长负责任务分发和自检，承包商负责班组任务。"),
+        text_response("钻井大组长负责任务分发和自检，承包商负责班组任务。[1]"),
+    ]);
+    let retriever = recording_retriever(true);
+    let mut run = kernel(model.clone(), retriever)
+        .run(request("钻井模块有哪些岗位职责？"))
+        .await?;
+    let (answer, citations, confidence) = collect_answer(&mut run).await;
+
+    assert!(answer.contains("钻井大组长"));
+    assert!(!answer.contains("证据不足"));
+    assert_eq!(citations.len(), 1);
+    assert_eq!(confidence, Some(Confidence::High));
+    assert_eq!(model.requests.lock().await.len(), 3);
+    assert!(run.trace.react_steps.iter().any(|step| step
+        .warnings
+        .iter()
+        .any(|warning| warning.contains("citation repair"))));
+    Ok(())
+}
+
+#[tokio::test]
 async fn search_without_evidence_is_not_misclassified_as_direct_answer() -> Result<()> {
     let model = queued_model(vec![
         tool_response(search_call("search-empty", "不存在的制度")),
