@@ -880,11 +880,11 @@ fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> Option<Ss
             top_chunk_ids,
         }),
         AgentProgress::ReactStepStarted { .. }
-        | AgentProgress::ReactStepCompleted { .. }
         | AgentProgress::ToolCallStarted { .. }
         | AgentProgress::ToolCallCompleted { .. }
         | AgentProgress::ToolCallFailed { .. }
         | AgentProgress::ResponseDelta { .. }
+        | AgentProgress::ResponseReset
         | AgentProgress::ThinkingDelta { .. } => None,
         AgentProgress::Flush { acknowledgement } => {
             let _ = acknowledgement.send(());
@@ -1074,12 +1074,6 @@ fn send_progress_event(
                 "decision_summary": decision_summary,
             }),
         ),
-        AgentProgress::ReactStepCompleted { step } => send_runtime_event(
-            tx,
-            runtime_events,
-            "agent.step.completed",
-            json!({ "step": step }),
-        ),
         AgentProgress::ToolCallStarted {
             tool_call_id,
             name,
@@ -1150,6 +1144,12 @@ fn send_progress_event(
             runtime_events,
             "response.delta",
             json!({ "delta": delta }),
+        ),
+        AgentProgress::ResponseReset => send_runtime_event(
+            tx,
+            runtime_events,
+            "response.replace",
+            json!({ "content": "" }),
         ),
         AgentProgress::ThinkingDelta { delta } => send_runtime_event(
             tx,

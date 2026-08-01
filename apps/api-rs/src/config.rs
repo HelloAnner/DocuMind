@@ -288,7 +288,7 @@ pub fn load_config() -> Result<AppConfig> {
         },
         citation: CitationConfig {
             require_citation: env_parse("RAG_REQUIRE_CITATION", true),
-            verify_claims: env_parse("RAG_VERIFY_CLAIMS", true),
+            verify_claims: env_parse("RAG_VERIFY_CLAIMS", false),
             verify_consensus: env_parse("RAG_VERIFY_CONSENSUS", false),
         },
     };

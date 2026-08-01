@@ -136,7 +136,7 @@ async fn direct_greeting_finishes_without_tools() -> Result<()> {
 }
 
 #[tokio::test]
-async fn response_step_wraps_visible_answer_deltas_in_order() -> Result<()> {
+async fn answer_tokens_stream_without_a_duplicate_response_step() -> Result<()> {
     let model = queued_model(vec![text_response("你好！")]);
     let agent = kernel(model, recording_retriever(true));
     let prepared = agent.prepare(request("你好")).await?;
@@ -156,20 +156,12 @@ async fn response_step_wraps_visible_answer_deltas_in_order() -> Result<()> {
     let _run = agent.run_prepared(prepared, Some(tx.clone())).await?;
     drop(tx);
     let events = collector.await?;
-    let started = events
+    assert!(events
         .iter()
-        .position(|event| matches!(event, AgentProgress::ReactStepStarted { action, .. } if action == "respond"))
-        .expect("response step should start");
-    let delta = events
-        .iter()
-        .position(|event| matches!(event, AgentProgress::ResponseDelta { .. }))
-        .expect("answer delta should be visible");
-    let completed = events
-        .iter()
-        .position(|event| matches!(event, AgentProgress::ReactStepCompleted { .. }))
-        .expect("response step should complete");
-
-    assert!(started < delta && delta < completed);
+        .any(|event| matches!(event, AgentProgress::ResponseDelta { .. })));
+    assert!(!events.iter().any(
+        |event| matches!(event, AgentProgress::ReactStepStarted { action, .. } if action == "respond")
+    ));
     Ok(())
 }
 

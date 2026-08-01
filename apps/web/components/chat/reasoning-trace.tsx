@@ -64,7 +64,7 @@ export function ReasoningTrace({
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
   }, [expanded, rounds]);
 
-  if (toolCount === 0) return null;
+  if (toolCount === 0 && !isStreaming) return null;
 
   function toggle() {
     if (isStreaming) return;
@@ -87,7 +87,9 @@ export function ReasoningTrace({
       data-testid="reasoning-trace"
     >
       {isStreaming ? (
-        <div className="dm-reasoning-running">正在处理中...</div>
+        <div className="dm-reasoning-running">
+          {toolCount === 0 ? "正在思考..." : "正在处理中..."}
+        </div>
       ) : (
         <button
           aria-expanded={expanded}
@@ -113,7 +115,6 @@ export function ReasoningTrace({
           {rounds.map((round, index) => (
             <ProcessGroup
               hasFollowing={index < rounds.length - 1}
-              isStreaming={isStreaming}
               key={round.step}
               round={round}
             />
@@ -126,14 +127,12 @@ export function ReasoningTrace({
 
 function ProcessGroup({
   round,
-  isStreaming,
   hasFollowing,
 }: {
   round: ReasoningRound;
-  isStreaming: boolean;
   hasFollowing: boolean;
 }) {
-  const roundStatus = reasoningRoundStatus(round, isStreaming);
+  const roundStatus = reasoningRoundStatus(round);
   const note = processNote(round);
   return (
     <div className="dm-process-group" data-reasoning-step={round.step}>
@@ -250,14 +249,14 @@ function buildReasoningRounds(steps: RuntimeReasoningStep[], liveTools: RuntimeT
   );
   for (const tool of liveTools) mergeTool(getRound(tool.step ?? fallbackStep), tool);
   return Array.from(rounds.values())
-    .filter((round) => round.tool_calls.length > 0 || round.action === "respond")
+    .filter((round) => round.tool_calls.length > 0)
     .sort((a, b) => a.step - b.step);
 }
 
-function reasoningRoundStatus(round: ReasoningRound, streaming: boolean): RoundStatus {
+function reasoningRoundStatus(round: ReasoningRound): RoundStatus {
   if ((round.warnings?.length ?? 0) > 0 || round.tool_calls.some((tool) => tool.status === "failed" || tool.status === "cancelled")) return "failed";
   if (round.completed_at) return "completed";
-  if (round.tool_calls.some((tool) => tool.status === "running") || (round.action === "respond" && streaming)) return "running";
+  if (round.tool_calls.some((tool) => tool.status === "running")) return "running";
   return "completed";
 }
 

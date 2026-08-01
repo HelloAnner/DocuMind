@@ -339,23 +339,6 @@ export function useConversationManager() {
               continue;
             }
 
-            if (runtime.event_type === "agent.step.completed") {
-              const stepNumber = runtimeStepNumber(runtime.payload.step);
-              if (stepNumber !== null) {
-                updateReasoningStepInStream(stepNumber, (step) => ({
-                  step: stepNumber,
-                  action: step?.action ?? "respond",
-                  decision_summary: step?.decision_summary ?? "",
-                  output: step?.output,
-                  tool_calls: step?.tool_calls ?? [],
-                  warnings: step?.warnings,
-                  started_at: step?.started_at,
-                  completed_at: runtime.occurred_at,
-                }));
-              }
-              continue;
-            }
-
             if (runtime.event_type === "thinking.delta") {
               // Raw model reasoning is intentionally not rendered. The visible trace is
               // assembled from real step, tool argument, result, and final-response events.

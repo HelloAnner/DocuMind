@@ -138,7 +138,15 @@ impl AgentKernel {
         let mut citation_repair_requested = false;
 
         for step in 1..=request.options.runtime.max_react_steps.max(1) {
-            let (response, response_deltas) = self
+            if !evidence.is_empty() {
+                emit(
+                    &progress,
+                    AgentProgress::StatusUpdated {
+                        status: "generating",
+                    },
+                );
+            }
+            let response = self
                 .complete_model(
                     AgentModelRequest {
                         messages: messages.clone(),
@@ -314,6 +322,7 @@ impl AgentKernel {
                         &content,
                         "citation markers rejected because this turn has no document evidence",
                     ));
+                    emit(&progress, AgentProgress::ResponseReset);
                     continue;
                 }
                 let citations_invalid = citation_indexes.is_empty()
@@ -336,24 +345,9 @@ impl AgentKernel {
                         &content,
                         "grounded answer requested one citation repair",
                     ));
+                    emit(&progress, AgentProgress::ResponseReset);
                     continue;
                 }
-                emit(
-                    &progress,
-                    AgentProgress::ReactStepStarted {
-                        step,
-                        action: "respond".to_string(),
-                        decision_summary: if evidence.is_empty() {
-                            "direct response without tools".to_string()
-                        } else {
-                            "grounded response from accumulated evidence".to_string()
-                        },
-                    },
-                );
-                for delta in response_deltas {
-                    emit(&progress, AgentProgress::ResponseDelta { delta });
-                }
-                emit(&progress, AgentProgress::ReactStepCompleted { step });
                 trace.react_steps.push(response_step(step, &content));
                 if evidence.is_empty() {
                     let confidence = if document_search_attempted {
@@ -443,34 +437,32 @@ impl AgentKernel {
         &self,
         request: AgentModelRequest,
         progress: &ProgressSender,
-    ) -> Result<(AgentModelResponse, Vec<String>)> {
+    ) -> Result<AgentModelResponse> {
         let Some(progress_sender) = progress.as_ref() else {
-            return Ok((self.model.complete(request).await?, Vec::new()));
+            return self.model.complete(request).await;
         };
         let (stream_sender, mut stream_receiver) = tokio::sync::mpsc::unbounded_channel();
         let relay_sender = progress_sender.clone();
         let relay = tokio::spawn(async move {
-            let mut response_deltas = Vec::new();
             while let Some(event) = stream_receiver.recv().await {
-                match event {
-                    AgentModelStreamEvent::ResponseDelta(delta) => response_deltas.push(delta),
-                    AgentModelStreamEvent::ThinkingDelta(delta) => {
-                        if relay_sender
-                            .send(AgentProgress::ThinkingDelta { delta })
-                            .is_err()
-                        {
-                            break;
-                        }
+                let progress = match event {
+                    AgentModelStreamEvent::ResponseDelta(delta) => {
+                        AgentProgress::ResponseDelta { delta }
                     }
+                    AgentModelStreamEvent::ThinkingDelta(delta) => {
+                        AgentProgress::ThinkingDelta { delta }
+                    }
+                };
+                if relay_sender.send(progress).is_err() {
+                    break;
                 }
             }
-            response_deltas
         });
         let response = self
             .model
             .complete_streamed(request, Some(stream_sender))
             .await;
-        let response_deltas = relay
+        relay
             .await
             .map_err(|error| anyhow!("model stream relay failed: {error}"))?;
 
@@ -483,7 +475,7 @@ impl AgentKernel {
                 .await
                 .map_err(|_| anyhow!("model stream flush acknowledgement was dropped"))?;
         }
-        Ok((response?, response_deltas))
+        response
     }
 }
 
