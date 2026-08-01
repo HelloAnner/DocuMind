@@ -3636,6 +3636,236 @@ body > .hiddenCanvasElement {
   }
 }
 
+/* Moss work process: process notes connected to compact tool actions. */
+[data-theme="light"] {
+  --moss-trace-disabled: #c4c4c7;
+  --moss-trace-line: #e4e4e7;
+  --moss-running-base: color-mix(in srgb, #7a7a7a 68%, transparent);
+  --moss-running-highlight: #3a3a3a;
+}
+
+[data-theme="dark"] {
+  --moss-trace-disabled: #52525b;
+  --moss-trace-line: rgba(255, 255, 255, 0.08);
+  --moss-running-base: color-mix(in srgb, #71717a 68%, transparent);
+  --moss-running-highlight: #e4e4e7;
+}
+
+.dm-reasoning-trace {
+  display: block;
+  margin: 2px 0 6px;
+  width: min(720px, calc(100% - 42px));
+}
+
+.dm-reasoning-running {
+  background: linear-gradient(90deg, var(--moss-running-base) 0 40%, var(--moss-running-highlight) 50%, var(--moss-running-base) 60% 100%);
+  background-clip: text;
+  background-size: 180% 100%;
+  color: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  height: 22px;
+  line-height: 22px;
+  margin-bottom: 6px;
+  width: fit-content;
+  animation: dm-moss-trace-shine 1.4s linear infinite;
+}
+
+.dm-reasoning-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  font-weight: 500;
+  gap: 4px;
+  height: 34px;
+  line-height: 22px;
+  min-height: 34px;
+  padding: 4px 0;
+}
+
+.dm-reasoning-toggle:hover {
+  background: transparent;
+  color: var(--text-muted);
+  opacity: 0.8;
+}
+
+.dm-reasoning-chevron {
+  color: currentColor;
+  opacity: 0.72;
+  transition: transform 150ms var(--ease-default);
+}
+
+.dm-reasoning-trace.expanded .dm-reasoning-chevron {
+  transform: rotate(180deg);
+}
+
+.dm-reasoning-feed {
+  max-height: 528px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-right: 8px;
+  scrollbar-width: none;
+}
+
+.dm-reasoning-feed::-webkit-scrollbar {
+  display: none;
+}
+
+.dm-process-group {
+  animation: dm-trace-row-enter 180ms ease-out both;
+  position: relative;
+}
+
+.dm-process-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 8px;
+  min-height: 30px;
+}
+
+.dm-process-icon-slot {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  flex: 0 0 16px;
+  height: 30px;
+  justify-content: center;
+  position: relative;
+  width: 16px;
+  z-index: 1;
+}
+
+.dm-process-copy {
+  color: var(--text-secondary);
+  flex: 1;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 22px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding: 4px 0;
+}
+
+.dm-process-more {
+  background: transparent;
+  border: 0;
+  color: var(--moss-trace-disabled);
+  cursor: pointer;
+  display: inline;
+  font-size: 13px;
+  line-height: 22px;
+  margin-left: 4px;
+  padding: 0;
+}
+
+.dm-process-connector {
+  background: var(--moss-trace-line);
+  bottom: 1.5px;
+  left: 7.5px;
+  pointer-events: none;
+  position: absolute;
+  top: 29.5px;
+  width: 1.25px;
+}
+
+.dm-process-connector.continues {
+  bottom: -0.5px;
+}
+
+.dm-process-tools {
+  margin-left: 7.5px;
+  margin-top: 1px;
+  padding-left: 15.5px;
+}
+
+.dm-process-tool {
+  align-items: stretch;
+  color: var(--text-tertiary);
+  display: flex;
+  font-size: 13px;
+  font-weight: 400;
+  gap: 7px;
+  line-height: 20px;
+  min-height: 30px;
+}
+
+.dm-process-tool.is-running,
+.dm-process-tool.is-failed {
+  color: var(--text-muted);
+}
+
+.dm-process-tool-icon {
+  align-items: center;
+  align-self: stretch;
+  color: currentColor;
+  display: inline-flex;
+  flex: 0 0 14px;
+  height: 30px;
+  justify-content: center;
+  width: 14px;
+}
+
+.dm-process-tool-copy {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  padding-top: 5px;
+}
+
+.dm-process-duration {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  line-height: 20px;
+  margin-left: auto;
+  padding-top: 5px;
+}
+
+.dm-process-spinner {
+  animation: dm-moss-trace-spin 1s linear infinite;
+  background: conic-gradient(transparent 0 72deg, currentColor 255deg 360deg);
+  border-radius: 50%;
+  height: 15px;
+  mask: radial-gradient(farthest-side, transparent calc(100% - 1.5px), #000 calc(100% - 1.5px));
+  width: 15px;
+}
+
+.dm-process-spinner.small {
+  height: 14px;
+  width: 14px;
+}
+
+@keyframes dm-moss-trace-shine {
+  to { background-position: 0 50%; }
+}
+
+@keyframes dm-moss-trace-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 767px) {
+  .dm-reasoning-trace {
+    width: calc(100% - 36px);
+  }
+
+  .dm-process-duration {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm-process-group,
+  .dm-process-spinner,
+  .dm-reasoning-running {
+    animation: none;
+  }
+}
+
 /* Wufan message feedback: compact actions, persisted selection, inline dislike detail. */
 [data-theme="light"] {
   --feedback-positive: #16a34a;
