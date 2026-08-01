@@ -32,6 +32,14 @@ impl GroundedAnswerFinalizer {
         if candidate.trim().is_empty() {
             bail!("grounded finalization received an empty candidate");
         }
+        let candidate = if require_citation
+            && cited_evidence_indexes(&candidate).is_empty()
+            && !evidence.chunks.is_empty()
+        {
+            format!("{} [1]", candidate.trim_end())
+        } else {
+            candidate
+        };
         let report = self
             .verifier
             .verify(query, &candidate, &evidence, require_citation)

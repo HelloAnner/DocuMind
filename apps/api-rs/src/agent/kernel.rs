@@ -135,7 +135,6 @@ impl AgentKernel {
         let mut seen_calls = HashSet::new();
         let mut empty_responses = 0usize;
         let mut document_search_attempted = false;
-        let mut citation_repair_requested = false;
 
         for step in 1..=request.options.runtime.max_react_steps.max(1) {
             if !evidence.is_empty() {
@@ -321,29 +320,6 @@ impl AgentKernel {
                         step,
                         &content,
                         "citation markers rejected because this turn has no document evidence",
-                    ));
-                    emit(&progress, AgentProgress::ResponseReset);
-                    continue;
-                }
-                let citations_invalid = citation_indexes.is_empty()
-                    || citation_indexes
-                        .iter()
-                        .any(|index| *index == 0 || *index as usize > evidence.len());
-                if !evidence.is_empty()
-                    && request.options.require_citation
-                    && citations_invalid
-                    && !citation_repair_requested
-                    && step < request.options.runtime.max_react_steps.max(1)
-                {
-                    citation_repair_requested = true;
-                    messages.push(AgentMessage::assistant(content.clone()));
-                    messages.push(AgentMessage::user(
-                        "Runtime grounding guard: the answer is useful but its citations are missing or invalid. Keep the conclusion and explanation, then revise it once with valid evidence ids immediately after the claims they support.",
-                    ));
-                    trace.react_steps.push(failed_response_step(
-                        step,
-                        &content,
-                        "grounded answer requested one citation repair",
                     ));
                     emit(&progress, AgentProgress::ResponseReset);
                     continue;

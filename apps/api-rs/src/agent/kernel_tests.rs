@@ -202,11 +202,10 @@ async fn model_can_search_twice_then_answer_with_citations() -> Result<()> {
 }
 
 #[tokio::test]
-async fn grounded_answer_gets_one_citation_repair_instead_of_being_discarded() -> Result<()> {
+async fn grounded_answer_is_not_generated_twice_when_citation_is_missing() -> Result<()> {
     let model = queued_model(vec![
         tool_response(search_call("search-roles", "钻井模块岗位职责")),
         text_response("钻井大组长负责任务分发和自检，承包商负责班组任务。"),
-        text_response("钻井大组长负责任务分发和自检，承包商负责班组任务。[1]"),
     ]);
     let retriever = recording_retriever(true);
     let mut run = kernel(model.clone(), retriever)
@@ -218,11 +217,15 @@ async fn grounded_answer_gets_one_citation_repair_instead_of_being_discarded() -
     assert!(!answer.contains("证据不足"));
     assert_eq!(citations.len(), 1);
     assert_eq!(confidence, Some(Confidence::High));
-    assert_eq!(model.requests.lock().await.len(), 3);
-    assert!(run.trace.react_steps.iter().any(|step| step
-        .warnings
-        .iter()
-        .any(|warning| warning.contains("citation repair"))));
+    assert_eq!(model.requests.lock().await.len(), 2);
+    assert_eq!(
+        run.trace
+            .react_steps
+            .iter()
+            .filter(|step| step.action == "respond")
+            .count(),
+        1
+    );
     Ok(())
 }
 
