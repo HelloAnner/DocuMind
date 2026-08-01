@@ -316,6 +316,7 @@ export function MessageRow({
             const c = citationLookup.get(idx);
             if (c) onCitationClick(c);
           }}
+          displayCitationIndex={(idx) => citationLookup.get(idx)?.index ?? idx}
         />
       ) : null}
 

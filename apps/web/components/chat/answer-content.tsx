@@ -20,6 +20,7 @@ interface AnswerContentProps {
   isStreaming?: boolean;
   runtimeStage?: string;
   onCitationClick?: (index: number) => void;
+  displayCitationIndex?: (index: number) => number;
 }
 
 interface MarkdownContentProps {
@@ -29,6 +30,7 @@ interface MarkdownContentProps {
   realtime?: boolean;
   runtimeStage?: string;
   onCitationClick?: (index: number) => void;
+  displayCitationIndex?: (index: number) => number;
 }
 
 const remarkPlugins = [remarkGfm];
@@ -41,7 +43,11 @@ function CitationBadge({ index, onClick }: { index: number; onClick?: () => void
   );
 }
 
-function renderCitationText(text: string, onCitationClick?: (index: number) => void) {
+function renderCitationText(
+  text: string,
+  onCitationClick?: (index: number) => void,
+  displayCitationIndex?: (index: number) => number
+) {
   return text.split(/(\[\d+\])/g).map((part, index) => {
     const match = part.match(/^\[(\d+)\]$/);
     if (!match) return part;
@@ -49,16 +55,22 @@ function renderCitationText(text: string, onCitationClick?: (index: number) => v
     return (
       <CitationBadge
         key={`${citationIndex}-${index}`}
-        index={citationIndex}
+        index={displayCitationIndex?.(citationIndex) ?? citationIndex}
         onClick={() => onCitationClick?.(citationIndex)}
       />
     );
   });
 }
 
-function renderCitations(children: ReactNode, onCitationClick?: (index: number) => void): ReactNode {
+function renderCitations(
+  children: ReactNode,
+  onCitationClick?: (index: number) => void,
+  displayCitationIndex?: (index: number) => number
+): ReactNode {
   return Children.map(children, (child) => {
-    if (typeof child === "string") return renderCitationText(child, onCitationClick);
+    if (typeof child === "string") {
+      return renderCitationText(child, onCitationClick, displayCitationIndex);
+    }
     if (!isValidElement(child)) return child;
 
     const element = child as ReactElement<{ children?: ReactNode }>;
@@ -67,7 +79,7 @@ function renderCitations(children: ReactNode, onCitationClick?: (index: number) 
     }
 
     return cloneElement(element, {
-      children: renderCitations(element.props.children, onCitationClick),
+      children: renderCitations(element.props.children, onCitationClick, displayCitationIndex),
     });
   });
 }
@@ -103,6 +115,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   realtime = false,
   runtimeStage,
   onCitationClick,
+  displayCitationIndex,
 }: MarkdownContentProps) {
   const deferredContent = useDeferredValue(content);
   const renderContent = realtime ? content : deferredContent;
@@ -112,20 +125,20 @@ export const MarkdownContent = memo(function MarkdownContent({
       <ReactMarkdown
         remarkPlugins={remarkPlugins}
         components={{
-          h1: ({ children }) => <h1>{renderCitations(children, onCitationClick)}</h1>,
-          h2: ({ children }) => <h2>{renderCitations(children, onCitationClick)}</h2>,
-          h3: ({ children }) => <h3>{renderCitations(children, onCitationClick)}</h3>,
-          h4: ({ children }) => <h4>{renderCitations(children, onCitationClick)}</h4>,
-          h5: ({ children }) => <h5>{renderCitations(children, onCitationClick)}</h5>,
-          h6: ({ children }) => <h6>{renderCitations(children, onCitationClick)}</h6>,
-          p: ({ children }) => <p>{renderCitations(children, onCitationClick)}</p>,
-          li: ({ children }) => <li>{renderCitations(children, onCitationClick)}</li>,
-          th: ({ children }) => <th>{renderCitations(children, onCitationClick)}</th>,
-          td: ({ children }) => <td>{renderCitations(children, onCitationClick)}</td>,
-          blockquote: ({ children }) => <blockquote>{renderCitations(children, onCitationClick)}</blockquote>,
+          h1: ({ children }) => <h1>{renderCitations(children, onCitationClick, displayCitationIndex)}</h1>,
+          h2: ({ children }) => <h2>{renderCitations(children, onCitationClick, displayCitationIndex)}</h2>,
+          h3: ({ children }) => <h3>{renderCitations(children, onCitationClick, displayCitationIndex)}</h3>,
+          h4: ({ children }) => <h4>{renderCitations(children, onCitationClick, displayCitationIndex)}</h4>,
+          h5: ({ children }) => <h5>{renderCitations(children, onCitationClick, displayCitationIndex)}</h5>,
+          h6: ({ children }) => <h6>{renderCitations(children, onCitationClick, displayCitationIndex)}</h6>,
+          p: ({ children }) => <p>{renderCitations(children, onCitationClick, displayCitationIndex)}</p>,
+          li: ({ children }) => <li>{renderCitations(children, onCitationClick, displayCitationIndex)}</li>,
+          th: ({ children }) => <th>{renderCitations(children, onCitationClick, displayCitationIndex)}</th>,
+          td: ({ children }) => <td>{renderCitations(children, onCitationClick, displayCitationIndex)}</td>,
+          blockquote: ({ children }) => <blockquote>{renderCitations(children, onCitationClick, displayCitationIndex)}</blockquote>,
           a: ({ children, href }) => (
             <a href={href} target="_blank" rel="noreferrer">
-              {renderCitations(children, onCitationClick)}
+              {renderCitations(children, onCitationClick, displayCitationIndex)}
             </a>
           ),
           code: ({ children, className: codeClassName }) => {
@@ -159,6 +172,7 @@ export const AnswerContent = memo(function AnswerContent({
   isStreaming = false,
   runtimeStage,
   onCitationClick,
+  displayCitationIndex,
 }: AnswerContentProps) {
   return (
     <MarkdownContent
@@ -168,6 +182,7 @@ export const AnswerContent = memo(function AnswerContent({
       realtime={isStreaming}
       runtimeStage={runtimeStage}
       onCitationClick={onCitationClick}
+      displayCitationIndex={displayCitationIndex}
     />
   );
 });
