@@ -1,10 +1,9 @@
 use async_trait::async_trait;
 use chrono::Utc;
-use sha2::{Digest, Sha256};
 use sqlx::{Pool, Postgres, Row};
 use uuid::Uuid;
 
-use crate::models::agent::{AgentTrace, CitationOutput};
+use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
 use crate::models::conversation::{
     ConversationListItem, ConversationListResponse, ConversationSession,
@@ -126,10 +125,6 @@ impl SqlxConversationRepository {
 
 fn opt_uuid_list(value: Option<Vec<Uuid>>) -> Vec<Uuid> {
     value.unwrap_or_default()
-}
-
-fn sha256_hex(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
 }
 
 #[async_trait]
@@ -644,99 +639,6 @@ impl ConversationRepository for SqlxConversationRepository {
         };
         let value: serde_json::Value = row.try_get("trace")?;
         Ok(Some(serde_json::from_value(value)?))
-    }
-
-    async fn doc_version_hash(&self, tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String> {
-        if kb_ids.is_empty() {
-            return Ok("empty-scope".to_string());
-        }
-
-        let row = sqlx::query(
-            "WITH live_chunks AS (
-                SELECT doc_id,
-                       COUNT(*) AS chunk_count,
-                       MAX(created_at) AS max_chunk_created_at
-                FROM chunks
-                WHERE tenant_id = $1
-                  AND kb_id = ANY($2)
-                GROUP BY doc_id
-             ),
-             scope_docs AS (
-                SELECT d.id,
-                       d.kb_id,
-                       d.file_sha256,
-                       d.parse_status,
-                       d.parse_version,
-                       d.latest_parse_job_id,
-                       d.updated_at,
-                       COALESCE(lc.chunk_count, 0) AS chunk_count,
-                       lc.max_chunk_created_at
-                FROM documents d
-                LEFT JOIN live_chunks lc ON lc.doc_id = d.id
-                WHERE d.tenant_id = $1
-                  AND d.kb_id = ANY($2)
-             )
-             SELECT COALESCE(
-                string_agg(
-                    concat_ws('|',
-                        id::text,
-                        kb_id::text,
-                        file_sha256,
-                        parse_status,
-                        parse_version::text,
-                        COALESCE(latest_parse_job_id::text, ''),
-                        updated_at::text,
-                        chunk_count::text,
-                        COALESCE(max_chunk_created_at::text, '')
-                    ),
-                    E'\n'
-                    ORDER BY kb_id, id
-                ),
-                'no-documents'
-             ) AS version_input
-             FROM scope_docs",
-        )
-        .bind(tenant_id)
-        .bind(kb_ids)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let version_input: String = row.try_get("version_input")?;
-        Ok(sha256_hex(version_input.as_bytes()))
-    }
-
-    async fn citations_valid_for_scope(
-        &self,
-        tenant_id: Uuid,
-        kb_ids: &[Uuid],
-        citations: &[CitationOutput],
-    ) -> anyhow::Result<bool> {
-        if kb_ids.is_empty() || citations.is_empty() {
-            return Ok(false);
-        }
-
-        let mut doc_ids: Vec<Uuid> = citations.iter().map(|citation| citation.doc_id).collect();
-        doc_ids.sort();
-        doc_ids.dedup();
-        if doc_ids.is_empty() {
-            return Ok(false);
-        }
-
-        let count: i64 = sqlx::query_scalar(
-            "SELECT COUNT(DISTINCT id)
-             FROM documents
-             WHERE tenant_id = $1
-               AND kb_id = ANY($2)
-               AND id = ANY($3)
-               AND parse_status <> 'deleted'",
-        )
-        .bind(tenant_id)
-        .bind(kb_ids)
-        .bind(&doc_ids)
-        .fetch_one(&self.pool)
-        .await?;
-
-        Ok(count as usize == doc_ids.len())
     }
 
     async fn upsert_feedback(&self, feedback: Feedback) -> anyhow::Result<Feedback> {

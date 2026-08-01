@@ -4,7 +4,7 @@ use std::sync::{Arc, RwLock};
 use async_trait::async_trait;
 use uuid::Uuid;
 
-use crate::models::agent::{AgentTrace, CitationOutput};
+use crate::models::agent::AgentTrace;
 use crate::models::citation::Citation;
 use crate::models::conversation::{
     ConversationListItem, ConversationListResponse, ConversationSession,
@@ -289,21 +289,6 @@ impl ConversationRepository for InMemoryConversationRepository {
         Ok(at.get(&assistant_message_id).cloned())
     }
 
-    async fn doc_version_hash(&self, _tenant_id: Uuid, kb_ids: &[Uuid]) -> anyhow::Result<String> {
-        let mut kb_sorted: Vec<String> = kb_ids.iter().map(|id| id.to_string()).collect();
-        kb_sorted.sort();
-        Ok(format!("memory:{}", kb_sorted.join(",")))
-    }
-
-    async fn citations_valid_for_scope(
-        &self,
-        _tenant_id: Uuid,
-        kb_ids: &[Uuid],
-        citations: &[CitationOutput],
-    ) -> anyhow::Result<bool> {
-        Ok(!kb_ids.is_empty() && !citations.is_empty())
-    }
-
     async fn upsert_feedback(&self, mut feedback: Feedback) -> anyhow::Result<Feedback> {
         let mut fb = self.feedback.write().unwrap();
         let key = (feedback.assistant_message_id, feedback.user_id);
@@ -518,50 +503,6 @@ mod tests {
                 .title,
             "手动标题"
         );
-    }
-
-    #[tokio::test]
-    async fn doc_version_hash_is_scope_order_independent() {
-        let repo = InMemoryConversationRepository::new();
-        let tenant = Uuid::new_v4();
-        let kb_a = Uuid::parse_str("00000000-0000-0000-0000-000000000010").unwrap();
-        let kb_b = Uuid::parse_str("00000000-0000-0000-0000-000000000011").unwrap();
-
-        let first = repo.doc_version_hash(tenant, &[kb_a, kb_b]).await.unwrap();
-        let second = repo.doc_version_hash(tenant, &[kb_b, kb_a]).await.unwrap();
-
-        assert_eq!(first, second);
-    }
-
-    #[tokio::test]
-    async fn cached_citations_require_scope_and_sources() {
-        let repo = InMemoryConversationRepository::new();
-        let tenant = Uuid::new_v4();
-        let kb_id = Uuid::new_v4();
-        let citation = crate::models::agent::CitationOutput {
-            index: 1,
-            chunk_id: Uuid::new_v4(),
-            doc_id: Uuid::new_v4(),
-            doc_title: "测试文档".to_string(),
-            page_range: vec![1],
-            quote: "引用片段".to_string(),
-            score: 0.9,
-            source_status: "available".to_string(),
-            anchor: None,
-        };
-
-        assert!(!repo
-            .citations_valid_for_scope(tenant, &[kb_id], &[])
-            .await
-            .unwrap());
-        assert!(!repo
-            .citations_valid_for_scope(tenant, &[], std::slice::from_ref(&citation))
-            .await
-            .unwrap());
-        assert!(repo
-            .citations_valid_for_scope(tenant, &[kb_id], &[citation])
-            .await
-            .unwrap());
     }
 
     #[tokio::test]

@@ -12,10 +12,7 @@ use crate::llm::openai::{OpenAiClient, OpenAiClientConfig};
 use crate::rag::{
     EmbeddingClientConfig, EsRetriever, HttpReranker, RerankProvider, SimpleContextAssembler,
 };
-use crate::repositories::{
-    AnswerCache, InMemoryAnswerCache, InMemoryConversationRepository, RedisAnswerCache,
-    SqlxConversationRepository,
-};
+use crate::repositories::{InMemoryConversationRepository, SqlxConversationRepository};
 use crate::storage::{build_storage, ObjectStorage};
 use tracing::warn;
 
@@ -24,7 +21,6 @@ pub struct AppState {
     pub config: AppConfig,
     pub repository: Arc<dyn crate::repositories::ConversationRepository>,
     pub agent_kernel: AgentKernel,
-    pub cache: Arc<dyn AnswerCache>,
     pub db_pool: Option<PgPool>,
     pub redis_client: Option<redis::Client>,
     pub storage: Arc<dyn ObjectStorage>,
@@ -53,12 +49,6 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         Some(redis::Client::open(url.as_str())?)
     } else {
         None
-    };
-
-    let cache: Arc<dyn AnswerCache> = if let Some(client) = redis_client.clone() {
-        Arc::new(RedisAnswerCache::new(client))
-    } else {
-        Arc::new(InMemoryAnswerCache::new())
     };
 
     if !config.rag.generation.use_real_llm {
@@ -154,7 +144,6 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         config,
         repository,
         agent_kernel,
-        cache,
         db_pool,
         redis_client,
         storage,
