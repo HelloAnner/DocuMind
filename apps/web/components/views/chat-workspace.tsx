@@ -186,7 +186,6 @@ export function ChatWorkspace() {
             message={message}
             isStreaming={message.message_id === streamingId}
             onRetry={() => retryMessage(message.message_id)}
-            onCancel={() => cancelMessage(message.message_id)}
             onSubmitFeedback={submitFeedback}
             onClearFeedback={clearFeedback}
             onCitationClick={handleCitationClick}

@@ -103,7 +103,6 @@ interface MessageRowProps {
   message: Message;
   isStreaming: boolean;
   onRetry: () => void;
-  onCancel: () => void;
   onSubmitFeedback: (
     id: string,
     rating: Rating,
@@ -177,7 +176,6 @@ export function MessageRow({
   message,
   isStreaming,
   onRetry,
-  onCancel,
   onSubmitFeedback,
   onClearFeedback,
   onCitationClick,
@@ -336,13 +334,12 @@ export function MessageRow({
         </div>
       )}
 
-      <div className="dm-answer-actions">
+      {!isStreaming ? (
+        <div className="dm-answer-actions">
         <IconButton aria-label="复制" onClick={handleCopy}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconButton>
-        {!isStreaming ? (
-          <>
-            <IconButton
+          <IconButton
               aria-label={feedbackRating === "up" ? "取消点赞" : "点赞"}
               aria-pressed={feedbackRating === "up"}
               className={`dm-feedback-button is-up ${
@@ -383,20 +380,14 @@ export function MessageRow({
                 fill={feedbackRating === "down" ? "currentColor" : "none"}
                 size={13}
               />
-            </IconButton>
-          </>
-        ) : null}
-        {isStreaming ? (
-          <Button variant="secondary" onClick={onCancel}>
-            停止
-          </Button>
-        ) : failed || cancelled ? (
+          </IconButton>
+        {failed || cancelled ? (
           <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={onRetry}>
             重试
           </Button>
         ) : null}
 
-        {downPanelOpen && !isStreaming ? (
+        {downPanelOpen ? (
           <form
             className="dm-feedback-panel"
             id={`feedback-panel-${message.message_id}`}
@@ -443,7 +434,8 @@ export function MessageRow({
             {feedbackError}
           </span>
         ) : null}
-      </div>
+        </div>
+      ) : null}
     </article>
   );
 }

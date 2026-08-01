@@ -261,6 +261,7 @@ function reasoningRoundStatus(round: ReasoningRound): RoundStatus {
 }
 
 function processNote(round: ReasoningRound) {
+  if (round.output?.trim()) return round.output.trim();
   const summary = humanizeDecisionSummary(round.decision_summary);
   if (summary) return summary;
   for (const tool of round.tool_calls) {

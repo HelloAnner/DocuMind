@@ -325,16 +325,35 @@ export function useConversationManager() {
                 activeReasoningStep = stepNumber;
                 const action = firstRuntimeString(runtime.payload.action, "tool");
                 const decisionSummary = firstRuntimeString(runtime.payload.decision_summary);
-                updateReasoningStepInStream(stepNumber, (step) => ({
-                  step: stepNumber,
-                  action,
-                  decision_summary: decisionSummary,
-                  output: step?.output,
-                  tool_calls: step?.tool_calls ?? [],
-                  warnings: step?.warnings,
-                  started_at: step?.started_at ?? runtime.occurred_at,
-                  completed_at: step?.completed_at,
-                }));
+                const messageId = assistantId;
+                queueMessageUpdate((current) =>
+                  current.map((message) => {
+                    if (
+                      message.message_id !== messageId &&
+                      message.message_id !== assistantTempId
+                    ) return message;
+                    const steps = message.reasoning_steps ?? [];
+                    const existing = steps.find((step) => step.step === stepNumber);
+                    const interimOutput = action === "tool" ? message.content.trim() : "";
+                    const nextStep: RuntimeReasoningStep = {
+                      step: stepNumber,
+                      action,
+                      decision_summary: decisionSummary,
+                      output: interimOutput || existing?.output,
+                      tool_calls: existing?.tool_calls ?? [],
+                      warnings: existing?.warnings,
+                      started_at: existing?.started_at ?? runtime.occurred_at,
+                      completed_at: existing?.completed_at,
+                    };
+                    return {
+                      ...message,
+                      content: interimOutput ? "" : message.content,
+                      reasoning_steps: existing
+                        ? steps.map((step) => step.step === stepNumber ? nextStep : step)
+                        : [...steps, nextStep],
+                    };
+                  })
+                );
               }
               continue;
             }
