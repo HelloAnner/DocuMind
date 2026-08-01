@@ -8,7 +8,6 @@ import {
   FolderOpen,
   Quote,
   RefreshCw,
-  Search,
   X,
 } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
@@ -97,11 +96,10 @@ export function ConversationFilesPanel({
     };
   }, [conversationId, open, refreshKey, retryToken]);
 
-  const summary = useMemo(() => {
-    const cited = state.files.filter((file) => file.citation_count > 0).length;
-    const retrieved = state.files.filter((file) => file.retrieval_count > 0).length;
-    return { cited, retrieved };
-  }, [state.files]);
+  const citedFileCount = useMemo(
+    () => state.files.filter((file) => file.citation_count > 0).length,
+    [state.files]
+  );
 
   return (
     <aside
@@ -133,8 +131,8 @@ export function ConversationFilesPanel({
                 {previewTarget
                   ? "真实原文"
                   : state.files.length > 0
-                    ? `${state.files.length} 个相关文件`
-                    : "检索与引用记录"}
+                    ? `${state.files.length} 个引用文件`
+                    : "正文引用的文件"}
               </span>
             </div>
           </div>
@@ -152,14 +150,10 @@ export function ConversationFilesPanel({
           ) : (
             <div className="dm-conversation-files">
               {state.files.length > 0 ? (
-                <div className="dm-conversation-files-summary" aria-label="文件来源概览">
-                  <span>
-                    <Search size={13} aria-hidden="true" />
-                    检索到 {summary.retrieved}
-                  </span>
+                <div className="dm-conversation-files-summary" aria-label="引用文件概览">
                   <span>
                     <Quote size={13} aria-hidden="true" />
-                    已引用 {summary.cited}
+                    已引用 {citedFileCount}
                   </span>
                 </div>
               ) : null}
@@ -176,13 +170,13 @@ export function ConversationFilesPanel({
                 <div className="dm-conversation-files-empty">
                   <FolderOpen size={30} aria-hidden="true" />
                   <strong>当前还没有会话文件</strong>
-                  <p>开始问答后，检索和引用过的真实文档会显示在这里。</p>
+                  <p>开始问答后，正文实际引用的文档会显示在这里。</p>
                 </div>
               ) : state.status === "ready" && state.files.length === 0 ? (
                 <div className="dm-conversation-files-empty">
                   <FolderOpen size={30} aria-hidden="true" />
                   <strong>这段对话还没有相关文件</strong>
-                  <p>只有发生真实知识检索或原文引用时，文件才会出现在列表中。</p>
+                  <p>只有正文实际引用原文时，文件才会出现在列表中。</p>
                 </div>
               ) : null}
 
@@ -207,10 +201,7 @@ export function ConversationFilesPanel({
                           <span className="dm-conversation-file-context">
                             {file.kb_name ? <span>{file.kb_name}</span> : null}
                             {file.citation_count > 0 ? (
-                              <span className="cited">引用 {file.citation_count}</span>
-                            ) : null}
-                            {file.retrieval_count > 0 ? (
-                              <span>检索 {file.retrieval_count} 轮</span>
+                              <span className="cited">已引用</span>
                             ) : null}
                             {unavailable ? <span className="unavailable">原文不可用</span> : null}
                           </span>

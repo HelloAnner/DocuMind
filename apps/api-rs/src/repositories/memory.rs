@@ -350,23 +350,8 @@ impl ConversationRepository for InMemoryConversationRepository {
             })
             .cloned()
             .collect();
-        let retrieval_traces = self.retrieval_traces.read().unwrap();
         let citations = self.citations.read().unwrap();
         let mut files: HashMap<Uuid, FileAccumulator> = HashMap::new();
-
-        for message in messages.iter().filter(|m| m.role == crate::models::MessageRole::User) {
-            let Some(traces) = retrieval_traces.get(&message.id) else { continue };
-            let mut docs_in_turn = HashSet::new();
-            for trace in traces {
-                let entry = files
-                    .entry(trace.doc_id)
-                    .or_insert_with(|| FileAccumulator::from_retrieval(trace, message));
-                if docs_in_turn.insert(trace.doc_id) {
-                    entry.file.retrieval_count += 1;
-                }
-                entry.record_retrieval(trace, message);
-            }
-        }
 
         for message in messages.iter().filter(|m| m.role == crate::models::MessageRole::Assistant) {
             let Some(msg_citations) = citations.get(&message.id) else { continue };
@@ -389,33 +374,9 @@ impl ConversationRepository for InMemoryConversationRepository {
 struct FileAccumulator {
     file: ConversationFile,
     preview_at: chrono::DateTime<chrono::Utc>,
-    preview_is_citation: bool,
 }
 
 impl FileAccumulator {
-    fn from_retrieval(trace: &crate::models::trace::RetrievalTrace, message: &ConversationMessage) -> Self {
-        let short_id = trace.doc_id.to_string();
-        Self {
-            file: ConversationFile {
-                doc_id: trace.doc_id,
-                doc_title: format!("文档 {}", &short_id[..8]),
-                file_name: format!("文档 {}", &short_id[..8]),
-                file_type: "unknown".to_string(),
-                kb_id: None,
-                kb_name: None,
-                source_status: "available".to_string(),
-                retrieval_count: 0,
-                citation_count: 0,
-                last_used_at: message.created_at,
-                preview_page_range: trace.page_range.clone(),
-                preview_quote: trace.content_preview.clone(),
-                preview_anchor: None,
-            },
-            preview_at: message.created_at,
-            preview_is_citation: false,
-        }
-    }
-
     fn from_citation(citation: &Citation, message: &ConversationMessage) -> Self {
         Self {
             file: ConversationFile {
@@ -434,32 +395,21 @@ impl FileAccumulator {
                 preview_anchor: citation.anchor.clone(),
             },
             preview_at: message.created_at,
-            preview_is_citation: true,
-        }
-    }
-
-    fn record_retrieval(&mut self, trace: &crate::models::trace::RetrievalTrace, message: &ConversationMessage) {
-        self.file.last_used_at = self.file.last_used_at.max(message.created_at);
-        if !self.preview_is_citation && message.created_at >= self.preview_at {
-            self.file.preview_page_range = trace.page_range.clone();
-            self.file.preview_quote = trace.content_preview.clone();
-            self.preview_at = message.created_at;
         }
     }
 
     fn record_citation(&mut self, citation: &Citation, message: &ConversationMessage) {
-        self.file.citation_count += 1;
+        self.file.citation_count = 1;
         self.file.doc_title = citation.doc_title.clone();
         self.file.file_name = citation.doc_title.clone();
         self.file.file_type = citation_file_type(citation);
         self.file.source_status = citation.source_status.clone();
         self.file.last_used_at = self.file.last_used_at.max(message.created_at);
-        if !self.preview_is_citation || message.created_at >= self.preview_at {
+        if message.created_at >= self.preview_at {
             self.file.preview_page_range = citation.page_range.clone();
             self.file.preview_quote = citation.quote.clone();
             self.file.preview_anchor = citation.anchor.clone();
             self.preview_at = message.created_at;
-            self.preview_is_citation = true;
         }
     }
 }
@@ -695,7 +645,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn deduplicates_retrievals_and_prefers_citation_preview() {
+    async fn lists_only_uniquely_cited_documents() {
         let repo = InMemoryConversationRepository::new();
         let tenant_id = Uuid::new_v4();
         let user_id = Uuid::new_v4();
@@ -735,18 +685,14 @@ mod tests {
         }]).await.unwrap();
 
         let files = repo.list_conversation_files(tenant_id, conversation_id, &[kb_id]).await.unwrap();
-        assert_eq!(files.len(), 2);
+        assert_eq!(files.len(), 1);
 
-        let cited = files.iter().find(|f| f.doc_id == cited_doc_id).unwrap();
-        assert_eq!(cited.retrieval_count, 1);
+        let cited = &files[0];
+        assert_eq!(cited.doc_id, cited_doc_id);
+        assert_eq!(cited.retrieval_count, 0);
         assert_eq!(cited.citation_count, 1);
         assert_eq!(cited.doc_title, "采购合同.pdf");
         assert_eq!(cited.preview_page_range, vec![8]);
         assert_eq!(cited.preview_quote, "验收后支付尾款");
-
-        let retrieved = files.iter().find(|f| f.doc_id == retrieved_doc_id).unwrap();
-        assert_eq!(retrieved.retrieval_count, 1);
-        assert_eq!(retrieved.citation_count, 0);
-        assert_eq!(retrieved.preview_page_range, vec![3]);
     }
 }

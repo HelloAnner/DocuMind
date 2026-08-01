@@ -24,44 +24,76 @@ pub fn resolve_citations(answer: &str, evidence: &EvidencePack) -> Vec<CitationO
         selected.push((one_based, chunk));
     }
 
-    let mut by_key: HashMap<String, CitationOutput> = HashMap::new();
-    let mut order = Vec::new();
+    let mut seen_docs = HashSet::new();
 
-    for (original_index, chunk) in selected {
-        let anchor = anchor_for_chunk(chunk);
-        let key = canonical_key(chunk, &anchor);
-        let quote = compact_quote(&chunk.chunk.content);
-
-        if let Some(existing) = by_key.get_mut(&key) {
-            existing.score = existing.score.max(chunk.score);
-            if quote.chars().count() > existing.quote.chars().count() {
-                existing.quote = quote;
-            }
-            continue;
-        }
-
-        order.push(key.clone());
-        by_key.insert(
-            key,
-            CitationOutput {
-                index: original_index,
-                chunk_id: chunk.chunk.chunk_id,
-                doc_id: chunk.chunk.doc_id,
-                doc_title: chunk.chunk.doc_title.clone(),
-                page_range: chunk.chunk.page_range.clone(),
-                quote,
-                score: chunk.score,
-                source_status: "available".to_string(),
-                anchor: Some(anchor),
-            },
-        );
-    }
-
-    order
+    selected
         .into_iter()
-        .filter_map(|key| by_key.remove(&key))
+        .filter(|(_, chunk)| seen_docs.insert(chunk.chunk.doc_id))
+        .map(|(index, chunk)| CitationOutput {
+            index,
+            chunk_id: chunk.chunk.chunk_id,
+            doc_id: chunk.chunk.doc_id,
+            doc_title: chunk.chunk.doc_title.clone(),
+            page_range: chunk.chunk.page_range.clone(),
+            quote: compact_quote(&chunk.chunk.content),
+            score: chunk.score,
+            source_status: "available".to_string(),
+            anchor: Some(anchor_for_chunk(chunk)),
+        })
         .take(MAX_CITATIONS)
         .collect()
+}
+
+pub fn canonicalize_citation_markers(answer: &str, evidence: &EvidencePack) -> String {
+    let cited = cited_evidence_indexes(answer);
+    let mut first_by_doc = HashMap::new();
+    let replacements: HashMap<i32, i32> = cited
+        .into_iter()
+        .filter_map(|index| {
+            let doc_id = evidence.chunks.get(index as usize - 1)?.chunk.doc_id;
+            let canonical = *first_by_doc.entry(doc_id).or_insert(index);
+            Some((index, canonical))
+        })
+        .collect();
+
+    let mut result = String::with_capacity(answer.len());
+    let mut rest = answer;
+    while let Some(start) = rest.find('[') {
+        result.push_str(&rest[..start]);
+        let marker = &rest[start..];
+        let Some(end) = marker.find(']') else {
+            result.push_str(marker);
+            return result;
+        };
+        let values = marker[1..end]
+            .split(',')
+            .map(str::trim)
+            .map(str::parse::<i32>)
+            .collect::<Result<Vec<_>, _>>();
+        if let Ok(values) = values {
+            let mut canonical = Vec::new();
+            for value in values {
+                let value = replacements.get(&value).copied().unwrap_or(value);
+                if !canonical.contains(&value) {
+                    canonical.push(value);
+                }
+            }
+            result.push('[');
+            result.push_str(
+                &canonical
+                    .iter()
+                    .map(i32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            result.push(']');
+        } else {
+            result.push_str(&marker[..=end]);
+        }
+        rest = &marker[end + 1..];
+    }
+    result.push_str(rest);
+    result
 }
 
 pub fn cited_evidence_indexes(answer: &str) -> BTreeSet<i32> {
@@ -154,33 +186,6 @@ fn metadata_i32(metadata: &serde_json::Value, key: &str) -> Option<i32> {
     })
 }
 
-fn canonical_key(chunk: &RerankedChunk, anchor: &CitationAnchor) -> String {
-    let block_key = anchor
-        .block_ids
-        .first()
-        .map(Uuid::to_string)
-        .or_else(|| anchor.table_ids.first().map(Uuid::to_string))
-        .unwrap_or_else(|| compact_key_text(&chunk.chunk.content));
-    let page = anchor
-        .page
-        .map(|page| page.to_string())
-        .or_else(|| anchor.slide.map(|slide| format!("slide-{slide}")))
-        .unwrap_or_else(|| "unknown".to_string());
-
-    format!(
-        "{}::{}::{}::{}::{}",
-        chunk.chunk.doc_id, anchor.format, anchor.kind, page, block_key
-    )
-}
-
-fn compact_key_text(content: &str) -> String {
-    content
-        .chars()
-        .filter(|ch| !ch.is_whitespace())
-        .take(80)
-        .collect()
-}
-
 fn compact_quote(content: &str) -> String {
     let text = strip_context_prefixes(content)
         .replace('\n', " ")
@@ -261,6 +266,27 @@ mod tests {
             context_text: "evidence".to_string(),
         };
         assert!(resolve_citations("错误引用 [2]", &evidence).is_empty());
+    }
+
+    #[test]
+    fn one_document_produces_one_source_and_one_marker_number() {
+        let first = evidence_chunk();
+        let mut second = evidence_chunk();
+        second.chunk.doc_id = first.chunk.doc_id;
+        second.chunk.page_range = vec![2];
+        let evidence = EvidencePack {
+            chunks: vec![first, second],
+            context_text: "evidence".to_string(),
+        };
+
+        assert_eq!(
+            resolve_citations("结论甲 [1]，结论乙 [2]", &evidence).len(),
+            1
+        );
+        assert_eq!(
+            canonicalize_citation_markers("结论甲 [1]，结论乙 [2]", &evidence),
+            "结论甲 [1]，结论乙 [1]"
+        );
     }
 
     fn evidence_chunk() -> RerankedChunk {

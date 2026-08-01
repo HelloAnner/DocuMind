@@ -919,58 +919,27 @@ fn opt_i32_list(value: Option<Vec<i32>>) -> Vec<i32> {
 }
 
 const CONVERSATION_FILES_SQL: &str = r#"
-WITH source_rows AS (
+WITH citation_rows AS (
     SELECT
-        rt.id AS source_id,
-        'retrieval'::text AS source_kind,
-        rt.message_id AS source_message_id,
-        rt.doc_id,
-        rt.page_range,
-        rt.content_preview AS quote,
-        rt.score,
-        NULL::jsonb AS anchor,
-        NULL::text AS snapshot_title,
-        m.created_at AS used_at
-    FROM conversation_retrieval_traces rt
-    JOIN conversation_messages m ON m.id = rt.message_id
-    WHERE m.tenant_id = $1 AND m.conversation_id = $2
-
-    UNION ALL
-
-    SELECT
-        c.id,
-        'citation'::text,
-        c.assistant_message_id,
         c.doc_id,
         c.page_range,
         c.quote,
-        c.score,
         c.anchor,
-        c.doc_title,
-        m.created_at
+        c.doc_title AS snapshot_title,
+        c.score,
+        m.created_at AS used_at
     FROM conversation_citations c
     JOIN conversation_messages m ON m.id = c.assistant_message_id
     WHERE m.tenant_id = $1 AND m.conversation_id = $2
 ),
-source_counts AS (
-    SELECT
-        doc_id,
-        COUNT(DISTINCT source_message_id)
-            FILTER (WHERE source_kind = 'retrieval') AS retrieval_count,
-        COUNT(DISTINCT source_id)
-            FILTER (WHERE source_kind = 'citation') AS citation_count,
-        MAX(used_at) AS last_used_at
-    FROM source_rows
-    GROUP BY doc_id
-),
 preview_rows AS (
     SELECT DISTINCT ON (doc_id)
-        doc_id, source_kind, page_range, quote, anchor, snapshot_title
-    FROM source_rows
-    ORDER BY doc_id, (source_kind = 'citation') DESC, used_at DESC, score DESC
+        doc_id, page_range, quote, anchor, snapshot_title, used_at
+    FROM citation_rows
+    ORDER BY doc_id, used_at DESC, score DESC
 )
 SELECT
-    counts.doc_id,
+    preview.doc_id,
     COALESCE(d.title, preview.snapshot_title, '已删除文档') AS doc_title,
     COALESCE(
         NULLIF(d.metadata->>'original_filename', ''),
@@ -990,18 +959,15 @@ SELECT
         WHEN d.id IS NULL OR d.parse_status = 'deleted' THEN 'deleted'
         ELSE 'available'
     END AS source_status,
-    counts.retrieval_count,
-    counts.citation_count,
-    counts.last_used_at,
+    0::bigint AS retrieval_count,
+    1::bigint AS citation_count,
+    preview.used_at AS last_used_at,
     preview.page_range AS preview_page_range,
     preview.quote AS preview_quote,
     preview.anchor AS preview_anchor
-FROM source_counts counts
-JOIN preview_rows preview ON preview.doc_id = counts.doc_id
-LEFT JOIN documents d ON d.id = counts.doc_id AND d.tenant_id = $1
+FROM preview_rows preview
+LEFT JOIN documents d ON d.id = preview.doc_id AND d.tenant_id = $1
 LEFT JOIN knowledge_base kb ON kb.id = d.kb_id AND kb.tenant_id = $1
-WHERE d.kb_id = ANY($3) OR (d.id IS NULL AND preview.source_kind = 'citation')
-ORDER BY counts.last_used_at DESC, doc_title ASC
+WHERE d.kb_id = ANY($3) OR d.id IS NULL
+ORDER BY preview.used_at DESC, doc_title ASC
 "#;
-
-

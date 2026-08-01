@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use anyhow::{bail, Result};
 
-use super::citation_resolver::{cited_evidence_indexes, resolve_citations};
+use super::citation_resolver::{
+    canonicalize_citation_markers, cited_evidence_indexes, resolve_citations,
+};
 use super::stream::AnswerStream;
 use super::verifier::ClaimVerifier;
 use crate::models::agent::AnswerStreamItem;
@@ -44,6 +46,7 @@ impl GroundedAnswerFinalizer {
         } else {
             insufficient_answer()
         };
+        let answer = canonicalize_citation_markers(&answer, &evidence);
         let citations = resolve_citations(&answer, &evidence);
         let (sender, receiver) = tokio::sync::mpsc::unbounded_channel();
         sender.send(AnswerStreamItem::Replace {

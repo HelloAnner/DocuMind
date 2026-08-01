@@ -53,10 +53,6 @@ function CitationChip({
   );
 }
 
-function normalizeCitationText(value: string) {
-  return value.replace(/\s+/g, " ").trim();
-}
-
 function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "";
@@ -72,26 +68,7 @@ function formatRelativeTime(value: string) {
 }
 
 function citationDedupKey(citation: Citation) {
-  const anchor = citation.anchor;
-  if (anchor) {
-    const page = anchor.page ?? citation.page_range[0] ?? "";
-    const slide = anchor.slide ?? "";
-    const blocks = anchor.block_ids?.join(",") ?? "";
-    const tables = anchor.table_ids?.join(",") ?? "";
-    return [
-      citation.doc_id || citation.doc_title,
-      anchor.format ?? "",
-      anchor.kind ?? "",
-      page,
-      slide,
-      blocks,
-      tables,
-    ].join("::");
-  }
-  const doc = citation.doc_id || citation.doc_title;
-  const pages = citation.page_range.join(",");
-  const quote = normalizeCitationText(citation.quote);
-  return `${doc}::${pages}::${quote}`;
+  return citation.doc_id || citation.doc_title;
 }
 
 function uniqueCitations(citations: Citation[]) {
