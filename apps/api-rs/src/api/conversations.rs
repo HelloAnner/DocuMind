@@ -1000,6 +1000,7 @@ fn progress_to_sse_event(message_id: Uuid, progress: AgentProgress) -> Option<Ss
             top_chunk_ids,
         }),
         AgentProgress::ReactStepStarted { .. }
+        | AgentProgress::ReactStepCompleted { .. }
         | AgentProgress::ToolCallStarted { .. }
         | AgentProgress::ToolCallCompleted { .. }
         | AgentProgress::ToolCallFailed { .. }
@@ -1099,7 +1100,13 @@ fn send_runtime_step_event(
     name: &str,
     payload: serde_json::Value,
 ) {
-    emit_atom(tx, runtime_events, event_type, Some(tool_step(tool_call_id, name)), payload);
+    emit_atom(
+        tx,
+        runtime_events,
+        event_type,
+        Some(tool_step(tool_call_id, name)),
+        payload,
+    );
 }
 
 fn send_execution_started(
@@ -1186,6 +1193,12 @@ fn send_progress_event(
                 "action": action,
                 "decision_summary": decision_summary,
             }),
+        ),
+        AgentProgress::ReactStepCompleted { step } => send_runtime_event(
+            tx,
+            runtime_events,
+            "agent.step.completed",
+            json!({ "step": step }),
         ),
         AgentProgress::ToolCallStarted {
             tool_call_id,

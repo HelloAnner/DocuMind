@@ -314,6 +314,12 @@ export function useConversationManager() {
               continue;
             }
 
+            if (runtime.event_type === "response.stage") {
+              const stage = runtime.payload.stage;
+              if (typeof stage === "string") updateAssistantInStream({ runtime_stage: stage });
+              continue;
+            }
+
             if (runtime.event_type === "agent.step.started") {
               const stepNumber = runtimeStepNumber(runtime.payload.step);
               if (stepNumber !== null) {
@@ -329,6 +335,23 @@ export function useConversationManager() {
                   warnings: step?.warnings,
                   started_at: step?.started_at ?? runtime.occurred_at,
                   completed_at: step?.completed_at,
+                }));
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "agent.step.completed") {
+              const stepNumber = runtimeStepNumber(runtime.payload.step);
+              if (stepNumber !== null) {
+                updateReasoningStepInStream(stepNumber, (step) => ({
+                  step: stepNumber,
+                  action: step?.action ?? "respond",
+                  decision_summary: step?.decision_summary ?? "",
+                  output: step?.output,
+                  tool_calls: step?.tool_calls ?? [],
+                  warnings: step?.warnings,
+                  started_at: step?.started_at,
+                  completed_at: runtime.occurred_at,
                 }));
               }
               continue;
@@ -467,6 +490,7 @@ export function useConversationManager() {
               updateMessage(runtime.response_message_id, {
                 status: "completed",
                 confidence,
+                runtime_stage: undefined,
               });
               continue;
             }

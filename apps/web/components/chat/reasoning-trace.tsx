@@ -256,6 +256,7 @@ function buildReasoningRounds(steps: RuntimeReasoningStep[], liveTools: RuntimeT
 
 function reasoningRoundStatus(round: ReasoningRound, streaming: boolean): RoundStatus {
   if ((round.warnings?.length ?? 0) > 0 || round.tool_calls.some((tool) => tool.status === "failed" || tool.status === "cancelled")) return "failed";
+  if (round.completed_at) return "completed";
   if (round.tool_calls.some((tool) => tool.status === "running") || (round.action === "respond" && streaming)) return "running";
   return "completed";
 }

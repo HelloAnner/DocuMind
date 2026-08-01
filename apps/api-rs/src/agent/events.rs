@@ -12,6 +12,9 @@ pub enum AgentProgress {
         action: String,
         decision_summary: String,
     },
+    ReactStepCompleted {
+        step: usize,
+    },
     ToolCallStarted {
         tool_call_id: String,
         name: String,

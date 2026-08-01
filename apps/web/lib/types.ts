@@ -96,6 +96,7 @@ export interface Message {
   thinking?: string;
   tool_calls?: RuntimeToolCall[];
   reasoning_steps?: RuntimeReasoningStep[];
+  runtime_stage?: string;
   feedback?: FeedbackResponse;
   follow_up_questions?: FollowUpQuestion[];
   duration_ms?: number;

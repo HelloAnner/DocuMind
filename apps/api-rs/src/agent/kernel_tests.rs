@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+use super::events::AgentProgress;
 use super::finalizer::GroundedAnswerFinalizer;
 use super::model::{AgentModel, AgentModelRequest, AgentModelResponse, AgentToolCall};
 use super::prompt::BuiltinPromptRegistry;
@@ -131,6 +132,44 @@ async fn direct_greeting_finishes_without_tools() -> Result<()> {
     assert_eq!(model.requests.lock().await.len(), 1);
     assert_eq!(run.trace.stop_reason, "direct_response");
     assert_eq!(run.trace.react_steps[0].action, "respond");
+    Ok(())
+}
+
+#[tokio::test]
+async fn response_step_wraps_visible_answer_deltas_in_order() -> Result<()> {
+    let model = queued_model(vec![text_response("你好！")]);
+    let agent = kernel(model, recording_retriever(true));
+    let prepared = agent.prepare(request("你好")).await?;
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let collector = tokio::spawn(async move {
+        let mut events = Vec::new();
+        while let Some(event) = rx.recv().await {
+            match event {
+                AgentProgress::Flush { acknowledgement } => {
+                    let _ = acknowledgement.send(());
+                }
+                event => events.push(event),
+            }
+        }
+        events
+    });
+    let _run = agent.run_prepared(prepared, Some(tx.clone())).await?;
+    drop(tx);
+    let events = collector.await?;
+    let started = events
+        .iter()
+        .position(|event| matches!(event, AgentProgress::ReactStepStarted { action, .. } if action == "respond"))
+        .expect("response step should start");
+    let delta = events
+        .iter()
+        .position(|event| matches!(event, AgentProgress::ResponseDelta { .. }))
+        .expect("answer delta should be visible");
+    let completed = events
+        .iter()
+        .position(|event| matches!(event, AgentProgress::ReactStepCompleted { .. }))
+        .expect("response step should complete");
+
+    assert!(started < delta && delta < completed);
     Ok(())
 }
 

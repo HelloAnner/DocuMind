@@ -311,6 +311,7 @@ export function MessageRow({
         <AnswerContent
           content={message.content}
           isStreaming={isStreaming}
+          runtimeStage={message.runtime_stage}
           onCitationClick={(idx) => {
             const c = citationLookup.get(idx);
             if (c) onCitationClick(c);

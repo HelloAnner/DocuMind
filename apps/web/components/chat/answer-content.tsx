@@ -18,6 +18,7 @@ import { copyToClipboard } from "@/lib/clipboard";
 interface AnswerContentProps {
   content: string;
   isStreaming?: boolean;
+  runtimeStage?: string;
   onCitationClick?: (index: number) => void;
 }
 
@@ -26,6 +27,7 @@ interface MarkdownContentProps {
   className: string;
   isStreaming?: boolean;
   realtime?: boolean;
+  runtimeStage?: string;
   onCitationClick?: (index: number) => void;
 }
 
@@ -99,6 +101,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   className,
   isStreaming = false,
   realtime = false,
+  runtimeStage,
   onCitationClick,
 }: MarkdownContentProps) {
   const deferredContent = useDeferredValue(content);
@@ -144,7 +147,7 @@ export const MarkdownContent = memo(function MarkdownContent({
       {isStreaming ? (
         <div className="dm-answer-streaming-status" aria-live="polite">
           <span className="dm-streaming-pulse-dot" aria-hidden="true" />
-          <span>生成中</span>
+          <span>{runtimeStage === "verifying" ? "正在核验引用" : "生成中"}</span>
         </div>
       ) : null}
     </div>
@@ -154,6 +157,7 @@ export const MarkdownContent = memo(function MarkdownContent({
 export const AnswerContent = memo(function AnswerContent({
   content,
   isStreaming = false,
+  runtimeStage,
   onCitationClick,
 }: AnswerContentProps) {
   return (
@@ -162,6 +166,7 @@ export const AnswerContent = memo(function AnswerContent({
       className="dm-answer-content dm-markdown-content"
       isStreaming={isStreaming}
       realtime={isStreaming}
+      runtimeStage={runtimeStage}
       onCitationClick={onCitationClick}
     />
   );
