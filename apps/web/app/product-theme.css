@@ -2257,7 +2257,6 @@ select:focus-visible {
 }
 
 .dm-drawer-head,
-.dm-drawer-tabs,
 .dm-drawer-footer,
 .dm-modal-head {
   border-color: var(--border-muted);
@@ -4580,8 +4579,7 @@ body > .hiddenCanvasElement {
     width: 100vw;
   }
 
-  .dm-drawer-head,
-  .dm-drawer-tabs {
+  .dm-drawer-head {
     padding-left: 16px;
     padding-right: 16px;
   }

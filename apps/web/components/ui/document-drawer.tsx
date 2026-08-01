@@ -1,16 +1,9 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useState } from "react";
-import { DocumentPreview } from "@/components/chat/document-preview";
-import type { AdminDocumentDetail } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { getFilePreviewUrl, type AdminDocumentDetail } from "@/lib/api";
 import { IconButton } from "./icon-button";
-
-const tabs = [
-  { value: "preview", label: "原文预览" },
-  { value: "cleaned", label: "清洗块" },
-] as const;
-type DrawerTab = (typeof tabs)[number]["value"];
 
 export function DocumentDrawer({
   detail,
@@ -21,7 +14,6 @@ export function DocumentDrawer({
   loading?: boolean;
   onClose: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState<DrawerTab>("preview");
   const doc = detail?.document;
 
   return (
@@ -36,56 +28,41 @@ export function DocumentDrawer({
           </div>
         </div>
 
-        <div className="dm-drawer-tabs" role="tablist" aria-label="文档视图">
-          {tabs.map((tab) => (
-            <button
-              aria-selected={activeTab === tab.value}
-              key={tab.value}
-              className={activeTab === tab.value ? "active" : ""}
-              onClick={() => setActiveTab(tab.value)}
-              role="tab"
-              type="button"
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-
-        <div className={`dm-drawer-body${activeTab === "preview" ? " is-preview" : ""}`}>
+        <div className="dm-drawer-body">
           {loading ? <div className="dm-empty-state">加载中...</div> : null}
-          {!loading && detail && activeTab === "preview" ? (
-            <div className="dm-admin-original-preview">
-              <DocumentPreview
-                target={{
-                  doc_id: detail.document.doc_id,
-                  doc_title: detail.document.file_name,
-                  file_type: detail.document.file_type,
-                }}
-              />
-            </div>
-          ) : null}
-
-          {!loading && detail && activeTab === "cleaned" ? (
-            detail.cleaned_blocks.length ? (
-              detail.cleaned_blocks.map((block) => (
-                <div className="dm-chunk-row" key={block.block_id}>
-                  <span>
-                    清洗块 #{block.block_index + 1} · {block.block_type}
-                    {block.is_removed ? ` · 已移除：${block.remove_reason ?? "noise"}` : ""}
-                  </span>
-                  <strong>{block.heading_path.length ? block.heading_path.join(" / ") : "Root"}</strong>
-                  <small>{block.cleaning_ops.length ? block.cleaning_ops.join(" / ") : "未执行清洗操作"}</small>
-                  <p>{block.cleaned_text}</p>
-                </div>
-              ))
-            ) : (
-              <div className="dm-empty-state">暂无清洗块</div>
-            )
+          {!loading && detail ? (
+            <OriginalDocumentPreview
+              docId={detail.document.doc_id}
+              fileName={detail.document.file_name}
+            />
           ) : null}
         </div>
       </aside>
     </div>
   );
+}
+
+function OriginalDocumentPreview({ docId, fileName }: { docId: string; fileName: string }) {
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    getFilePreviewUrl(docId)
+      .then((preview) => {
+        if (!cancelled) setUrl(preview.preview_url);
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setError(reason instanceof Error ? reason.message : "原文加载失败");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docId]);
+
+  if (error) return <div className="dm-document-error">{error}</div>;
+  if (!url) return <div className="dm-document-loading">正在打开原文…</div>;
+  return <iframe className="dm-admin-original-preview" src={url} title={`${fileName} 原文预览`} />;
 }
 
 export function statusLabel(
