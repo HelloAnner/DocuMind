@@ -10,7 +10,6 @@ import {
   Folder,
   Menu,
   MessageSquareText,
-  Paperclip,
   Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -264,20 +263,11 @@ export function ChatWorkspace() {
                   onKeyDown={handleKeyDown}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
-                  disabled={!!streamingId}
                   rows={1}
                 />
               </div>
               <div className="dm-composer-toolbar">
                 <div className="dm-composer-tools">
-                  <button
-                    type="button"
-                    className="dm-composer-tool"
-                    aria-label="添加附件"
-                    title="添加附件"
-                  >
-                    <Paperclip size={14} />
-                  </button>
                   <span
                     className="dm-composer-context"
                     title="本次问答覆盖当前有权访问的知识库"

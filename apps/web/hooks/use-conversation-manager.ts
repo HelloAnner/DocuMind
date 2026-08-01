@@ -80,6 +80,7 @@ export function useConversationManager() {
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const skipLoadRef = useRef<string | null>(null);
+  const loadedIdsRef = useRef<Set<string>>(new Set());
 
   const loadConversations = useCallback(async () => {
     try {
@@ -119,6 +120,7 @@ export function useConversationManager() {
       try {
         const res = await getMessages(conversationId);
         setMessages(res.messages);
+        loadedIdsRef.current.add(conversationId);
       } catch (e) {
         console.error("failed to load messages", e);
       } finally {
@@ -135,8 +137,10 @@ export function useConversationManager() {
     }
     if (skipLoadRef.current === currentId) {
       skipLoadRef.current = null;
+      loadedIdsRef.current.add(currentId);
       return;
     }
+    if (loadedIdsRef.current.has(currentId)) return;
     loadMessages(currentId);
   }, [currentId, loadMessages]);
 
@@ -800,7 +804,7 @@ export function useConversationManager() {
         return false;
       }
     },
-    [currentId, streamingId]
+    [currentId]
   );
 
   const doRenameConversation = useCallback(async (conversationId: string, title: string) => {

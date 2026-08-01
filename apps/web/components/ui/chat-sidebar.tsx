@@ -95,7 +95,6 @@ export function ChatSidebar() {
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const openMenuRef = useRef<HTMLDivElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
-  const [unreadIds, setUnreadIds] = useState<Set<string>>(new Set());
   const [deleteTarget, setDeleteTarget] = useState<Conversation | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -123,28 +122,8 @@ export function ChatSidebar() {
     setMenuId(null);
     setCurrentId(id);
     closeMobile();
-    setUnreadIds((prev) => {
-      if (!prev.has(id)) return prev;
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
     router.push(`/chat?c=${encodeURIComponent(id)}`);
   };
-
-  useEffect(() => {
-    if (unreadIds.size > 0 || conversations.length === 0) return;
-    const today = new Date().toDateString();
-    const firstToday = conversations.find(
-      (c) =>
-        new Date(c.updated_at).toDateString() === today &&
-        c.conversation_id !== currentId
-    );
-    if (firstToday) {
-      setUnreadIds(new Set([firstToday.conversation_id]));
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversations, currentId]);
 
   useEffect(() => {
     if (!menuId) return;
@@ -213,7 +192,6 @@ export function ChatSidebar() {
     const hovered = hoveredId === conv.conversation_id;
     const menuOpen = menuId === conv.conversation_id;
     const renaming = renamingId === conv.conversation_id;
-    const unread = unreadIds.has(conv.conversation_id);
 
     return (
       <div
@@ -247,7 +225,6 @@ export function ChatSidebar() {
           ) : (
             <span className="dm-history-item-title">{displayTitle(conv)}</span>
           )}
-          {unread && <span className="dm-history-item-dot" aria-hidden="true" />}
         </button>
 
         <div className="dm-history-item-actions" ref={menuOpen ? openMenuRef : undefined}>

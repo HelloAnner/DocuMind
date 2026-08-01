@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   Copy,
@@ -298,8 +298,8 @@ export function MessageRow({
   }
 
   const hasCitations = message.citations.length > 0;
-  const displayCitations = uniqueCitations(message.citations);
-  const citationLookup = citationByDisplayedSource(message.citations);
+  const displayCitations = useMemo(() => uniqueCitations(message.citations), [message.citations]);
+  const citationLookup = useMemo(() => citationByDisplayedSource(message.citations), [message.citations]);
   const hasDisplayCitations = displayCitations.length > 0;
   const failed = message.status === "failed";
   const cancelled = message.status === "cancelled";
@@ -343,7 +343,7 @@ export function MessageRow({
 
       <FollowUpQuestions questions={message.follow_up_questions} onClick={onFollowUp} />
 
-      {hasDisplayCitations && !isStreaming && (
+      {hasDisplayCitations && (
         <div className="dm-answer-citations">
           <div className="dm-answer-citations-row">
             {displayCitations.map((citation) => (
