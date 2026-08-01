@@ -1117,11 +1117,14 @@ a {
 }
 
 .dm-admin-original-preview {
-  background: var(--surface-subdued);
-  border: 0;
+  display: flex;
   flex: 1;
   min-height: 0;
   width: 100%;
+}
+
+.dm-admin-original-preview .dm-document-preview-header {
+  display: none;
 }
 
 .dm-original-preview {

@@ -1,8 +1,8 @@
 "use client";
 
 import { X } from "lucide-react";
-import { useEffect, useState } from "react";
-import { getFilePreviewUrl, type AdminDocumentDetail } from "@/lib/api";
+import { DocumentPreview } from "@/components/chat/document-preview";
+import type { AdminDocumentDetail } from "@/lib/api";
 import { IconButton } from "./icon-button";
 
 export function DocumentDrawer({
@@ -31,38 +31,20 @@ export function DocumentDrawer({
         <div className="dm-drawer-body">
           {loading ? <div className="dm-empty-state">加载中...</div> : null}
           {!loading && detail ? (
-            <OriginalDocumentPreview
-              docId={detail.document.doc_id}
-              fileName={detail.document.file_name}
-            />
+            <div className="dm-admin-original-preview">
+              <DocumentPreview
+                target={{
+                  doc_id: detail.document.doc_id,
+                  doc_title: detail.document.file_name,
+                  file_type: detail.document.file_type,
+                }}
+              />
+            </div>
           ) : null}
         </div>
       </aside>
     </div>
   );
-}
-
-function OriginalDocumentPreview({ docId, fileName }: { docId: string; fileName: string }) {
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
-
-  useEffect(() => {
-    let cancelled = false;
-    getFilePreviewUrl(docId)
-      .then((preview) => {
-        if (!cancelled) setUrl(preview.preview_url);
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled) setError(reason instanceof Error ? reason.message : "原文加载失败");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [docId]);
-
-  if (error) return <div className="dm-document-error">{error}</div>;
-  if (!url) return <div className="dm-document-loading">正在打开原文…</div>;
-  return <iframe className="dm-admin-original-preview" src={url} title={`${fileName} 原文预览`} />;
 }
 
 export function statusLabel(

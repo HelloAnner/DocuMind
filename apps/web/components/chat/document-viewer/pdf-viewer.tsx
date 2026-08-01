@@ -109,11 +109,7 @@ export function PdfViewer({
         const pageCount = totalHeader && totalHeader > 0 ? totalHeader : pdf.numPages;
         setTotalPages(pageCount);
 
-        const range: number[] = [];
-        for (let p = target - 3; p <= target + 3; p += 1) {
-          if (p >= 1 && p <= pageCount) range.push(p);
-        }
-        setLoadedPages(range);
+        setLoadedPages([target]);
         onReady?.();
       } catch (error) {
         console.error(`[PdfViewer] bootstrap error:`, error);
