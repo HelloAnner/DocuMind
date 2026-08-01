@@ -5,7 +5,6 @@ import { MessageSquare, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { fetchJson } from "@/lib/api";
 import Link from "next/link";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 interface KnowledgeBase {
   id: string;
@@ -38,7 +37,6 @@ export default function KnowledgePage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <ThemeToggle />
         </div>
       </header>
 

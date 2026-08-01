@@ -15,7 +15,6 @@ import {
 } from "@/lib/auth";
 import styles from "./account.module.css";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 export default function AccountPage() {
   const router = useRouter();
@@ -72,7 +71,6 @@ export default function AccountPage() {
     <main className={styles.page}>
       <div className="dm-account-brandbar">
         <BrandMark />
-        <ThemeToggle />
       </div>
       <div className={styles.container}>
         <Link className={styles.back} href={AUTHENTICATED_HOME_PATH}>

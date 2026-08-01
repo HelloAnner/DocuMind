@@ -80,7 +80,6 @@ export function useConversationManager() {
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const skipLoadRef = useRef<string | null>(null);
-  const loadedIdsRef = useRef<Set<string>>(new Set());
 
   const loadConversations = useCallback(async () => {
     try {
@@ -114,35 +113,35 @@ export function useConversationManager() {
     }
   }, [loadConversations, loadKnowledgeBases]);
 
-  const loadMessages = useCallback(
-    async (conversationId: string) => {
-      setLoading(true);
-      try {
-        const res = await getMessages(conversationId);
-        setMessages(res.messages);
-        loadedIdsRef.current.add(conversationId);
-      } catch (e) {
-        console.error("failed to load messages", e);
-      } finally {
-        setLoading(false);
-      }
-    },
-    []
-  );
-
   useEffect(() => {
     if (!currentId) {
       setMessages([]);
+      setLoading(false);
       return;
     }
     if (skipLoadRef.current === currentId) {
       skipLoadRef.current = null;
-      loadedIdsRef.current.add(currentId);
       return;
     }
-    if (loadedIdsRef.current.has(currentId)) return;
-    loadMessages(currentId);
-  }, [currentId, loadMessages]);
+
+    let active = true;
+    setMessages([]);
+    setLoading(true);
+    getMessages(currentId)
+      .then((response) => {
+        if (active) setMessages(response.messages);
+      })
+      .catch((error) => {
+        if (active) console.error("failed to load messages", error);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentId]);
 
   const allKbIds = useMemo(() => availableKbs.map((kb) => kb.id), [availableKbs]);
 

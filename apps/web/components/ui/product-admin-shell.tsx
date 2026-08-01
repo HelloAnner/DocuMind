@@ -4,7 +4,6 @@ import { Menu, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { AdminShellSidebar } from "./admin-shell-sidebar";
 import { BrandMark } from "./brand-mark";
-import { ThemeToggle } from "./theme-toggle";
 
 export function ProductAdminShell({
   children,
@@ -31,7 +30,6 @@ export function ProductAdminShell({
           <Menu size={18} />
         </button>
         <BrandMark />
-        <ThemeToggle />
       </header>
 
       {mobileOpen ? (

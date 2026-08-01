@@ -400,26 +400,6 @@ select:focus-visible {
   transform: none;
 }
 
-.dm-theme-toggle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 8px;
-  color: var(--text-muted);
-  cursor: pointer;
-  display: inline-flex;
-  flex-shrink: 0;
-  height: 32px;
-  justify-content: center;
-  transition: background 150ms cubic-bezier(0.4, 0, 0.2, 1), color 150ms cubic-bezier(0.4, 0, 0.2, 1);
-  width: 32px;
-}
-
-.dm-theme-toggle:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
-
 /* Shared product shell */
 
 .dm-shell,
@@ -890,10 +870,6 @@ select:focus-visible {
   height: 15px;
   opacity: 0.6;
   width: 1px;
-}
-
-.dm-login-brandbar .dm-theme-toggle {
-  margin-right: 8px;
 }
 
 .dm-login-story {
@@ -1413,7 +1389,6 @@ select:focus-visible {
 }
 
 .dm-chat-sidebar.collapsed .dm-brand-wordmark,
-.dm-chat-sidebar.collapsed .dm-theme-toggle,
 .dm-chat-sidebar.collapsed .dm-new-session-button span,
 .dm-chat-sidebar.collapsed .dm-chat-history,
 .dm-chat-sidebar.collapsed .dm-user-menu-identity,
@@ -2571,10 +2546,6 @@ body > .hiddenCanvasElement {
     top: 24px;
   }
 
-  .dm-login-brandbar .dm-theme-toggle {
-    margin-right: 0;
-  }
-
   .dm-login-brand-identity {
     gap: 9px;
     max-width: calc(100vw - 90px);
@@ -2657,10 +2628,6 @@ body > .hiddenCanvasElement {
   .dm-chat-sidebar.collapsed .dm-brand-wordmark,
   .dm-chat-sidebar.collapsed .dm-user-menu-identity {
     display: block;
-  }
-
-  .dm-chat-sidebar.collapsed .dm-theme-toggle {
-    display: inline-flex;
   }
 
   .dm-chat-sidebar.collapsed .dm-user-menu-trigger > svg {

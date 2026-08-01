@@ -5,7 +5,6 @@ import { Search } from "lucide-react";
 import Link from "next/link";
 import { fetchJson } from "@/lib/api";
 import type { Conversation } from "@/lib/types";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 
 function groupByDate(items: Conversation[]) {
   const groups = new Map<string, Conversation[]>();
@@ -51,7 +50,6 @@ export default function HistoryPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <ThemeToggle />
         </div>
       </header>
 

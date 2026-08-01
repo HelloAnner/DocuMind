@@ -24,7 +24,6 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { NavItem } from "./nav-item";
 import { UserAccountMenu } from "./user-account-menu";
 import { BrandMark } from "./brand-mark";
-import { ThemeToggle } from "./theme-toggle";
 
 interface NavEntry {
   label: string;
@@ -112,7 +111,6 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
           <Link className="dm-admin-logo" href={homeHref} onClick={onNavigate}>
             <BrandMark />
           </Link>
-          <ThemeToggle />
         </div>
         {showTenantContext ? (
           <Link

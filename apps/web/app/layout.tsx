@@ -2,7 +2,18 @@ import type { Metadata } from "next";
 import "./globals.css";
 import "./product-theme.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
-import { ThemeProvider, themeBootstrapScript } from "@/components/providers/theme-provider";
+
+const themeBootstrapScript = `
+(() => {
+  const media = window.matchMedia("(prefers-color-scheme: dark)");
+  const applyTheme = () => {
+    const theme = media.matches ? "dark" : "light";
+    document.documentElement.dataset.theme = theme;
+    document.documentElement.style.colorScheme = theme;
+  };
+  applyTheme();
+  media.addEventListener("change", applyTheme);
+})();`;
 
 export const metadata: Metadata = {
   title: "DocuMind",
@@ -23,9 +34,7 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
       </head>
       <body>
-        <ThemeProvider>
-          <AuthProvider>{children}</AuthProvider>
-        </ThemeProvider>
+        <AuthProvider>{children}</AuthProvider>
       </body>
     </html>
   );

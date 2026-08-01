@@ -19,7 +19,6 @@ import type { Conversation } from "@/lib/types";
 import { UserAccountMenu } from "./user-account-menu";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { BrandMark } from "./brand-mark";
-import { ThemeToggle } from "./theme-toggle";
 import { ConfirmDialog } from "./confirm-dialog";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
@@ -290,7 +289,6 @@ export function ChatSidebar() {
       <div className="dm-chat-sidebar-header">
         <BrandMark />
         <div className="dm-chat-sidebar-header-actions">
-          <ThemeToggle />
           <IconButton
             aria-label={collapsed ? "展开会话导航" : "收起会话导航"}
             className="dm-chat-sidebar-collapse"

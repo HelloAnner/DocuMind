@@ -6,7 +6,6 @@ import { Building2, LockKeyhole, UserRound } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { AgentOrb, BrandMark } from "@/components/ui/brand-mark";
-import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { getTenantLoginContext, type TenantLoginContext } from "@/lib/auth";
 import { createTenantLoginProfile, type TenantLoginProfile } from "./tenant-login-profile";
 
@@ -164,7 +163,6 @@ function TenantLoginExperience() {
             </>
           ) : null}
         </div>
-        <ThemeToggle />
       </header>
 
       <section className="dm-login-story" aria-label={`${profile.tenantName} 知识空间介绍`}>
