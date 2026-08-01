@@ -1,7 +1,5 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
-use uuid::Uuid;
-
 use crate::models::agent::CitationOutput;
 use crate::models::citation::CitationAnchor;
 use crate::models::rag::{EvidencePack, RerankedChunk};
@@ -240,6 +238,7 @@ impl RetrievedChunkExt for crate::models::rag::RetrievedChunk {
 mod tests {
     use super::*;
     use crate::models::rag::RetrievedChunk;
+    use uuid::Uuid;
     use crate::models::trace::RetrievalSource;
 
     #[test]
