@@ -4276,33 +4276,36 @@ body > .hiddenCanvasElement {
   max-width: 1600px;
 }
 
-.dm-kb-document-context {
+.dm-document-title-row {
   align-items: center;
-  background: var(--surface-subdued);
-  border: 1px solid var(--border-faint);
-  border-radius: 10px;
   display: flex;
-  justify-content: space-between;
-  margin-bottom: 12px;
-  min-height: 56px;
-  padding: 10px 12px;
+  gap: 8px;
+  min-width: 0;
 }
 
-.dm-kb-document-context > div {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.dm-kb-document-context span {
-  color: var(--text-muted);
+.dm-document-title-row > span {
+  color: var(--text-placeholder);
   font-size: 12px;
 }
 
-.dm-kb-document-context strong {
+.dm-document-title-row h1 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-document-back-link {
+  align-items: center;
+  color: var(--text-muted);
+  display: inline-flex;
+  flex-shrink: 0;
+  font-size: 12px;
+  gap: 5px;
+  text-decoration: none;
+}
+
+.dm-document-back-link:hover {
   color: var(--text-primary);
-  font-size: 14px;
-  font-weight: 600;
 }
 
 .dm-document-empty-state {
@@ -4572,6 +4575,17 @@ body > .hiddenCanvasElement {
 }
 
 @media (max-width: 767px) {
+  .dm-drawer {
+    border-radius: 0;
+    width: 100vw;
+  }
+
+  .dm-drawer-head,
+  .dm-drawer-tabs {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
   .dm-kb-document-panel .dm-panel-head {
     align-items: stretch;
     flex-direction: column;

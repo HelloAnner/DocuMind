@@ -18,7 +18,6 @@ import { DocumentRow } from "@/components/ui/document-row";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Segmented } from "@/components/ui/segmented";
-import { Topbar } from "@/components/ui/topbar";
 import { AdminDocumentUploadModal } from "./admin-document-upload-modal";
 import { ManagedDocumentDrawer } from "./managed-document-drawer";
 
@@ -249,29 +248,31 @@ export function AdminDocuments() {
 
   return (
     <>
-      <Topbar
-        title={knowledgeBase?.name ?? "知识库文档"}
-        subtitle={knowledgeBase ? knowledgeBase.description || "查看和维护该知识库中的文档" : "从知识库进入文档列表"}
-      >
-        <Link href="/admin/knowledge">
-          <Button icon={<ArrowLeft size={14} />} variant="secondary">
-            返回知识库
+      <header className="dm-topbar dm-document-topbar">
+        <div className="dm-document-title-row">
+          <Link className="dm-document-back-link" href="/admin/knowledge">
+            <ArrowLeft size={14} />
+            知识库
+          </Link>
+          <span aria-hidden="true">/</span>
+          <h1>{knowledgeBase?.name ?? "知识库文档"}</h1>
+        </div>
+        <div className="dm-topbar-actions">
+          <Button
+            aria-label="刷新文档列表"
+            icon={<RefreshCw size={14} />}
+            onClick={() => refresh(true).catch(console.error)}
+            variant="secondary"
+          >
+            刷新
           </Button>
-        </Link>
-        <Button
-          aria-label="刷新文档列表"
-          icon={<RefreshCw size={14} />}
-          onClick={() => refresh(true).catch(console.error)}
-          variant="secondary"
-        >
-          刷新
-        </Button>
-        {kbId ? (
-          <Button icon={<Upload size={14} />} onClick={() => setShowUploadModal(true)}>
-            上传文档
-          </Button>
-        ) : null}
-      </Topbar>
+          {kbId ? (
+            <Button icon={<Upload size={14} />} onClick={() => setShowUploadModal(true)}>
+              上传文档
+            </Button>
+          ) : null}
+        </div>
+      </header>
 
       <div className="dm-admin-content">
         {!kbId && paramsReady ? (
@@ -285,7 +286,7 @@ export function AdminDocuments() {
         ) : (
           <Panel
             className="dm-kb-document-panel"
-            title="文档列表"
+            title={`文档列表 · ${visibleDocuments.length}`}
             action={
               <div className="dm-document-panel-actions">
                 <Button
@@ -299,14 +300,6 @@ export function AdminDocuments() {
               </div>
             }
           >
-            <div className="dm-kb-document-context">
-              <div>
-                <span>知识库</span>
-                <strong>{knowledgeBase?.name ?? "加载中…"}</strong>
-              </div>
-              <span>{visibleDocuments.length} 个文档</span>
-            </div>
-
             <div className="dm-document-toolbar">
               <SearchInput
                 placeholder="搜索文件名或标题..."
@@ -411,9 +404,7 @@ export function AdminDocuments() {
         <ManagedDocumentDrawer
           key={selectedDocId}
           docId={selectedDocId}
-          knowledgeBases={knowledgeBases}
           onClose={() => setSelectedDocId(undefined)}
-          onChanged={() => refresh()}
           onNotice={handleDrawerNotice}
         />
       ) : null}
