@@ -9,7 +9,6 @@ import {
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import {
   citationLocationStatus,
@@ -339,6 +338,11 @@ export function MessageRow({
         <IconButton aria-label="复制" onClick={handleCopy}>
           {copied ? <Check size={13} /> : <Copy size={13} />}
         </IconButton>
+        {failed || cancelled ? (
+          <IconButton aria-label="重试" onClick={onRetry} title="重试">
+            <RefreshCw size={13} />
+          </IconButton>
+        ) : null}
           <IconButton
               aria-label={feedbackRating === "up" ? "取消点赞" : "点赞"}
               aria-pressed={feedbackRating === "up"}
@@ -381,12 +385,6 @@ export function MessageRow({
                 size={13}
               />
           </IconButton>
-        {failed || cancelled ? (
-          <Button variant="secondary" icon={<RefreshCw size={14} />} onClick={onRetry}>
-            重试
-          </Button>
-        ) : null}
-
         {downPanelOpen ? (
           <form
             className="dm-feedback-panel"

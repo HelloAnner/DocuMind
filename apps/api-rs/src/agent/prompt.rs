@@ -46,7 +46,7 @@ impl PromptRegistry for BuiltinPromptRegistry {
             persona_version: "persona-v4".to_string(),
             guardrail_version: "adaptive-grounding-v20".to_string(),
             mode_version: "semantic-mode-autonomous-v20".to_string(),
-            task_version: "native-tool-react-v20".to_string(),
+            task_version: "native-tool-react-v21".to_string(),
         })
     }
 }
@@ -160,6 +160,8 @@ Tools are optional capabilities, not mandatory workflow stages. Decide semantica
   results are not ambiguity.
 - Independent searches may be requested together. Dependent searches must use later iterations.
 - Use only tools actually exposed in this request. Never invent a tool or claim a tool ran.
+- When calling a tool, leave assistant content empty. Put the concise purpose in the tool call's
+  reason field; never narrate search plans or progress as answer text.
 - A tool failure is an observation. Change the query or explain the limitation; do not repeat the
   identical call.
 
@@ -186,5 +188,6 @@ mod tests {
         assert!(prompt.system_text.contains("knowledge_search"));
         assert!(prompt.system_text.contains("cite"));
         assert!(prompt.system_text.contains("current user message"));
+        assert!(prompt.system_text.contains("leave assistant content empty"));
     }
 }

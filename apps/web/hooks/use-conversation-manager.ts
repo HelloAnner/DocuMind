@@ -79,6 +79,7 @@ export function useConversationManager() {
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const requestActiveRef = useRef(false);
   const skipLoadRef = useRef<string | null>(null);
 
   const loadConversations = useCallback(async () => {
@@ -680,38 +681,49 @@ export function useConversationManager() {
 
   const sendMessage = useCallback(
     async (content: string) => {
-      let conversationId = currentId;
-      if (!conversationId) {
-        const created = await createAndSelect();
-        if (!created) return;
-        conversationId = created;
-      }
+      if (requestActiveRef.current) return;
+      requestActiveRef.current = true;
+      try {
+        let conversationId = currentId;
+        if (!conversationId) {
+          const created = await createAndSelect();
+          if (!created) return;
+          conversationId = created;
+        }
 
-      const req: SendMessageRequest = {
-        content,
-        client_request_id: `req-${Date.now()}`,
-        stream: true,
-      };
-      const controller = new AbortController();
-      await processStream(
-        conversationId,
-        content,
-        req,
-        sendMessageStreamUrl(conversationId),
-        controller,
-        false
-      );
+        const req: SendMessageRequest = {
+          content,
+          client_request_id: `req-${Date.now()}`,
+          stream: true,
+        };
+        const controller = new AbortController();
+        await processStream(
+          conversationId,
+          content,
+          req,
+          sendMessageStreamUrl(conversationId),
+          controller,
+          false
+        );
+      } finally {
+        requestActiveRef.current = false;
+      }
     },
     [currentId, createAndSelect, processStream]
   );
 
   const retryMessage = useCallback(
     async (messageId: string) => {
-      if (!currentId) return;
-      const controller = new AbortController();
-      const url = retryMessageStreamUrl(currentId, messageId);
-      const req: RetryMessageRequest = { stream: true };
-      await processStream(currentId, "", req, url, controller, true);
+      if (!currentId || requestActiveRef.current) return;
+      requestActiveRef.current = true;
+      try {
+        const controller = new AbortController();
+        const url = retryMessageStreamUrl(currentId, messageId);
+        const req: RetryMessageRequest = { stream: true };
+        await processStream(currentId, "", req, url, controller, true);
+      } finally {
+        requestActiveRef.current = false;
+      }
     },
     [currentId, processStream]
   );
