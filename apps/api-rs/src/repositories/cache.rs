@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
 use async_trait::async_trait;
-use chrono::{DateTime, TimeZone, Utc};
+use chrono::{DateTime, Utc};
 use redis::AsyncCommands;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
@@ -144,10 +144,6 @@ fn hash_str(input: &str) -> String {
     hex::encode(Sha256::digest(input.as_bytes()))
 }
 
-#[allow(dead_code)]
-fn dt_from_timestamp(secs: i64) -> DateTime<Utc> {
-    Utc.timestamp_opt(secs, 0).single().unwrap_or_else(Utc::now)
-}
 
 #[cfg(test)]
 mod tests {

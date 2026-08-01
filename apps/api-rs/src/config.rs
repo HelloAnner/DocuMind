@@ -151,96 +151,91 @@ pub struct AgentConfig {
     pub total_timeout_seconds: u64,
 }
 
-pub fn load_config() -> Result<AppConfig> {
-    dotenvy::dotenv().ok();
+fn env_str(key: &str, default: &str) -> String {
+    env::var(key).unwrap_or_else(|_| default.to_string())
+}
 
+fn env_opt(key: &str) -> Option<String> {
+    env::var(key).ok()
+}
+
+fn env_nonempty(key: &str) -> Option<String> {
+    env::var(key).ok().filter(|v| !v.trim().is_empty())
+}
+
+fn env_parse<T: std::str::FromStr>(key: &str, default: T) -> T {
+    env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
+}
+
+fn env_uuid(key: &str, default: &str) -> Uuid {
+    env::var(key)
+        .ok()
+        .and_then(|v| Uuid::parse_str(&v).ok())
+        .unwrap_or_else(|| Uuid::parse_str(default).unwrap())
+}
+
+fn env_first_str(keys: &[&str], default: &str) -> String {
+    keys.iter()
+        .find_map(|k| env::var(k).ok())
+        .unwrap_or_else(|| default.to_string())
+}
+
+fn env_first_parse<T: std::str::FromStr>(keys: &[&str], default: T) -> T {
+    keys.iter()
+        .find_map(|k| env::var(k).ok().and_then(|v| v.parse().ok()))
+        .unwrap_or(default)
+}
+
+fn env_first_nonempty(keys: &[&str]) -> Option<String> {
+    keys.iter().find_map(|k| env::var(k).ok()).filter(|v| !v.trim().is_empty())
+}
+
+pub fn load_config() -> Result<AppConfig> {
     let environment = env::var("DOCUMIND_ENV")
         .or_else(|_| env::var("APP_ENV"))
         .or_else(|_| env::var("RUST_ENV"))
         .map(|value| RuntimeEnvironment::from_env_value(&value))
         .unwrap_or(RuntimeEnvironment::Development);
-    let server_host = env::var("SERVER_HOST").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let server_port = env::var("SERVER_PORT")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(8089);
-    let database_url = env::var("DATABASE_URL").ok();
-    let redis_url = env::var("REDIS_URL").ok();
-    let rabbitmq_url = env::var("RABBITMQ_URL").ok();
-    let elasticsearch_url = env::var("ELASTICSEARCH_URL").ok();
-    let object_storage_provider =
-        env::var("OBJECT_STORAGE_PROVIDER").unwrap_or_else(|_| "minio".to_string());
-    let object_storage_endpoint = env::var("OBJECT_STORAGE_ENDPOINT").ok();
-    let object_storage_region =
-        env::var("OBJECT_STORAGE_REGION").unwrap_or_else(|_| "us-east-1".to_string());
-    let object_storage_bucket =
-        env::var("OBJECT_STORAGE_BUCKET").unwrap_or_else(|_| "documind".to_string());
-    let object_storage_access_key = env::var("OBJECT_STORAGE_ACCESS_KEY").ok();
-    let object_storage_secret_key = env::var("OBJECT_STORAGE_SECRET_KEY").ok();
+    let server_host = env_str("SERVER_HOST", "127.0.0.1");
+    let server_port = env_parse("SERVER_PORT", 8089u16);
+    let database_url = env_opt("DATABASE_URL");
+    let redis_url = env_opt("REDIS_URL");
+    let rabbitmq_url = env_opt("RABBITMQ_URL");
+    let elasticsearch_url = env_opt("ELASTICSEARCH_URL");
+    let object_storage_provider = env_str("OBJECT_STORAGE_PROVIDER", "minio");
+    let object_storage_endpoint = env_opt("OBJECT_STORAGE_ENDPOINT");
+    let object_storage_region = env_str("OBJECT_STORAGE_REGION", "us-east-1");
+    let object_storage_bucket = env_str("OBJECT_STORAGE_BUCKET", "documind");
+    let object_storage_access_key = env_opt("OBJECT_STORAGE_ACCESS_KEY");
+    let object_storage_secret_key = env_opt("OBJECT_STORAGE_SECRET_KEY");
     let object_storage_force_path_style = env_bool("OBJECT_STORAGE_FORCE_PATH_STYLE", true);
     let object_storage_tls_verify = env_bool("OBJECT_STORAGE_TLS_VERIFY", false);
-    let object_storage_presign_expire_seconds = env::var("OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS")
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(900);
-    let blob_storage_dir = env::var("BLOB_STORAGE_DIR")
-        .or_else(|_| env::var("OBJECT_STORAGE_LOCAL_DIR"))
-        .unwrap_or_else(|_| "./data/objects".to_string());
-    let jwt_secret =
-        env::var("JWT_SECRET").unwrap_or_else(|_| "documind-dev-secret-change-me".to_string());
-    let auth_token_expire_hours = env::var("AUTH_TOKEN_EXPIRE_HOURS")
-        .or_else(|_| env::var("JWT_EXPIRE_HOURS"))
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(24);
+    let object_storage_presign_expire_seconds = env_parse("OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS", 900u64);
+    let blob_storage_dir = env_first_str(&["BLOB_STORAGE_DIR", "OBJECT_STORAGE_LOCAL_DIR"], "./data/objects");
+    let jwt_secret = env_str("JWT_SECRET", "documind-dev-secret-change-me");
+    let auth_token_expire_hours = env_first_parse(&["AUTH_TOKEN_EXPIRE_HOURS", "JWT_EXPIRE_HOURS"], 24i64);
     let legacy_portal_auth =
         env_bool("PORTAL_MANAGED", false) && env_bool("PORTAL_AUTH_ENABLED", false);
     let auth_login_mode =
         normalize_auth_login_mode(&env::var("AUTH_LOGIN_MODE").unwrap_or_else(|_| {
-            if legacy_portal_auth {
-                "portal".to_string()
-            } else {
-                "local".to_string()
-            }
+            if legacy_portal_auth { "portal".to_string() } else { "local".to_string() }
         }));
-    let portal_base_url =
-        env::var("PORTAL_BASE_URL").unwrap_or_else(|_| "http://localhost:8080".to_string());
-    let portal_exchange_endpoint = env::var("PORTAL_EXCHANGE_ENDPOINT")
-        .unwrap_or_else(|_| "/api/auth/exchange-ticket".to_string());
+    let portal_base_url = env_str("PORTAL_BASE_URL", "http://localhost:8080");
+    let portal_exchange_endpoint = env_str("PORTAL_EXCHANGE_ENDPOINT", "/api/auth/exchange-ticket");
 
-    let default_tenant_id = env::var("DEFAULT_TENANT_ID")
-        .ok()
-        .and_then(|v| Uuid::parse_str(&v).ok())
-        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000001").unwrap());
-
-    let default_user_id = env::var("DEFAULT_USER_ID")
-        .ok()
-        .and_then(|v| Uuid::parse_str(&v).ok())
-        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000002").unwrap());
-
-    let default_role = env::var("DEFAULT_ROLE").unwrap_or_else(|_| "enterprise_admin".to_string());
-    let default_tenant_name =
-        env::var("DEFAULT_TENANT_NAME").unwrap_or_else(|_| "Acme Corp".to_string());
-    let default_tenant_slug =
-        env::var("DEFAULT_TENANT_SLUG").unwrap_or_else(|_| "acme".to_string());
-    let super_admin_user_id = env::var("SUPER_ADMIN_USER_ID")
-        .ok()
-        .and_then(|v| Uuid::parse_str(&v).ok())
-        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000003").unwrap());
-    let standard_user_id = env::var("STANDARD_USER_ID")
-        .ok()
-        .and_then(|v| Uuid::parse_str(&v).ok())
-        .unwrap_or_else(|| Uuid::parse_str("00000000-0000-0000-0000-000000000004").unwrap());
-    let super_admin_email = env::var("SUPER_ADMIN_EMAIL").unwrap_or_else(|_| "Anner".to_string());
-    let super_admin_password = env::var("SUPER_ADMIN_PASSWORD").unwrap_or_else(|_| "1".to_string());
-    let enterprise_admin_email =
-        env::var("ENTERPRISE_ADMIN_EMAIL").unwrap_or_else(|_| "admin@documind.local".to_string());
-    let enterprise_admin_password =
-        env::var("ENTERPRISE_ADMIN_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
-    let standard_user_email =
-        env::var("STANDARD_USER_EMAIL").unwrap_or_else(|_| "user@documind.local".to_string());
-    let standard_user_password =
-        env::var("STANDARD_USER_PASSWORD").unwrap_or_else(|_| "documind123".to_string());
+    let default_tenant_id = env_uuid("DEFAULT_TENANT_ID", "00000000-0000-0000-0000-000000000001");
+    let default_user_id = env_uuid("DEFAULT_USER_ID", "00000000-0000-0000-0000-000000000002");
+    let default_role = env_str("DEFAULT_ROLE", "enterprise_admin");
+    let default_tenant_name = env_str("DEFAULT_TENANT_NAME", "Acme Corp");
+    let default_tenant_slug = env_str("DEFAULT_TENANT_SLUG", "acme");
+    let super_admin_user_id = env_uuid("SUPER_ADMIN_USER_ID", "00000000-0000-0000-0000-000000000003");
+    let standard_user_id = env_uuid("STANDARD_USER_ID", "00000000-0000-0000-0000-000000000004");
+    let super_admin_email = env_str("SUPER_ADMIN_EMAIL", "Anner");
+    let super_admin_password = env_str("SUPER_ADMIN_PASSWORD", "1");
+    let enterprise_admin_email = env_str("ENTERPRISE_ADMIN_EMAIL", "admin@documind.local");
+    let enterprise_admin_password = env_str("ENTERPRISE_ADMIN_PASSWORD", "documind123");
+    let standard_user_email = env_str("STANDARD_USER_EMAIL", "user@documind.local");
+    let standard_user_password = env_str("STANDARD_USER_PASSWORD", "documind123");
 
     let default_kb_ids: Vec<Uuid> = env::var("DEFAULT_KB_IDS")
         .ok()
@@ -253,197 +248,79 @@ pub fn load_config() -> Result<AppConfig> {
 
     let rag = RagConfig {
         rewrite: RewriteConfig {
-            enabled: env::var("RAG_REWRITE_ENABLED")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(true),
-            hyde_enabled: env::var("RAG_HYDE_ENABLED")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(true),
-            model: env::var("RAG_REWRITE_MODEL").unwrap_or_else(|_| "qwen-turbo".to_string()),
+            enabled: env_parse("RAG_REWRITE_ENABLED", true),
+            hyde_enabled: env_parse("RAG_HYDE_ENABLED", true),
+            model: env_str("RAG_REWRITE_MODEL", "qwen-turbo"),
         },
         retrieval: RetrievalConfig {
-            dense_top_k: env::var("RAG_DENSE_TOP_K")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(100),
-            bm25_top_k: env::var("RAG_BM25_TOP_K")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(100),
-            rrf_top_k: env::var("RAG_RRF_TOP_K")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(20),
-            effective_top_k: env::var("RAG_TOP_K")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(5),
+            dense_top_k: env_parse("RAG_DENSE_TOP_K", 100usize),
+            bm25_top_k: env_parse("RAG_BM25_TOP_K", 100usize),
+            rrf_top_k: env_parse("RAG_RRF_TOP_K", 20usize),
+            effective_top_k: env_parse("RAG_TOP_K", 5usize),
         },
         rerank: RerankConfig {
-            enabled: env::var("RAG_RERANK_ENABLED")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(true),
-            provider: env::var("RAG_RERANK_PROVIDER").unwrap_or_else(|_| "dashscope".to_string()),
-            model: env::var("RAG_RERANK_MODEL").unwrap_or_else(|_| "gte-rerank-v2".to_string()),
-            api_url: env::var("RAG_RERANK_API_URL")
-                .ok()
-                .filter(|v| !v.trim().is_empty()),
-            api_key: env::var("RAG_RERANK_API_KEY")
-                .ok()
-                .filter(|v| !v.trim().is_empty()),
+            enabled: env_parse("RAG_RERANK_ENABLED", true),
+            provider: env_str("RAG_RERANK_PROVIDER", "dashscope"),
+            model: env_str("RAG_RERANK_MODEL", "gte-rerank-v2"),
+            api_url: env_nonempty("RAG_RERANK_API_URL"),
+            api_key: env_nonempty("RAG_RERANK_API_KEY"),
         },
         embedding: EmbeddingConfig {
-            model: env::var("EMBED_MODEL")
-                .or_else(|_| env::var("EMBEDDING_MODEL"))
-                .unwrap_or_else(|_| "text-embedding-v3".to_string()),
-            base_url: env::var("EMBED_BASE_URL")
-                .or_else(|_| env::var("EMBEDDING_API_URL"))
-                .or_else(|_| env::var("LLM_BASE_URL"))
-                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
-            api_key: env::var("EMBED_API_KEY")
-                .or_else(|_| env::var("LLM_API"))
-                .or_else(|_| env::var("LLM_API_KEY"))
-                .ok()
-                .filter(|v| !v.trim().is_empty()),
-            batch_size: env::var("EMBED_BATCH_SIZE")
-                .or_else(|_| env::var("EMBEDDING_BATCH_SIZE"))
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(10),
-            dimension: env::var("EMBED_DIM")
-                .or_else(|_| env::var("EMBEDDING_DIM"))
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1024),
-            retry_max: env::var("EMBED_RETRY_MAX")
-                .or_else(|_| env::var("EMBEDDING_RETRY_MAX"))
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(3),
-            worker_poll_ms: env::var("EMBED_WORKER_POLL_MS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1_000),
-            index_schema_version: env::var("ES_INDEX_SCHEMA_VERSION")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(2),
-            index_name: env::var("ES_INDEX_CHUNKS").unwrap_or_else(|_| "chunks".to_string()),
-            index_alias: env::var("ES_INDEX_ALIAS").unwrap_or_else(|_| "chunks_search".to_string()),
+            model: env_first_str(&["EMBED_MODEL", "EMBEDDING_MODEL"], "text-embedding-v3"),
+            base_url: env_first_str(&["EMBED_BASE_URL", "EMBEDDING_API_URL", "LLM_BASE_URL"], "http://localhost:11434/v1"),
+            api_key: env_first_nonempty(&["EMBED_API_KEY", "LLM_API", "LLM_API_KEY"]),
+            batch_size: env_first_parse(&["EMBED_BATCH_SIZE", "EMBEDDING_BATCH_SIZE"], 10usize),
+            dimension: env_first_parse(&["EMBED_DIM", "EMBEDDING_DIM"], 1024usize),
+            retry_max: env_first_parse(&["EMBED_RETRY_MAX", "EMBEDDING_RETRY_MAX"], 3i32),
+            worker_poll_ms: env_parse("EMBED_WORKER_POLL_MS", 1_000u64),
+            index_schema_version: env_parse("ES_INDEX_SCHEMA_VERSION", 2u32),
+            index_name: env_str("ES_INDEX_CHUNKS", "chunks"),
+            index_alias: env_str("ES_INDEX_ALIAS", "chunks_search"),
             enabled: env_bool("EMBED_ENABLED", true),
         },
         generation: GenerationConfig {
-            model: env::var("LLM_MODEL").unwrap_or_else(|_| "qwen-turbo".to_string()),
-            base_url: env::var("LLM_BASE_URL")
-                .unwrap_or_else(|_| "http://localhost:11434/v1".to_string()),
-            api_key: env::var("LLM_API_KEY")
-                .or_else(|_| env::var("LLM_API"))
-                .unwrap_or_else(|_| "ollama".to_string()),
-            use_real_llm: env::var("USE_REAL_LLM")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(false),
-            temperature: env::var("LLM_TEMPERATURE")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(0.2),
-            max_output_tokens: env::var("LLM_MAX_OUTPUT_TOKENS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(1200),
+            model: env_str("LLM_MODEL", "qwen-turbo"),
+            base_url: env_str("LLM_BASE_URL", "http://localhost:11434/v1"),
+            api_key: env_first_str(&["LLM_API_KEY", "LLM_API"], "ollama"),
+            use_real_llm: env_parse("USE_REAL_LLM", false),
+            temperature: env_parse("LLM_TEMPERATURE", 0.2f64),
+            max_output_tokens: env_parse("LLM_MAX_OUTPUT_TOKENS", 1200u32),
         },
         citation: CitationConfig {
-            require_citation: env::var("RAG_REQUIRE_CITATION")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(true),
-            verify_claims: env::var("RAG_VERIFY_CLAIMS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(true),
-            verify_consensus: env::var("RAG_VERIFY_CONSENSUS")
-                .ok()
-                .and_then(|v| v.parse().ok())
-                .unwrap_or(false),
+            require_citation: env_parse("RAG_REQUIRE_CITATION", true),
+            verify_claims: env_parse("RAG_VERIFY_CLAIMS", true),
+            verify_consensus: env_parse("RAG_VERIFY_CONSENSUS", false),
         },
     };
 
     let agent = AgentConfig {
-        reasoning_model: env::var("AGENT_REASONING_MODEL")
-            .unwrap_or_else(|_| rag.rewrite.model.clone()),
-        default_tone: env::var("AGENT_DEFAULT_TONE").unwrap_or_else(|_| "concise_warm".to_string()),
-        proactive_followup: env::var("AGENT_PROACTIVE_FOLLOWUP")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(true),
-        max_followup_suggestions: env::var("AGENT_MAX_FOLLOWUP_SUGGESTIONS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(2),
-        allow_analyst_mode: env::var("AGENT_ALLOW_ANALYST_MODE")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(true),
-        require_citation_for_analysis: env::var("AGENT_REQUIRE_CITATION_FOR_ANALYSIS")
-            .ok()
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(true),
-        clarification_style: env::var("AGENT_CLARIFICATION_STYLE")
-            .unwrap_or_else(|_| "short".to_string()),
+        reasoning_model: env_str("AGENT_REASONING_MODEL", &rag.rewrite.model),
+        default_tone: env_str("AGENT_DEFAULT_TONE", "concise_warm"),
+        proactive_followup: env_parse("AGENT_PROACTIVE_FOLLOWUP", true),
+        max_followup_suggestions: env_parse("AGENT_MAX_FOLLOWUP_SUGGESTIONS", 2usize),
+        allow_analyst_mode: env_parse("AGENT_ALLOW_ANALYST_MODE", true),
+        require_citation_for_analysis: env_parse("AGENT_REQUIRE_CITATION_FOR_ANALYSIS", true),
+        clarification_style: env_str("AGENT_CLARIFICATION_STYLE", "short"),
         max_react_steps: env_usize("AGENT_MAX_REACT_STEPS", 4).clamp(2, 8),
         max_queries_per_step: env_usize("AGENT_MAX_QUERIES_PER_STEP", 4).clamp(1, 8),
         max_history_turns: env_usize("AGENT_MAX_HISTORY_TURNS", 12).clamp(1, 50),
         max_history_chars: env_usize("AGENT_MAX_HISTORY_CHARS", 24_000).clamp(2_000, 100_000),
         max_context_chars: env_usize("AGENT_MAX_CONTEXT_CHARS", 30_000).clamp(4_000, 120_000),
         max_repair_attempts: env_usize("AGENT_MAX_REPAIR_ATTEMPTS", 1).clamp(0, 1),
-        total_timeout_seconds: env::var("AGENT_TOTAL_TIMEOUT_SECONDS")
-            .ok()
-            .and_then(|value| value.parse().ok())
-            .unwrap_or(240),
+        total_timeout_seconds: env_parse("AGENT_TOTAL_TIMEOUT_SECONDS", 240u64),
     };
 
     let config = AppConfig {
-        environment,
-        server_host,
-        server_port,
-        database_url,
-        redis_url,
-        rabbitmq_url,
-        elasticsearch_url,
-        object_storage_provider,
-        object_storage_endpoint,
-        object_storage_region,
-        object_storage_bucket,
-        object_storage_access_key,
-        object_storage_secret_key,
-        object_storage_force_path_style,
-        object_storage_tls_verify,
-        object_storage_presign_expire_seconds,
-        blob_storage_dir,
-        jwt_secret,
-        auth_token_expire_hours,
-        auth_login_mode,
-        portal_base_url,
-        portal_exchange_endpoint,
-        default_tenant_id,
-        default_user_id,
-        default_role,
-        default_kb_ids,
-        default_tenant_name,
-        default_tenant_slug,
-        super_admin_user_id,
-        standard_user_id,
-        super_admin_email,
-        super_admin_password,
-        enterprise_admin_email,
-        enterprise_admin_password,
-        standard_user_email,
-        standard_user_password,
-        rag,
-        agent,
+        environment, server_host, server_port, database_url, redis_url, rabbitmq_url,
+        elasticsearch_url, object_storage_provider, object_storage_endpoint, object_storage_region,
+        object_storage_bucket, object_storage_access_key, object_storage_secret_key,
+        object_storage_force_path_style, object_storage_tls_verify,
+        object_storage_presign_expire_seconds, blob_storage_dir, jwt_secret,
+        auth_token_expire_hours, auth_login_mode, portal_base_url, portal_exchange_endpoint,
+        default_tenant_id, default_user_id, default_role, default_kb_ids, default_tenant_name,
+        default_tenant_slug, super_admin_user_id, standard_user_id, super_admin_email,
+        super_admin_password, enterprise_admin_email, enterprise_admin_password,
+        standard_user_email, standard_user_password, rag, agent,
     };
     config.validate()?;
     Ok(config)

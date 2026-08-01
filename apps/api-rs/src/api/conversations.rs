@@ -1063,20 +1063,32 @@ fn send_legacy_event(
     let _ = tx.send(Ok(event.to_sse_event()));
 }
 
+fn emit_atom(
+    tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
+    runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
+    event_type: &str,
+    step: Option<crate::api::runtime_events::RuntimeStep>,
+    payload: serde_json::Value,
+) {
+    match runtime_events.lock() {
+        Ok(mut factory) => {
+            let event = match step {
+                Some(s) => factory.event_with_step(event_type, Some(s), payload),
+                None => factory.event(event_type, payload),
+            };
+            let _ = tx.send(Ok(event));
+        }
+        Err(err) => error!("runtime event factory lock failed: {err}"),
+    }
+}
+
 fn send_runtime_event(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
     runtime_events: &Arc<Mutex<RuntimeEventFactory>>,
     event_type: &str,
     payload: serde_json::Value,
 ) {
-    match runtime_events.lock() {
-        Ok(mut factory) => {
-            let _ = tx.send(Ok(factory.event(event_type, payload)));
-        }
-        Err(err) => {
-            error!("runtime event factory lock failed: {err}");
-        }
-    }
+    emit_atom(tx, runtime_events, event_type, None, payload);
 }
 
 fn send_runtime_step_event(
@@ -1087,18 +1099,7 @@ fn send_runtime_step_event(
     name: &str,
     payload: serde_json::Value,
 ) {
-    match runtime_events.lock() {
-        Ok(mut factory) => {
-            let _ = tx.send(Ok(factory.event_with_step(
-                event_type,
-                Some(tool_step(tool_call_id, name)),
-                payload,
-            )));
-        }
-        Err(err) => {
-            error!("runtime event factory lock failed: {err}");
-        }
-    }
+    emit_atom(tx, runtime_events, event_type, Some(tool_step(tool_call_id, name)), payload);
 }
 
 fn send_execution_started(
@@ -1263,9 +1264,8 @@ fn send_progress_event(
             "thinking.delta",
             json!({ "delta": delta }),
         ),
-        AgentProgress::Flush { acknowledgement } => {
-            let _ = acknowledgement.send(());
-        }
+        // Flush is handled by the early return above
+        _ => {}
     }
 }
 

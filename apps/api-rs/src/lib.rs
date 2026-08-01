@@ -92,76 +92,8 @@ fn api_routes() -> Router<AppState> {
 }
 
 async fn health(State(state): State<AppState>) -> impl IntoResponse {
-    let http_client = reqwest::Client::builder()
-        .timeout(HEALTH_TIMEOUT)
-        .build()
-        .ok();
-    let postgres = check_postgres(state.db_pool.as_ref()).await;
-    let redis = check_redis(state.redis_client.as_ref()).await;
-    let elasticsearch = check_elasticsearch(
-        http_client.as_ref(),
-        state.config.elasticsearch_url.as_deref(),
-        state.config.rag.embedding.index_alias.as_str(),
-    )
-    .await;
-    let object_storage = check_object_storage(
-        http_client.as_ref(),
-        state.config.object_storage_provider.as_str(),
-        state.config.object_storage_endpoint.as_deref(),
-        state.config.object_storage_bucket.as_str(),
-    )
-    .await;
-    let rabbitmq = check_tcp_url(state.config.rabbitmq_url.as_deref(), 5672).await;
-    let real_llm = check_openai_compatible_endpoint(
-        http_client.as_ref(),
-        state.config.rag.generation.use_real_llm,
-        state.config.rag.generation.base_url.as_str(),
-        Some(state.config.rag.generation.api_key.as_str()),
-        "LLM",
-    )
-    .await
-    .with_field("model", state.config.rag.generation.model.as_str());
-    let embedding = check_openai_compatible_endpoint(
-        http_client.as_ref(),
-        state.config.rag.embedding.enabled,
-        state.config.rag.embedding.base_url.as_str(),
-        state.config.rag.embedding.api_key.as_deref(),
-        "Embedding",
-    )
-    .await
-    .with_field("model", state.config.rag.embedding.model.as_str())
-    .with_field("index", state.config.rag.embedding.index_alias.as_str());
-    let vector_consistency = match (&state.db_pool, state.config.elasticsearch_url.as_deref()) {
-        (Some(pool), Some(es_url)) => crate::rag::vector_pipeline::quick_consistency(
-            pool,
-            &state.config.rag.embedding,
-            es_url,
-        )
-        .await
-        .map_err(|error| error.to_string()),
-        _ => Err("vector index dependencies are not configured".to_string()),
-    };
-    let vector_index_consistent = vector_consistency
-        .as_ref()
-        .map(|snapshot| snapshot.consistent)
-        .unwrap_or(false);
-    let reranker = DependencyCheck::ok()
-        .with_field("provider", state.config.rag.rerank.provider.as_str())
-        .with_field("model", state.config.rag.rerank.model.as_str())
-        .with_field("startup_probe", "passed");
-    let ok = [
-        postgres.ok,
-        redis.ok,
-        elasticsearch.ok,
-        object_storage.ok,
-        rabbitmq.ok,
-        real_llm.ok,
-        embedding.ok,
-        vector_index_consistent,
-        reranker.ok,
-    ]
-    .into_iter()
-    .all(|item| item);
+    let snap = check_all_dependencies(&state).await;
+    let ok = snap.all_ok();
 
     Json(json!({
         "ok": ok,
@@ -169,75 +101,13 @@ async fn health(State(state): State<AppState>) -> impl IntoResponse {
         "mode": "release",
         "environment": state.config.environment.as_str(),
         "version": env!("CARGO_PKG_VERSION"),
-        "checks": {
-            "postgres": postgres.ok,
-            "redis": redis.ok,
-            "elasticsearch": elasticsearch.ok,
-            "object_storage": object_storage.ok,
-            "rabbitmq": rabbitmq.ok,
-            "real_llm": real_llm.ok,
-            "embedding": embedding.ok,
-            "vector_index_consistent": vector_index_consistent,
-            "reranker": reranker.ok
-        },
-        "details": {
-            "postgres": postgres.into_json(),
-            "redis": redis.into_json(),
-            "elasticsearch": elasticsearch.into_json(),
-            "object_storage": object_storage.into_json(),
-            "rabbitmq": rabbitmq.into_json(),
-            "real_llm": real_llm.into_json(),
-            "embedding": embedding.into_json(),
-            "vector_index": match vector_consistency {
-                Ok(snapshot) => json!(snapshot),
-                Err(error) => json!({"consistent": false, "error": error})
-            },
-            "reranker": reranker.into_json()
-        }
+        "checks": snap.checks_summary(),
+        "details": snap.checks_details()
     }))
 }
 
 async fn metrics(State(state): State<AppState>) -> Response {
-    let http_client = reqwest::Client::builder()
-        .timeout(HEALTH_TIMEOUT)
-        .build()
-        .ok();
-    let postgres = check_postgres(state.db_pool.as_ref()).await;
-    let redis = check_redis(state.redis_client.as_ref()).await;
-    let elasticsearch = check_elasticsearch(
-        http_client.as_ref(),
-        state.config.elasticsearch_url.as_deref(),
-        state.config.rag.embedding.index_alias.as_str(),
-    )
-    .await;
-    let object_storage = check_object_storage(
-        http_client.as_ref(),
-        state.config.object_storage_provider.as_str(),
-        state.config.object_storage_endpoint.as_deref(),
-        state.config.object_storage_bucket.as_str(),
-    )
-    .await;
-    let rabbitmq = check_tcp_url(state.config.rabbitmq_url.as_deref(), 5672).await;
-    let real_llm = check_openai_compatible_endpoint(
-        http_client.as_ref(),
-        state.config.rag.generation.use_real_llm,
-        state.config.rag.generation.base_url.as_str(),
-        Some(state.config.rag.generation.api_key.as_str()),
-        "LLM",
-    )
-    .await;
-    let embedding = check_openai_compatible_endpoint(
-        http_client.as_ref(),
-        state.config.rag.embedding.enabled,
-        state.config.rag.embedding.base_url.as_str(),
-        state.config.rag.embedding.api_key.as_deref(),
-        "Embedding",
-    )
-    .await;
-    let reranker = DependencyCheck::ok()
-        .with_field("provider", state.config.rag.rerank.provider.as_str())
-        .with_field("model", state.config.rag.rerank.model.as_str())
-        .with_field("startup_probe", "passed");
+    let snap = check_all_dependencies(&state).await;
 
     let mut out = String::new();
     out.push_str("# HELP documind_up Whether the DocuMind process can render metrics.\n");
@@ -245,16 +115,7 @@ async fn metrics(State(state): State<AppState>) -> Response {
     push_metric(&mut out, "documind_up", &[], 1);
     out.push_str("# HELP documind_dependency_up Dependency health from the same probes used by /api/health.\n");
     out.push_str("# TYPE documind_dependency_up gauge\n");
-    for (name, check) in [
-        ("postgres", &postgres),
-        ("redis", &redis),
-        ("elasticsearch", &elasticsearch),
-        ("object_storage", &object_storage),
-        ("rabbitmq", &rabbitmq),
-        ("real_llm", &real_llm),
-        ("embedding", &embedding),
-        ("reranker", &reranker),
-    ] {
+    for (name, check) in snap.named_checks() {
         push_metric(
             &mut out,
             "documind_dependency_up",
@@ -274,39 +135,16 @@ async fn metrics(State(state): State<AppState>) -> Response {
                 ));
             }
         }
-        if let Some(es_url) = state.config.elasticsearch_url.as_deref() {
-            match crate::rag::vector_pipeline::quick_consistency(
-                pool,
-                &state.config.rag.embedding,
-                es_url,
-            )
-            .await
-            {
-                Ok(snapshot) => {
-                    push_metric(
-                        &mut out,
-                        "documind_vector_index_expected_chunks",
-                        &[],
-                        snapshot.expected_chunks,
-                    );
-                    push_metric(
-                        &mut out,
-                        "documind_vector_index_actual_chunks",
-                        &[],
-                        snapshot.actual_chunks,
-                    );
-                    push_metric(
-                        &mut out,
-                        "documind_vector_index_drift_chunks",
-                        &[],
-                        snapshot.missing_or_stale_chunks,
-                    );
-                }
-                Err(err) => out.push_str(&format!(
-                    "# documind_vector_consistency_error {}\n",
-                    sanitize_prometheus_comment(&err.to_string())
-                )),
+        match &snap.vector_consistency {
+            Ok(snapshot) => {
+                push_metric(&mut out, "documind_vector_index_expected_chunks", &[], snapshot.expected_chunks);
+                push_metric(&mut out, "documind_vector_index_actual_chunks", &[], snapshot.actual_chunks);
+                push_metric(&mut out, "documind_vector_index_drift_chunks", &[], snapshot.missing_or_stale_chunks);
             }
+            Err(err) => out.push_str(&format!(
+                "# documind_vector_consistency_error {}\n",
+                sanitize_prometheus_comment(err)
+            )),
         }
     } else {
         push_metric(&mut out, "documind_database_metrics_available", &[], 0);
@@ -500,19 +338,11 @@ struct DependencyCheck {
 
 impl DependencyCheck {
     fn ok() -> Self {
-        Self {
-            ok: true,
-            reason: None,
-            fields: BTreeMap::new(),
-        }
+        Self { ok: true, reason: None, fields: BTreeMap::new() }
     }
 
     fn failed(reason: impl Into<String>) -> Self {
-        Self {
-            ok: false,
-            reason: Some(reason.into()),
-            fields: BTreeMap::new(),
-        }
+        Self { ok: false, reason: Some(reason.into()), fields: BTreeMap::new() }
     }
 
     fn with_field(mut self, key: &str, value: impl Into<serde_json::Value>) -> Self {
@@ -520,16 +350,119 @@ impl DependencyCheck {
         self
     }
 
-    fn into_json(self) -> serde_json::Value {
+    fn to_json(&self) -> serde_json::Value {
         let mut payload = serde_json::Map::new();
         payload.insert("ok".to_string(), json!(self.ok));
-        if let Some(reason) = self.reason {
+        if let Some(ref reason) = self.reason {
             payload.insert("reason".to_string(), json!(reason));
         }
-        for (key, value) in self.fields {
-            payload.insert(key, value);
+        for (key, value) in &self.fields {
+            payload.insert(key.clone(), value.clone());
         }
         serde_json::Value::Object(payload)
+    }
+}
+
+type VectorConsistencyResult = Result<crate::rag::vector_pipeline::VectorConsistency, String>;
+
+struct DependencySnapshot {
+    postgres: DependencyCheck,
+    redis: DependencyCheck,
+    elasticsearch: DependencyCheck,
+    object_storage: DependencyCheck,
+    rabbitmq: DependencyCheck,
+    real_llm: DependencyCheck,
+    embedding: DependencyCheck,
+    reranker: DependencyCheck,
+    vector_consistency: VectorConsistencyResult,
+}
+
+impl DependencySnapshot {
+    fn all_ok(&self) -> bool {
+        let vector_ok = self.vector_consistency.as_ref().map(|s| s.consistent).unwrap_or(false);
+        [self.postgres.ok, self.redis.ok, self.elasticsearch.ok, self.object_storage.ok,
+         self.rabbitmq.ok, self.real_llm.ok, self.embedding.ok, vector_ok, self.reranker.ok]
+            .into_iter().all(|v| v)
+    }
+
+    fn checks_summary(&self) -> serde_json::Value {
+        let vector_ok = self.vector_consistency.as_ref().map(|s| s.consistent).unwrap_or(false);
+        json!({
+            "postgres": self.postgres.ok, "redis": self.redis.ok,
+            "elasticsearch": self.elasticsearch.ok, "object_storage": self.object_storage.ok,
+            "rabbitmq": self.rabbitmq.ok, "real_llm": self.real_llm.ok,
+            "embedding": self.embedding.ok, "vector_index_consistent": vector_ok,
+            "reranker": self.reranker.ok
+        })
+    }
+
+    fn checks_details(&self) -> serde_json::Value {
+        json!({
+            "postgres": self.postgres.to_json(),
+            "redis": self.redis.to_json(),
+            "elasticsearch": self.elasticsearch.to_json(),
+            "object_storage": self.object_storage.to_json(),
+            "rabbitmq": self.rabbitmq.to_json(),
+            "real_llm": self.real_llm.to_json(),
+            "embedding": self.embedding.to_json(),
+            "vector_index": match &self.vector_consistency {
+                Ok(s) => json!(s),
+                Err(e) => json!({"consistent": false, "error": e})
+            },
+            "reranker": self.reranker.to_json()
+        })
+    }
+
+    fn named_checks(&self) -> Vec<(&str, &DependencyCheck)> {
+        vec![
+            ("postgres", &self.postgres), ("redis", &self.redis),
+            ("elasticsearch", &self.elasticsearch), ("object_storage", &self.object_storage),
+            ("rabbitmq", &self.rabbitmq), ("real_llm", &self.real_llm),
+            ("embedding", &self.embedding), ("reranker", &self.reranker),
+        ]
+    }
+}
+
+async fn check_all_dependencies(state: &AppState) -> DependencySnapshot {
+    let http_client = reqwest::Client::builder().timeout(HEALTH_TIMEOUT).build().ok();
+    let cfg = &state.config;
+    let postgres = check_postgres(state.db_pool.as_ref()).await;
+    let redis = check_redis(state.redis_client.as_ref()).await;
+    let elasticsearch = check_elasticsearch(
+        http_client.as_ref(), cfg.elasticsearch_url.as_deref(),
+        cfg.rag.embedding.index_alias.as_str(),
+    ).await;
+    let object_storage = check_object_storage(
+        http_client.as_ref(), cfg.object_storage_provider.as_str(),
+        cfg.object_storage_endpoint.as_deref(), cfg.object_storage_bucket.as_str(),
+    ).await;
+    let rabbitmq = check_tcp_url(cfg.rabbitmq_url.as_deref(), 5672).await;
+    let real_llm = check_openai_compatible_endpoint(
+        http_client.as_ref(), cfg.rag.generation.use_real_llm,
+        cfg.rag.generation.base_url.as_str(),
+        Some(cfg.rag.generation.api_key.as_str()), "LLM",
+    ).await
+        .with_field("model", cfg.rag.generation.model.as_str());
+    let embedding = check_openai_compatible_endpoint(
+        http_client.as_ref(), cfg.rag.embedding.enabled,
+        cfg.rag.embedding.base_url.as_str(),
+        cfg.rag.embedding.api_key.as_deref(), "Embedding",
+    ).await
+        .with_field("model", cfg.rag.embedding.model.as_str())
+        .with_field("index", cfg.rag.embedding.index_alias.as_str());
+    let vector_consistency = match (&state.db_pool, cfg.elasticsearch_url.as_deref()) {
+        (Some(pool), Some(es_url)) => crate::rag::vector_pipeline::quick_consistency(
+            pool, &cfg.rag.embedding, es_url,
+        ).await.map_err(|e| e.to_string()),
+        _ => Err("vector index dependencies are not configured".to_string()),
+    };
+    let reranker = DependencyCheck::ok()
+        .with_field("provider", cfg.rag.rerank.provider.as_str())
+        .with_field("model", cfg.rag.rerank.model.as_str())
+        .with_field("startup_probe", "passed");
+    DependencySnapshot {
+        postgres, redis, elasticsearch, object_storage, rabbitmq,
+        real_llm, embedding, reranker, vector_consistency,
     }
 }
 

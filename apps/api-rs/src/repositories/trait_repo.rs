@@ -10,17 +10,14 @@ use crate::models::message::ConversationMessage;
 use crate::models::trace::{QueryTrace, RetrievalTrace};
 
 #[async_trait]
-pub trait ConversationFileRepository: Send + Sync {
+pub trait ConversationRepository: Send + Sync {
     async fn list_conversation_files(
         &self,
         tenant_id: Uuid,
         conversation_id: Uuid,
         allowed_kb_ids: &[Uuid],
     ) -> anyhow::Result<Vec<ConversationFile>>;
-}
 
-#[async_trait]
-pub trait ConversationRepository: ConversationFileRepository + Send + Sync {
     async fn create_session(&self, session: ConversationSession) -> anyhow::Result<()>;
     async fn list_sessions(
         &self,
