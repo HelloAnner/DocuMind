@@ -10,10 +10,13 @@ DEPLOY_TARGET ?= x86_64-unknown-linux-musl
 DEPLOY_TARGET_DIR ?= target/deploy-linux-x86_64-musl
 DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(DEPLOY_TARGET)/release/$(BIN_NAME)
 
-.PHONY: install deploy-web-build deploy-build deploy deploy-remote sync-remote-source status health release-gate logs clean
+.PHONY: install docs deploy-web-build deploy-build deploy deploy-remote sync-remote-source status health release-gate logs clean
 
 install:
 	cd $(WEB_DIR) && npm install
+
+docs:
+	python3 scripts/build-docs.py
 
 deploy-web-build: install
 	cd $(WEB_DIR) && DOCUMIND_STATIC_EXPORT=1 DOCUMIND_BASE_PATH=$(DEPLOY_BASE_PATH) NEXT_PUBLIC_API_BASE=$(DEPLOY_BASE_PATH) npm run build
