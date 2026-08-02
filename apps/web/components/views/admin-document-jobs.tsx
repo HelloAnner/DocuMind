@@ -82,7 +82,7 @@ export function AdminDocumentJobs() {
       <Button icon={<RefreshCw size={14} />} variant="secondary" onClick={() => refresh(true).catch(console.error)}>刷新</Button>
     </Topbar>
     <div className="dm-admin-content dm-document-jobs-page">
-      <section className="dm-stats-grid">
+      <section className="dm-stat-row">
         <StatCard label="处理中" value={String(data?.summary.processing ?? "-")} hint={data?.summary.stalled ? `${data.summary.stalled} 个长时间无进展` : "运行正常"} />
         <StatCard label="排队中" value={String(data?.summary.queued ?? "-")} hint="等待解析资源" />
         <StatCard label="近 24 小时失败" value={String(data?.summary.failed_24h ?? "-")} hint="可查看原因并重试" />
