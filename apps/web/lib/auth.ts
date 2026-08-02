@@ -12,6 +12,7 @@ export type UserRole =
 
 export interface User {
   id: string;
+  login_id: string;
   email: string;
   name?: string;
   avatar_url?: string;
@@ -26,7 +27,10 @@ export interface Tenant {
   status: string;
 }
 
+export type AuthScope = "platform" | "tenant";
+
 export interface MeResponse {
+  scope: AuthScope;
   user: User;
   tenant: Tenant;
   roles: UserRole[];
@@ -60,8 +64,8 @@ const AUTH_KEY = "documind-auth";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
-export function authenticatedHomePath(roles: UserRole[] | string[]): string {
-  if (roles.includes("super_admin")) return "/system";
+export function authenticatedHomePath(scope: AuthScope, roles: UserRole[] | string[]): string {
+  if (scope === "platform") return "/system";
   if (isTenantAdminRole(roles)) return "/admin";
   return AUTHENTICATED_HOME_PATH;
 }
@@ -70,7 +74,9 @@ export interface StoredAuth {
   token: string;
   userId: string;
   tenantId: string;
+  loginId: string;
   email: string;
+  scope: AuthScope;
   roles: UserRole[];
 }
 
@@ -158,7 +164,9 @@ function storeLoginResponse(data: LoginResponse) {
     token: data.access_token,
     userId: data.user.id,
     tenantId: data.tenant.id,
+    loginId: data.user.login_id,
     email: data.user.email,
+    scope: data.scope,
     roles: data.roles,
   });
 }
@@ -180,7 +188,7 @@ export async function loginWithPassword(
   password: string,
   tenantSlug?: string
 ): Promise<MeResponse> {
-  const body: Record<string, string> = { email: username, password };
+  const body: Record<string, string> = { username, password };
   if (tenantSlug?.trim()) {
     body.tenant_slug = tenantSlug.trim();
   }
@@ -191,7 +199,7 @@ export async function loginWithPassword(
   });
   if (!res.ok) {
     const error = await res.json().catch(() => null) as { message?: string } | null;
-    throw new Error(error?.message || "用户名或密码错误");
+    throw new Error(error?.message || "用户 ID 或密码错误");
   }
   const data: LoginResponse = await res.json();
   storeLoginResponse(data);
@@ -200,13 +208,13 @@ export async function loginWithPassword(
 
 export async function acceptInvitation(
   token: string,
-  email: string,
+  loginId: string,
   password: string
 ): Promise<MeResponse> {
   const res = await fetch(`${BASE}/api/v1/invitations/accept`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, email, password }),
+    body: JSON.stringify({ token, login_id: loginId, password }),
   });
   if (!res.ok) {
     const error = await res.json().catch(() => null) as { message?: string } | null;

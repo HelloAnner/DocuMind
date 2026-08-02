@@ -524,7 +524,7 @@ async fn list_members(
 
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, MemberSummaryRow>(
-            "SELECT u.id, u.email, u.name, tm.roles, tm.status,
+            "SELECT u.id, COALESCE(u.email, u.login_id) AS email, u.name, tm.roles, tm.status,
                     tm.joined_at, tm.last_seen_at,
                     0::bigint as query_count
              FROM app_user u

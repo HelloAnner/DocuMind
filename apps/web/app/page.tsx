@@ -12,7 +12,7 @@ export default function HomePage() {
   useEffect(() => {
     if (loading) return;
     if (me) {
-      router.replace(authenticatedHomePath(me.roles));
+      router.replace(authenticatedHomePath(me.scope, me.roles));
     } else {
       router.replace("/login");
     }

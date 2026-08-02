@@ -1,13 +1,12 @@
 "use client";
 
 import { LockKeyhole, UserRound } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { acceptInvitation, AUTHENTICATED_HOME_PATH } from "@/lib/auth";
+import { acceptInvitation, authenticatedHomePath } from "@/lib/auth";
 
 export function InviteAcceptView() {
-  const router = useRouter();
   const params = useSearchParams();
   const token = params.get("token") ?? "";
   const [email, setEmail] = useState("");
@@ -20,8 +19,8 @@ export function InviteAcceptView() {
     setSubmitting(true);
     setError(null);
     try {
-      await acceptInvitation(token, email, password);
-      router.replace(AUTHENTICATED_HOME_PATH);
+      const me = await acceptInvitation(token, email, password);
+      window.location.replace(authenticatedHomePath(me.scope, me.roles));
     } catch (err) {
       setError(err instanceof Error ? err.message : "接受邀请失败");
     } finally {
@@ -52,14 +51,14 @@ export function InviteAcceptView() {
         </div>
 
         <label className="dm-field">
-          <span>账号</span>
+          <span>用户 ID</span>
           <span className="dm-login-input-wrap">
             <UserRound size={16} aria-hidden="true" />
             <input
               autoComplete="username"
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="已有账号或新邮箱"
+              placeholder="已有或新建用户 ID"
               required
             />
           </span>

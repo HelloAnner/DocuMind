@@ -12,7 +12,7 @@ export function UserAccountMenu() {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const roles = me?.roles ?? [];
-  const isSuperAdmin = isSuperAdminRole(roles);
+  const isSuperAdmin = me?.scope === "platform" && isSuperAdminRole(roles);
   const isTenantAdmin = !isSuperAdmin && isTenantAdminRole(roles);
   const managementHref = isSuperAdmin ? "/system" : isTenantAdmin ? "/admin" : null;
 
@@ -25,7 +25,7 @@ export function UserAccountMenu() {
   }, []);
 
   if (!me) return null;
-  const initials = (me.user.name || me.user.email).trim().slice(0, 1).toUpperCase();
+  const initials = (me.user.name || me.user.login_id).trim().slice(0, 1).toUpperCase();
 
   return (
     <div className={`${styles.root} dm-user-menu-root`} ref={rootRef}>
@@ -59,7 +59,7 @@ export function UserAccountMenu() {
           {me.user.avatar_url ? <img alt="" src={me.user.avatar_url} /> : initials}
         </span>
         <span className={`${styles.identity} dm-user-menu-identity`}>
-          <strong>{me.user.name || me.user.email}</strong>
+          <strong>{me.user.name || me.user.login_id}</strong>
           <span>{isSuperAdmin ? "超级管理员" : isTenantAdmin ? "租户管理员" : me.tenant.name}</span>
         </span>
         <ChevronUp size={14} />

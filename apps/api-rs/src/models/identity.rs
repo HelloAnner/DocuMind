@@ -6,8 +6,10 @@ use uuid::Uuid;
 pub struct CurrentActor {
     pub user_id: Uuid,
     pub tenant_id: Uuid,
+    pub login_id: String,
     pub email: String,
     pub name: String,
+    pub scope: String,
     pub roles: Vec<String>,
     pub permissions: Vec<String>,
     pub allowed_kb_ids: Vec<Uuid>,
@@ -34,6 +36,7 @@ impl CurrentActor {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MeResponse {
+    pub scope: String,
     pub user: UserProfile,
     pub tenant: TenantProfile,
     pub roles: Vec<String>,
@@ -44,6 +47,7 @@ pub struct MeResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserProfile {
     pub id: Uuid,
+    pub login_id: String,
     pub email: String,
     pub name: Option<String>,
     pub avatar_url: Option<String>,
@@ -78,6 +82,7 @@ pub struct TenantSummary {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SystemUserSummary {
     pub id: Uuid,
+    pub login_id: String,
     pub email: String,
     pub name: Option<String>,
     pub status: String,

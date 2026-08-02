@@ -16,7 +16,7 @@ export default function AdminLayout({
 
   useEffect(() => {
     if (loading) return;
-    const canAccess = me && canAccessAdmin(me.roles);
+    const canAccess = me && me.scope === "tenant" && canAccessAdmin(me.roles);
     if (!canAccess) {
       router.replace("/");
     }

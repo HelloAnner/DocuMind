@@ -91,6 +91,7 @@ async fn update_profile(
                 .first()
                 .cloned()
                 .unwrap_or_else(|| "end_user".to_string()),
+            scope: actor.scope.clone(),
             tenant_id: actor.tenant_id,
             sid: None,
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -212,6 +213,7 @@ async fn switch_tenant(
             sub: actor.user_id,
             email: actor.email,
             role: "end_user".to_string(),
+            scope: "tenant".to_string(),
             tenant_id: req.tenant_id,
             sid: None,
             exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -233,6 +235,7 @@ async fn switch_tenant(
     Ok(Json(LoginResponse {
         access_token,
         token_type: "bearer",
+        scope: me.scope,
         user: me.user,
         tenant: me.tenant,
         roles: me.roles,

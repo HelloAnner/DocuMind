@@ -194,7 +194,14 @@ pub async fn actor_from_api_headers(
     let tenant_id: Uuid = row.get("tenant_id");
     let service_user_id: Uuid = row.get("service_user_id");
     let mut actor =
-        crate::auth::resolve_actor_from_db(pool, tenant_id, service_user_id, "end_user").await?;
+        crate::auth::resolve_actor_from_db(
+            pool,
+            tenant_id,
+            service_user_id,
+            "end_user",
+            "tenant",
+        )
+        .await?;
     let scopes: Vec<String> = row.get("scopes");
     actor
         .permissions

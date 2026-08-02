@@ -107,8 +107,8 @@ async fn create_client(
     let expires_at = Utc::now() + Duration::days(request.expires_in_days);
     let mut transaction = pool.begin().await?;
     sqlx::query(
-        "INSERT INTO app_user (id, email, name, auth_provider, status)
-         VALUES ($1, $2, $3, 'api', 'active')",
+        "INSERT INTO app_user (id, login_id, email, name, auth_provider, status)
+         VALUES ($1, $2, $2, $3, 'api', 'active')",
     )
     .bind(service_user_id)
     .bind(format!("api-{service_user_id}@internal.documind"))

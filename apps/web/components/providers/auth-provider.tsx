@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (username: string, password: string, tenantSlug?: string) => {
       const data = await loginWithPassword(username, password, tenantSlug);
       setMe(data);
-      router.replace(authenticatedHomePath(data.roles));
+      router.replace(authenticatedHomePath(data.scope, data.roles));
     },
     [router]
   );

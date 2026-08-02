@@ -243,14 +243,14 @@ async fn list_users(
     require_super_admin(&actor)?;
 
     if let Some(pool) = &state.db_pool {
-        let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String)>(
-            "SELECT id, email, name, status FROM app_user WHERE auth_provider <> 'api' ORDER BY created_at DESC",
+        let rows = sqlx::query_as::<_, (Uuid, String, String, Option<String>, String)>(
+            "SELECT id, login_id, COALESCE(email, ''), name, status FROM app_user WHERE auth_provider <> 'api' ORDER BY created_at DESC",
         )
         .fetch_all(pool)
         .await?;
 
         let mut users = Vec::with_capacity(rows.len());
-        for (id, email, name, status) in rows {
+        for (id, login_id, email, name, status) in rows {
             let mut tenants: Vec<String> = sqlx::query_scalar(
                 "SELECT t.name || '(' || UNNEST(tm.roles) || ')'
                  FROM tenant_member tm
@@ -276,6 +276,7 @@ async fn list_users(
             }
             users.push(SystemUserSummary {
                 id,
+                login_id,
                 email,
                 name,
                 status,
@@ -289,6 +290,7 @@ async fn list_users(
     Ok(Json(vec![
         SystemUserSummary {
             id: Uuid::new_v4(),
+            login_id: "ops".to_string(),
             email: "ops@documind.local".to_string(),
             name: Some("Ops".to_string()),
             status: "active".to_string(),
@@ -297,6 +299,7 @@ async fn list_users(
         },
         SystemUserSummary {
             id: Uuid::new_v4(),
+            login_id: "admin".to_string(),
             email: "admin@documind.local".to_string(),
             name: Some("Admin".to_string()),
             status: "active".to_string(),
@@ -305,6 +308,7 @@ async fn list_users(
         },
         SystemUserSummary {
             id: Uuid::new_v4(),
+            login_id: "dev".to_string(),
             email: "dev@documind.local".to_string(),
             name: Some("Dev".to_string()),
             status: "active".to_string(),

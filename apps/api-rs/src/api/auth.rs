@@ -30,6 +30,7 @@ pub struct LoginRequest {
 pub struct LoginResponse {
     pub access_token: String,
     pub token_type: &'static str,
+    pub scope: String,
     pub user: UserProfile,
     pub tenant: TenantProfile,
     pub roles: Vec<String>,
@@ -40,7 +41,7 @@ pub struct LoginResponse {
 #[derive(Debug, Deserialize)]
 pub struct AcceptInvitationRequest {
     pub token: String,
-    pub email: Option<String>,
+    pub login_id: Option<String>,
     pub name: Option<String>,
     pub password: Option<String>,
 }
@@ -309,8 +310,8 @@ async fn provision_portal_actor(
     sqlx::query(
         r#"
         INSERT INTO app_user
-          (id, email, name, auth_provider, sso_subject, last_active_tenant, status)
-        VALUES ($1, $2, $3, 'portal', $4, $5, 'active')
+          (id, login_id, email, name, auth_provider, sso_subject, last_active_tenant, status)
+        VALUES ($1, $2, $2, $3, 'portal', $4, $5, 'active')
         ON CONFLICT (id) DO UPDATE
         SET email = EXCLUDED.email,
             name = EXCLUDED.name,
@@ -368,6 +369,12 @@ async fn provision_portal_actor(
             .first()
             .cloned()
             .unwrap_or_else(|| "end_user".to_string()),
+        scope: if roles.iter().any(|role| role == "super_admin") {
+            "platform"
+        } else {
+            "tenant"
+        }
+        .to_string(),
         tenant_id: portal.tenant_id,
         sid: None,
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -599,17 +606,17 @@ fn invitation_token_hash(token: &str) -> String {
 
 fn normalize_invitation_account(value: &str) -> Result<String, crate::error::AppError> {
     let account = value.trim().to_lowercase();
-    if account.is_empty() || account.chars().count() > 128 {
+    if !(2..=128).contains(&account.chars().count())
+        || !account
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | '-' | '@' | '+'))
+    {
         return Err(crate::error::AppError::bad_request(
             "ACCOUNT_INVALID",
             "请输入有效账号",
         ));
     }
     Ok(account)
-}
-
-fn is_platform_compat_membership(roles: &[String]) -> bool {
-    !roles.is_empty() && roles.iter().all(|role| role == "super_admin")
 }
 
 fn hash_password(password: &str) -> Result<String, crate::error::AppError> {
@@ -634,18 +641,7 @@ mod tests {
         );
         assert_eq!(normalize_invitation_account("Anner").unwrap(), "anner");
         assert!(normalize_invitation_account("").is_err());
-    }
-
-    #[test]
-    fn only_platform_compat_membership_can_be_replaced_by_invitation() {
-        assert!(is_platform_compat_membership(&["super_admin".to_string()]));
-        assert!(!is_platform_compat_membership(
-            &["tenant_admin".to_string()]
-        ));
-        assert!(!is_platform_compat_membership(&[
-            "super_admin".to_string(),
-            "tenant_admin".to_string()
-        ]));
+        assert!(normalize_invitation_account("bad id").is_err());
     }
 
     #[test]
@@ -742,7 +738,8 @@ async fn login(
         Some("auth_session"),
         None,
         json!({
-            "email": actor.email.clone(),
+            "login_id": actor.login_id.clone(),
+            "scope": actor.scope.clone(),
             "roles": actor.roles.clone(),
         }),
     )
@@ -751,6 +748,7 @@ async fn login(
     Ok(Json(LoginResponse {
         access_token,
         token_type: "bearer",
+        scope: me.scope,
         user: me.user,
         tenant: me.tenant,
         roles: me.roles,
@@ -809,16 +807,7 @@ async fn accept_invitation(
     let invitation_id: Uuid = invitation.get("id");
     let tenant_id: Uuid = invitation.get("tenant_id");
     let invited_email: Option<String> = invitation.try_get("email")?;
-    let email = normalize_invitation_account(req.email.as_deref().unwrap_or_default())?;
-    if invited_email
-        .as_deref()
-        .is_some_and(|invited| !invited.eq_ignore_ascii_case(&email))
-    {
-        return Err(crate::error::AppError::Forbidden {
-            code: "INVITATION_EMAIL_MISMATCH".to_string(),
-            message: "该邀请不属于此账号".to_string(),
-        });
-    }
+    let login_id = normalize_invitation_account(req.login_id.as_deref().unwrap_or_default())?;
     let invitation_name: Option<String> = invitation.try_get("name").ok();
     let invitation_roles: Vec<String> = invitation.get("roles");
     let mut roles = invitation_roles
@@ -877,19 +866,16 @@ async fn accept_invitation(
     let existing_user = sqlx::query(
         r#"
         SELECT u.id,
+               u.email,
                u.password_hash,
-               u.status,
-               EXISTS(
-                   SELECT 1 FROM platform_admin pa
-                   WHERE pa.user_id = u.id AND pa.status = 'active'
-               ) AS is_platform_admin
+               u.status
         FROM app_user u
-        WHERE lower(u.email) = lower($1)
+        WHERE lower(u.login_id) = lower($1)
         LIMIT 1
         FOR UPDATE OF u
         "#,
     )
-    .bind(&email)
+    .bind(&login_id)
     .fetch_optional(&mut *tx)
     .await?;
     let display_name = req
@@ -899,13 +885,23 @@ async fn accept_invitation(
         .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or(invitation_name)
-        .unwrap_or_else(|| email.clone());
+        .unwrap_or_else(|| login_id.clone());
 
-    let mut replace_platform_compat_membership = false;
+    let mut update_existing_membership = false;
     let user_id = if let Some(user) = existing_user {
         let user_id: Uuid = user.get("id");
         let user_status: String = user.get("status");
-        let is_platform_admin: bool = user.get("is_platform_admin");
+        let existing_email: Option<String> = user.try_get("email")?;
+        if invited_email.as_deref().is_some_and(|invited| {
+            !existing_email
+                .as_deref()
+                .is_some_and(|email| email.eq_ignore_ascii_case(invited))
+        }) {
+            return Err(crate::error::AppError::Forbidden {
+                code: "INVITATION_EMAIL_MISMATCH".to_string(),
+                message: "该邀请不属于此账号".to_string(),
+            });
+        }
         if user_status != "active" {
             return Err(crate::error::AppError::Forbidden {
                 code: "ACCOUNT_NOT_ACTIVE".to_string(),
@@ -933,24 +929,9 @@ async fn accept_invitation(
         .bind(user_id)
         .fetch_optional(&mut *tx)
         .await?;
-        if let Some(existing_roles) = membership_roles {
-            if is_platform_admin && is_platform_compat_membership(&existing_roles) {
-                replace_platform_compat_membership = true;
-            } else {
-                return Err(crate::error::AppError::Conflict {
-                    code: "TENANT_MEMBER_EXISTS".to_string(),
-                    message: "该账号已经是当前租户成员，请直接修改成员状态或角色".to_string(),
-                });
-            }
-        }
+        update_existing_membership = membership_roles.is_some();
         user_id
     } else {
-        if !email.contains('@') {
-            return Err(crate::error::AppError::bad_request(
-                "EMAIL_REQUIRED_FOR_REGISTRATION",
-                "新账号请使用邮箱注册",
-            ));
-        }
         let password = req.password.as_deref().ok_or_else(|| {
             crate::error::AppError::bad_request("PASSWORD_REQUIRED", "首次接受邀请需要设置密码")
         })?;
@@ -959,12 +940,13 @@ async fn accept_invitation(
         sqlx::query(
             r#"
             INSERT INTO app_user
-              (id, email, name, password_hash, auth_provider, last_active_tenant, status)
-            VALUES ($1, $2, $3, $4, 'email', $5, 'active')
+              (id, login_id, email, name, password_hash, auth_provider, last_active_tenant, status)
+            VALUES ($1, $2, $3, $4, $5, 'local', $6, 'active')
             "#,
         )
         .bind(user_id)
-        .bind(&email)
+        .bind(&login_id)
+        .bind(invited_email.as_deref())
         .bind(&display_name)
         .bind(password_hash)
         .bind(tenant_id)
@@ -974,7 +956,7 @@ async fn accept_invitation(
     };
 
     let invited_by = invitation.get::<Uuid, _>("invited_by");
-    if replace_platform_compat_membership {
+    if update_existing_membership {
         sqlx::query(
             r#"
             UPDATE tenant_member
@@ -1057,15 +1039,16 @@ async fn accept_invitation(
     .bind(user_id)
     .bind(&primary_role)
     .bind(invitation_id.to_string())
-    .bind(json!({ "email": email, "roles": roles }))
+    .bind(json!({ "login_id": login_id, "roles": roles }))
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
 
     let claims = auth::Claims {
         sub: user_id,
-        email: email.clone(),
+        email: invited_email.unwrap_or_default(),
         role: primary_role,
+        scope: "tenant".to_string(),
         tenant_id,
         sid: None,
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -1077,6 +1060,7 @@ async fn accept_invitation(
     Ok(Json(LoginResponse {
         access_token,
         token_type: "bearer",
+        scope: me.scope,
         user: me.user,
         tenant: me.tenant,
         roles: me.roles,
@@ -1097,6 +1081,7 @@ async fn refresh(
     Ok(Json(LoginResponse {
         access_token,
         token_type: "bearer",
+        scope: me.scope,
         user: me.user,
         tenant: me.tenant,
         roles: me.roles,
@@ -1143,14 +1128,12 @@ pub(crate) async fn me_response(
         None
     };
     Ok(MeResponse {
+        scope: actor.scope.clone(),
         user: UserProfile {
             id: actor.user_id,
+            login_id: actor.login_id.clone(),
             email: actor.email.clone(),
-            name: if actor.name == actor.email {
-                None
-            } else {
-                Some(actor.name.clone())
-            },
+            name: Some(actor.name.clone()),
             avatar_url,
             status: "active".to_string(),
         },

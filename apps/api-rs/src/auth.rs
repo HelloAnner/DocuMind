@@ -22,6 +22,7 @@ pub struct Claims {
     pub sub: Uuid,
     pub email: String,
     pub role: String,
+    pub scope: String,
     pub tenant_id: Uuid,
     pub sid: Option<String>,
     pub exp: usize,
@@ -32,6 +33,7 @@ struct AuthSession {
     user_id: Uuid,
     tenant_id: Uuid,
     role: String,
+    scope: String,
     created_at: i64,
     last_seen_at: i64,
 }
@@ -82,7 +84,13 @@ impl FromRequestParts<AppState> for ActorExtractor {
             .unwrap_or_else(|| cfg.default_role.clone());
 
         let actor = if let Some(pool) = &state.db_pool {
-            resolve_actor_from_db(pool, tenant_id, user_id, &requested_role)
+            resolve_actor_from_db(
+                pool,
+                tenant_id,
+                user_id,
+                &requested_role,
+                if requested_role == "super_admin" { "platform" } else { "tenant" },
+            )
                 .await
                 .ok()
         } else {
@@ -144,7 +152,7 @@ pub async fn authenticate(
     if username.trim().is_empty() || password.is_empty() {
         return Err(AppError::bad_request(
             "CREDENTIALS_REQUIRED",
-            "请输入用户名和密码",
+            "请输入用户 ID 和密码",
         ));
     }
 
@@ -166,7 +174,7 @@ async fn authenticate_from_db(
     tenant_key: Option<&str>,
 ) -> Result<CurrentActor, AppError> {
     let user = sqlx::query(
-        "SELECT id, email, name, password_hash, status FROM app_user WHERE lower(email) = lower($1) LIMIT 1",
+        "SELECT id, login_id, email, name, password_hash, status FROM app_user WHERE lower(login_id) = lower($1) LIMIT 1",
     )
     .bind(username)
     .fetch_optional(pool)
@@ -268,13 +276,16 @@ async fn authenticate_from_db(
         allowed_kb_ids(pool, tenant_id, user_id, &roles).await?
     };
     let permissions = effective_permissions_for_membership(&roles, &attributes);
-    let email: String = user.get("email");
-    let name: Option<String> = user.try_get("name").ok();
+    let login_id: String = user.get("login_id");
+    let email: Option<String> = user.try_get("email").ok().flatten();
+    let name: Option<String> = user.try_get("name").ok().flatten();
     let actor = CurrentActor {
         user_id,
         tenant_id,
-        email: email.clone(),
-        name: name.unwrap_or(email),
+        login_id: login_id.clone(),
+        email: email.unwrap_or_default(),
+        name: name.unwrap_or(login_id),
+        scope: if is_super_admin { "platform" } else { "tenant" }.to_string(),
         roles: roles.clone(),
         permissions,
         allowed_kb_ids,
@@ -352,7 +363,14 @@ pub async fn actor_from_claims(
     claims: &Claims,
 ) -> Result<CurrentActor, AppError> {
     if let Some(pool) = &state.db_pool {
-        resolve_actor_from_db(pool, claims.tenant_id, claims.sub, &claims.role).await
+        resolve_actor_from_db(
+            pool,
+            claims.tenant_id,
+            claims.sub,
+            &claims.role,
+            &claims.scope,
+        )
+        .await
     } else {
         Ok(build_actor_from_fallback(
             claims.tenant_id,
@@ -370,21 +388,23 @@ pub(crate) async fn resolve_actor_from_db(
     tenant_id: Uuid,
     user_id: Uuid,
     _requested_role: &str,
+    requested_scope: &str,
 ) -> Result<CurrentActor, AppError> {
-    let user: (Uuid, String, Option<String>, String) =
-        sqlx::query_as("SELECT id, email, name, status FROM app_user WHERE id = $1")
+    let user: (Uuid, String, Option<String>, Option<String>, String) = sqlx::query_as(
+        "SELECT id, login_id, email, name, status FROM app_user WHERE id = $1",
+    )
             .bind(user_id)
             .fetch_optional(pool)
             .await?
             .ok_or_else(AppError::unauthorized)?;
 
-    let status: String = user.3;
+    let status: String = user.4;
     if status != "active" {
         return Err(AppError::unauthorized());
     }
 
     let is_platform_admin = platform_admin_active(pool, user_id).await?;
-    let include_super_admin = _requested_role == "super_admin";
+    let include_super_admin = requested_scope == "platform" && _requested_role == "super_admin";
     let is_super_admin = is_platform_admin && include_super_admin;
     let membership = sqlx::query(
         r#"
@@ -420,13 +440,16 @@ pub(crate) async fn resolve_actor_from_db(
         allowed_kb_ids(pool, tenant_id, user_id, &roles).await?
     };
     let permissions = effective_permissions_for_membership(&roles, &attributes);
-    let email = user.1;
-    let name = user.2;
+    let login_id = user.1;
+    let email = user.2.unwrap_or_default();
+    let name = user.3;
     Ok(CurrentActor {
         user_id,
         tenant_id,
-        name: name.unwrap_or_else(|| email.clone()),
+        name: name.unwrap_or_else(|| login_id.clone()),
+        login_id,
         email,
+        scope: if is_super_admin { "platform" } else { "tenant" }.to_string(),
         roles: roles.clone(),
         permissions,
         allowed_kb_ids,
@@ -543,8 +566,10 @@ fn build_actor_from_fallback(
     CurrentActor {
         user_id,
         tenant_id,
+        login_id: email.to_string(),
         email: email.to_string(),
         name: name.to_string(),
+        scope: if include_super_admin { "platform" } else { "tenant" }.to_string(),
         roles: roles.clone(),
         permissions: derive_permissions(&roles),
         allowed_kb_ids: if include_super_admin {
@@ -575,6 +600,7 @@ pub fn issue_token(
         sub: actor.user_id,
         email: actor.email.clone(),
         role,
+        scope: actor.scope.clone(),
         tenant_id: actor.tenant_id,
         sid: session_id.map(str::to_string),
         exp: exp.timestamp() as usize,
@@ -608,6 +634,7 @@ pub async fn create_auth_session(
             .first()
             .cloned()
             .unwrap_or_else(|| "user".to_string()),
+        scope: actor.scope.clone(),
         created_at: now,
         last_seen_at: now,
     };
@@ -648,7 +675,11 @@ pub async fn validate_and_renew_auth_session(
     };
     let mut session: AuthSession =
         serde_json::from_str(&raw).map_err(|e| AppError::Internal(e.into()))?;
-    if session.user_id != claims.sub || session.tenant_id != claims.tenant_id {
+    if session.user_id != claims.sub
+        || session.tenant_id != claims.tenant_id
+        || session.role != claims.role
+        || session.scope != claims.scope
+    {
         return Err(AppError::unauthorized());
     }
     session.last_seen_at = Utc::now().timestamp();
@@ -1004,10 +1035,10 @@ async fn upsert_seed_user(
     let password_hash = hash(password, DEFAULT_COST)?;
     sqlx::query(
         r#"
-        INSERT INTO app_user (id, email, name, password_hash, status)
-        VALUES ($1, $2, $3, $4, 'active')
+        INSERT INTO app_user (id, login_id, email, name, password_hash, status)
+        VALUES ($1, $2, $2, $3, $4, 'active')
         ON CONFLICT (id)
-        DO UPDATE SET email = EXCLUDED.email, name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, status = 'active', updated_at = NOW()
+        DO UPDATE SET login_id = EXCLUDED.login_id, email = EXCLUDED.email, name = EXCLUDED.name, password_hash = EXCLUDED.password_hash, status = 'active', updated_at = NOW()
         "#,
     )
     .bind(id)

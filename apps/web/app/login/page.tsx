@@ -72,7 +72,7 @@ function LoginForm({
       ) : null}
 
       <label className="dm-field">
-        <span>账号</span>
+        <span>用户 ID</span>
         <span className="dm-login-input-wrap">
           <UserRound size={16} aria-hidden="true" />
           <input
@@ -80,7 +80,7 @@ function LoginForm({
             type="text"
             value={email}
             onChange={(event) => setEmail(event.target.value)}
-            placeholder="请输入账号"
+            placeholder="请输入用户 ID"
             required
             disabled={unavailable}
           />

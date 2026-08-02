@@ -6,8 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
-  AUTHENTICATED_HOME_PATH,
-  isSuperAdminRole,
+  authenticatedHomePath,
   listAccountTenants,
   switchAccountTenant,
   updateAccountProfile,
@@ -57,9 +56,9 @@ export default function AccountPage() {
     setBusy(true);
     setMessage("");
     try {
-      await switchAccountTenant(tenant.id);
+      const session = await switchAccountTenant(tenant.id);
       await refresh();
-      router.replace(AUTHENTICATED_HOME_PATH);
+      router.replace(authenticatedHomePath(session.scope, session.roles));
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "切换失败");
     } finally {
@@ -73,7 +72,7 @@ export default function AccountPage() {
         <BrandMark />
       </div>
       <div className={styles.container}>
-        <Link className={styles.back} href={AUTHENTICATED_HOME_PATH}>
+        <Link className={styles.back} href={authenticatedHomePath(me.scope, me.roles)}>
           <ArrowLeft size={15} /> 返回
         </Link>
         <header className={styles.header}>
@@ -83,15 +82,21 @@ export default function AccountPage() {
         <div className={styles.grid}>
           <section className={styles.card}>
             <h2>个人资料</h2>
-            <p>邮箱由系统维护，不可在此修改。</p>
+            <p>用户 ID 用于登录，展示名称用于页面显示。</p>
             <label className={styles.field}>
-              <span>姓名</span>
+              <span>展示名称</span>
               <input maxLength={128} onChange={(event) => setName(event.target.value)} value={name} />
             </label>
             <label className={styles.field}>
-              <span>邮箱</span>
-              <input disabled value={me.user.email} />
+              <span>用户 ID</span>
+              <input disabled value={me.user.login_id} />
             </label>
+            {me.user.email ? (
+              <label className={styles.field}>
+                <span>联系邮箱</span>
+                <input disabled value={me.user.email} />
+              </label>
+            ) : null}
             <label className={styles.field}>
               <span>头像地址（可选）</span>
               <input onChange={(event) => setAvatarUrl(event.target.value)} placeholder="https://…" value={avatarUrl} />
@@ -106,7 +111,7 @@ export default function AccountPage() {
 
           <section className={styles.card}>
             <h2>租户空间</h2>
-            <p>{isSuperAdminRole(me.roles) ? "平台管理员不进入租户数据空间。" : "仅展示已启用且你仍为成员的租户。"}</p>
+            <p>{me.scope === "platform" ? "当前为平台管理会话。" : "仅展示已启用且你仍为成员的租户。"}</p>
             <div className={styles.tenantList}>
               {tenants.map((tenant) => (
                 <div className={styles.tenant} key={tenant.id}>

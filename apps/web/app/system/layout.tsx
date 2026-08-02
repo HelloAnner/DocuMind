@@ -15,7 +15,7 @@ export default function SystemLayout({
 
   useEffect(() => {
     if (loading) return;
-    if (!me || !me.roles.includes("super_admin")) {
+    if (!me || me.scope !== "platform") {
       router.replace("/");
     }
   }, [me, loading, router]);
