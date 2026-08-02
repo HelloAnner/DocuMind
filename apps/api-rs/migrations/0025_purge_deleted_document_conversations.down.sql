@@ -1,0 +1,1 @@
+-- Purged conversation content cannot be restored.

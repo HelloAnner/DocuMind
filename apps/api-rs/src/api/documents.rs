@@ -594,14 +594,18 @@ async fn delete_document(
     .await?;
     crate::rag::vector_jobs::cancel_document(pool, doc_id).await?;
     let es_deleted_chunks = delete_document_from_search_index(&state, &doc).await?;
+    state.storage.delete(&doc.storage_key).await?;
 
+    let mut tx = pool.begin().await?;
+    let deleted_conversations =
+        purge_document_conversations(&mut tx, actor.tenant_id, doc_id).await?;
     sqlx::query("DELETE FROM documents WHERE tenant_id = $1 AND id = $2")
         .bind(actor.tenant_id)
         .bind(doc_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+    tx.commit().await?;
 
-    let _ = state.storage.delete(&doc.storage_key).await;
     record_audit_event(
         &state,
         Some(&actor),
@@ -614,6 +618,7 @@ async fn delete_document(
             "file_type": doc.file_type,
             "storage_key": doc.storage_key,
             "es_deleted_chunks": es_deleted_chunks,
+            "deleted_conversations": deleted_conversations,
         }),
     )
     .await?;
@@ -1187,6 +1192,34 @@ fn document_storage_key(
     format!(
         "tenants/{tenant_id}/knowledge-bases/{kb_id}/documents/{doc_id}/original/{file_sha256}.{file_type}"
     )
+}
+
+async fn purge_document_conversations(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant_id: Uuid,
+    doc_id: Uuid,
+) -> Result<u64, AppError> {
+    let result = sqlx::query(
+        "WITH impacted AS (
+             SELECT DISTINCT m.conversation_id
+             FROM conversation_messages m
+             JOIN conversation_citations c ON c.assistant_message_id = m.id
+             WHERE m.tenant_id = $1 AND c.doc_id = $2
+             UNION
+             SELECT DISTINCT m.conversation_id
+             FROM conversation_messages m
+             JOIN conversation_retrieval_traces r ON r.message_id = m.id
+             WHERE m.tenant_id = $1 AND r.doc_id = $2
+         )
+         DELETE FROM conversation_sessions s
+         USING impacted i
+         WHERE s.id = i.conversation_id AND s.tenant_id = $1",
+    )
+    .bind(tenant_id)
+    .bind(doc_id)
+    .execute(&mut **tx)
+    .await?;
+    Ok(result.rows_affected())
 }
 
 async fn delete_document_from_search_index(

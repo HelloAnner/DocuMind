@@ -29,7 +29,7 @@ pub trait ObjectStorage: Send + Sync {
     /// 读取指定 key 的某个字节范围（含 start，不含 end）。
     async fn get_range(&self, key: &str, start: u64, end: u64) -> Result<Vec<u8>>;
 
-    /// 删除指定 key。失败不应阻塞调用方，由实现内部记录日志。
+    /// 删除指定 key；由调用方决定删除失败是否阻塞业务操作。
     async fn delete(&self, key: &str) -> Result<()>;
 }
 

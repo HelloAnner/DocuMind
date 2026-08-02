@@ -145,7 +145,7 @@ export function AdminDocuments() {
   async function handleBatchDelete() {
     const selectedIds = Array.from(selectedDocIds);
     if (selectedIds.length === 0) return;
-    if (!window.confirm(`确认删除选中的 ${selectedIds.length} 个文档及其切片和引用索引？`)) return;
+    if (!window.confirm(`确认永久删除选中的 ${selectedIds.length} 个文档、检索索引及引用过这些文档的历史会话？`)) return;
     setBatchBusy(true);
     setNotice(undefined);
     let deleted = 0;
@@ -207,7 +207,7 @@ export function AdminDocuments() {
   }
 
   async function handleDelete(doc: AdminDocument) {
-    if (!window.confirm(`删除《${doc.file_name}》及其切片和引用索引？`)) return;
+    if (!window.confirm(`永久删除《${doc.file_name}》、检索索引及引用过该文档的历史会话？`)) return;
     setBusyDocId(doc.doc_id);
     setNotice(undefined);
     try {

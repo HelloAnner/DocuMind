@@ -87,11 +87,15 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         .as_ref()
         .ok_or_else(|| anyhow::anyhow!("DocuMind Agent requires ELASTICSEARCH_URL"))?;
     let embedding_config = EmbeddingClientConfig::try_from(&config.rag.embedding)?;
+    let retrieval_pool = db_pool
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("DocuMind Agent requires DATABASE_URL"))?;
     let retriever: Arc<dyn crate::rag::Retriever> = Arc::new(EsRetriever::new(
         es_url.clone(),
         config.rag.embedding.index_alias.clone(),
         embedding_config,
         config.rag.embedding.model.clone(),
+        retrieval_pool,
     )?);
 
     if !config.rag.rerank.enabled {

@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, Result};
 use futures::future::join_all;
+use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::models::rag::{RetrievalInput, RetrievalOutput, RetrievedChunk};
@@ -21,6 +22,7 @@ pub struct EsRetriever {
     index_name: String,
     embedding_model: String,
     embedding_client: EmbeddingClient,
+    pool: PgPool,
 }
 
 impl EsRetriever {
@@ -29,6 +31,7 @@ impl EsRetriever {
         index_name: String,
         embedding_config: EmbeddingClientConfig,
         embedding_model: String,
+        pool: PgPool,
     ) -> Result<Self> {
         Ok(Self {
             http: reqwest::Client::builder()
@@ -38,6 +41,7 @@ impl EsRetriever {
             index_name,
             embedding_model,
             embedding_client: EmbeddingClient::new(embedding_config)?,
+            pool,
         })
     }
 
@@ -171,10 +175,28 @@ impl Retriever for EsRetriever {
             );
         }
         let warnings = dense_failures.into_iter().chain(bm25_failures).collect();
-        Ok(RetrievalOutput {
-            chunks: fuse_ranked_lists(dense_lists, bm25_lists, input.top_k),
-            warnings,
-        })
+        let mut chunks = fuse_ranked_lists(dense_lists, bm25_lists, input.top_k);
+        let chunk_ids = chunks
+            .iter()
+            .map(|chunk| chunk.chunk_id)
+            .collect::<Vec<_>>();
+        let searchable_ids = sqlx::query_scalar::<_, Uuid>(
+            "SELECT c.id
+             FROM chunks c
+             JOIN documents d ON d.id = c.doc_id AND d.latest_parse_job_id = c.parse_job_id
+             WHERE c.id = ANY($1)
+               AND d.tenant_id = $2
+               AND d.kb_id = ANY($3)
+               AND d.parse_status = 'indexed'",
+        )
+        .bind(&chunk_ids)
+        .bind(input.tenant_id)
+        .bind(&input.effective_kb_ids)
+        .fetch_all(&self.pool)
+        .await?;
+        let searchable_ids = searchable_ids.into_iter().collect::<HashSet<_>>();
+        chunks.retain(|chunk| searchable_ids.contains(&chunk.chunk_id));
+        Ok(RetrievalOutput { chunks, warnings })
     }
 
     fn component_name(&self) -> String {
