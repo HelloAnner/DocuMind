@@ -16,7 +16,10 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE_DIR = ROOT / "docs" / "deliverables"
 DIST_DIR = ROOT / "dist"
 BUNDLE_NAME = "DocuMind项目交付文档书"
-DOCUMENTS = [("independent-deployment.md", "DocuMind独立部署说明书.docx")]
+DOCUMENTS = [
+    ("independent-deployment.md", "DocuMind独立部署说明书.docx"),
+    ("system-architecture.md", "DocuMind系统架构与业务逻辑说明书.docx"),
+]
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
 
@@ -208,7 +211,7 @@ def render_body(metadata: dict[str, str], blocks: list[tuple], generated: str) -
         paragraph("DOCUMIND", before=900, after=260, align="center", raw_runs=run("DOCUMIND", bold=True, color="0F766E", size=28)),
         paragraph(title, before=900, after=220, align="center", raw_runs=run(title, bold=True, color="17324D", size=52)),
         paragraph(metadata["subtitle"], after=700, align="center", raw_runs=run(metadata["subtitle"], color="4B6478", size=26)),
-        table([["文档版本", "生成日期", "适用场景"], [metadata["version"], generated, "客户内网独立部署"]]),
+        table([["文档版本", "生成日期", "适用场景"], [metadata["version"], generated, metadata.get("scenario", "客户内网独立部署")]]),
         paragraph("客户交付文件 · 请妥善保管", before=900, align="center", raw_runs=run("客户交付文件 · 请妥善保管", color="64748B", size=18)),
         '<w:p><w:r><w:br w:type="page"/></w:r></w:p>',
         paragraph("目录", style="Heading1"),
@@ -306,9 +309,9 @@ def write_docx(source: Path, target: Path, generated: str) -> None:
         "word/styles.xml": styles_xml(),
         "word/settings.xml": f'''<?xml version="1.0" encoding="UTF-8"?><w:settings xmlns:w="{W}"><w:updateFields w:val="true"/><w:defaultTabStop w:val="420"/></w:settings>''',
         "word/header1.xml": f'''<?xml version="1.0" encoding="UTF-8"?><w:hdr xmlns:w="{W}">{paragraph("DOCUMIND  ·  客户交付文档", align="right", raw_runs=run("DOCUMIND  ·  客户交付文档", bold=True, color="0F766E", size=17))}</w:hdr>''',
-        "word/footer1.xml": f'''<?xml version="1.0" encoding="UTF-8"?><w:ftr xmlns:w="{W}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr>{run("DocuMind 独立部署说明书  |  第 ", color="64748B", size=16)}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>{run(" 页", color="64748B", size=16)}</w:p></w:ftr>''',
+        "word/footer1.xml": f'''<?xml version="1.0" encoding="UTF-8"?><w:ftr xmlns:w="{W}"><w:p><w:pPr><w:jc w:val="center"/></w:pPr>{run(f"{metadata['title']}  |  第 ", color="64748B", size=16)}<w:r><w:fldChar w:fldCharType="begin"/></w:r><w:r><w:instrText>PAGE</w:instrText></w:r><w:r><w:fldChar w:fldCharType="end"/></w:r>{run(" 页", color="64748B", size=16)}</w:p></w:ftr>''',
         "docProps/core.xml": f'''<?xml version="1.0" encoding="UTF-8"?>
-<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{x(metadata['title'])}</dc:title><dc:creator>DocuMind</dc:creator><dc:subject>客户独立部署</dc:subject><dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified></cp:coreProperties>''',
+<cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:title>{x(metadata['title'])}</dc:title><dc:creator>DocuMind</dc:creator><dc:subject>{x(metadata['subtitle'])}</dc:subject><dcterms:created xsi:type="dcterms:W3CDTF">{now}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">{now}</dcterms:modified></cp:coreProperties>''',
         "docProps/app.xml": '''<?xml version="1.0" encoding="UTF-8"?><Properties xmlns="http://schemas.openxmlformats.org/officeDocument/2006/extended-properties" xmlns:vt="http://schemas.openxmlformats.org/officeDocument/2006/docPropsVTypes"><Application>DocuMind Documentation Builder</Application><AppVersion>1.0</AppVersion></Properties>''',
     }
     target.parent.mkdir(parents=True, exist_ok=True)
