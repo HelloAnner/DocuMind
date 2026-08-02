@@ -136,6 +136,16 @@ pub async fn mark_document_embedding(
     .bind(scope.parse_job_id)
     .execute(pool)
     .await?;
+    sqlx::query(
+        "INSERT INTO document_processing_events (tenant_id, doc_id, parse_job_id, stage, status, message, metrics)
+         VALUES ($1, $2, $3, 'embedding', 'running', '开始向量化和索引', $4)",
+    )
+    .bind(scope.tenant_id)
+    .bind(scope.doc_id)
+    .bind(scope.parse_job_id)
+    .bind(json!({ "model": config.model, "dimension": config.dimension }))
+    .execute(pool)
+    .await?;
     Ok(())
 }
 
@@ -279,6 +289,16 @@ pub async fn mark_document_indexed(
         .bind(&config.model)
         .execute(&mut *tx)
         .await?;
+        sqlx::query(
+            "INSERT INTO document_processing_events (tenant_id, doc_id, parse_job_id, stage, status, message, metrics)
+             VALUES ($1, $2, $3, 'indexed', 'completed', '向量化和索引完成', $4)",
+        )
+        .bind(scope.tenant_id)
+        .bind(scope.doc_id)
+        .bind(scope.parse_job_id)
+        .bind(json!({ "indexed_chunks": indexed_chunks, "index": physical_index }))
+        .execute(&mut *tx)
+        .await?;
     }
     tx.commit().await?;
     Ok(updated.rows_affected() == 1)
@@ -323,6 +343,16 @@ pub async fn mark_document_terminal_failure(
     }))
     .bind(doc_id)
     .bind(parse_job_id)
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "INSERT INTO document_processing_events (tenant_id, doc_id, parse_job_id, stage, status, message, error_code, error_message)
+         SELECT tenant_id, id, $1, 'embedding', 'failed', '向量化或索引失败', 'VECTOR_JOB_FAILED', $2
+         FROM documents WHERE id = $3 AND latest_parse_job_id = $1",
+    )
+    .bind(parse_job_id)
+    .bind(error)
+    .bind(doc_id)
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;

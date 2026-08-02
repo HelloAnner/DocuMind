@@ -13,6 +13,7 @@ interface CapturedRequest {
   contentType?: string;
   json?: unknown;
   file?: { name: string; size: number };
+  batchId?: string;
 }
 
 describe("ApiClient admin management", () => {
@@ -33,7 +34,9 @@ describe("ApiClient admin management", () => {
       await api.createKnowledgeBase({ name: "Legal", status: "active", tags: ["law"] });
       await api.updateKnowledgeBase("kb/1", { name: "Legal 2", status: "archived", tags: [] });
       await api.deleteKnowledgeBase("kb/1");
-      await api.uploadDocument("kb/1", new Blob(["document"]), "policy.md");
+      await api.uploadDocument("kb/1", new Blob(["document"]), "policy.md", "batch-1");
+      await api.listDocumentJobs({ status: "processing", batchId: "batch-1" });
+      await api.getDocumentJob("job/1");
       await api.retryDocument("doc/1");
       await api.retryDocuments(["doc/1", "doc-2"]);
       await api.forceIndexDocument("doc/1");
@@ -54,6 +57,8 @@ describe("ApiClient admin management", () => {
         "PUT /api/admin/knowledge-bases/kb%2F1",
         "DELETE /api/admin/knowledge-bases/kb%2F1",
         "POST /api/knowledge-bases/kb%2F1/documents",
+        "GET /api/admin/document-jobs",
+        "GET /api/admin/document-jobs/job%2F1",
         "POST /api/admin/documents/doc%2F1/retry",
         "POST /api/admin/documents/retry",
         "POST /api/admin/documents/doc%2F1/force-index",
@@ -68,6 +73,7 @@ describe("ApiClient admin management", () => {
 
       const upload = requests.find((item) => item.path.endsWith("/documents") && item.file);
       expect(upload?.file).toEqual({ name: "policy.md", size: 8 });
+      expect(upload?.batchId).toBe("batch-1");
       expect(upload?.contentType).toBeUndefined();
       const replacement = requests.find((item) => item.path.endsWith("/replace-file"));
       expect(replacement?.file).toEqual({ name: "policy-v2.md", size: 11 });
@@ -95,6 +101,8 @@ function createFetcher(requests: CapturedRequest[]): typeof fetch {
     if (init?.body instanceof FormData) {
       const file = init.body.get("file");
       if (file instanceof File) captured.file = { name: file.name, size: file.size };
+      const batchId = init.body.get("upload_batch_id");
+      if (typeof batchId === "string") captured.batchId = batchId;
     } else if (typeof init?.body === "string") {
       captured.json = JSON.parse(init.body) as unknown;
     }
@@ -108,6 +116,8 @@ function createFetcher(requests: CapturedRequest[]): typeof fetch {
       return jsonResponse([]);
     }
     if (url.pathname === "/api/diagnostics/vector-indexes") return jsonResponse([]);
+    if (url.pathname === "/api/admin/document-jobs") return jsonResponse({ items: [], summary: { queued: 0, processing: 0, failed_24h: 0, completed_24h: 0, stalled: 0 } });
+    if (url.pathname.startsWith("/api/admin/document-jobs/")) return jsonResponse({ job: {}, events: [] });
     if (url.pathname.includes("knowledge-bases") && captured.method !== "DELETE") {
       if (url.pathname.endsWith("/documents")) return jsonResponse(uploadResponse());
       return jsonResponse(knowledgeBase());

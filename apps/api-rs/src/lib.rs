@@ -85,6 +85,7 @@ fn api_routes() -> Router<AppState> {
         .merge(api::vector_diagnostics_router())
         .merge(api::admin_router())
         .merge(api::admin_members_router())
+        .merge(api::document_jobs_router())
         .merge(api::documents_router())
         .merge(api::knowledge_router())
         .merge(api::history_router())

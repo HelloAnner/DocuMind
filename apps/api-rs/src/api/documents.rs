@@ -1,6 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command as StdCommand;
+use std::sync::{Arc, OnceLock};
 
 use axum::extract::{DefaultBodyLimit, Multipart, Path as AxumPath, Query, State};
 use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
@@ -14,6 +15,7 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
 use tokio::process::Command;
+use tokio::sync::Semaphore;
 use tokio::time::{timeout, Duration};
 use uuid::Uuid;
 
@@ -33,6 +35,8 @@ const PREVIEW_CHAR_LIMIT: usize = 60_000;
 const MAX_UPLOAD_BYTES: usize = 100 * 1024 * 1024;
 const OFFICE_CONVERSION_TIMEOUT_SECONDS: u64 = 90;
 const OCR_RENDER_DPI: u32 = 220;
+const PARSE_WORKER_CONCURRENCY: usize = 2;
+static PARSE_WORKER_SLOTS: OnceLock<Arc<Semaphore>> = OnceLock::new();
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -354,6 +358,7 @@ struct UploadedFile {
     title: String,
     file_name: String,
     mime_type: String,
+    upload_batch_id: Option<Uuid>,
     bytes: Vec<u8>,
 }
 
@@ -453,9 +458,9 @@ async fn upload_document(
     sqlx::query(
         "INSERT INTO documents (
             id, tenant_id, kb_id, title, file_type, file_size_bytes, storage_key,
-            file_sha256, parse_status, parse_version, chunk_count, metadata, created_by
+            file_sha256, parse_status, parse_version, chunk_count, metadata, created_by, upload_batch_id
          )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12)",
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 1, $10, $11, $12, $13)",
     )
     .bind(doc_id)
     .bind(actor.tenant_id)
@@ -473,6 +478,7 @@ async fn upload_document(
         "active_parse_job_id": parse_job_id,
     }))
     .bind(actor.user_id)
+    .bind(uploaded.upload_batch_id)
     .execute(&mut *tx)
     .await?;
 
@@ -2290,80 +2296,104 @@ async fn download_document_content(
 // Shared reprocess / retry logic
 // ---------------------------------------------------------------------------
 
-pub async fn recover_interrupted_document_jobs(pool: &sqlx::PgPool) -> Result<u64, sqlx::Error> {
-    let result = sqlx::query(
-        r#"
-        WITH candidates AS MATERIALIZED (
-            SELECT
-                d.id AS doc_id,
-                d.tenant_id,
-                COALESCE(
-                    CASE
-                        WHEN d.parse_status = 'ocr_pending'
-                         AND COALESCE(d.metadata->>'active_ocr_job_id', '') ~* '^[0-9a-f-]{36}$'
-                        THEN (d.metadata->>'active_ocr_job_id')::uuid
-                    END,
-                    CASE
-                        WHEN COALESCE(d.metadata->>'active_parse_job_id', '') ~* '^[0-9a-f-]{36}$'
-                        THEN (d.metadata->>'active_parse_job_id')::uuid
-                    END,
-                    d.latest_parse_job_id
-                ) AS parse_job_id,
-                d.parse_status,
-                d.latest_parse_job_id
-            FROM documents d
-            WHERE d.parse_status IN ('uploaded', 'parsing', 'chunked', 'embedding', 'ocr_pending')
-        ),
-        interrupted AS MATERIALIZED (
-            SELECT
-                c.doc_id,
-                c.tenant_id,
-                c.parse_job_id,
-                c.parse_status,
-                COALESCE(j.parser_config->>'job_kind', 'parse') AS job_kind
-            FROM candidates c
-            LEFT JOIN document_parse_jobs j
-                   ON j.parse_job_id = c.parse_job_id
-            WHERE c.parse_job_id IS NOT NULL
-              AND COALESCE(j.status, 'pending') IN ('pending', 'running', 'ocr_queued')
-        ),
-        updated_jobs AS (
-            UPDATE document_parse_jobs j
-               SET status = 'failed',
-                   error_code = 'RUNTIME_INTERRUPTED',
-                   error_message = 'DocuMind restarted before this in-process document job completed; retry the document to resume processing.',
-                   completed_at = COALESCE(j.completed_at, NOW()),
-                   finished_at = COALESCE(j.finished_at, NOW())
-              FROM interrupted i
-             WHERE j.parse_job_id = i.parse_job_id
-             RETURNING j.parse_job_id
-        )
-        UPDATE documents d
-           SET parse_status = CASE
-                    WHEN i.parse_status = 'embedding' THEN 'embedding_failed'
-                    WHEN i.parse_status = 'ocr_pending' OR i.job_kind = 'ocr' THEN 'parse_low_confidence'
-                    ELSE 'parse_failed'
-               END,
-               metadata = d.metadata
-                   || jsonb_build_object(
-                       'active_parse_job_id', i.parse_job_id,
-                       'parse_progress', 100,
-                       'error_code', 'RUNTIME_INTERRUPTED',
-                       'error_message', 'DocuMind restarted before this in-process document job completed; retry the document to resume processing.',
-                       'recovered_at', NOW()
-                   )
-                   || CASE
-                       WHEN i.parse_status = 'ocr_pending' OR i.job_kind = 'ocr'
-                       THEN jsonb_build_object('ocr_status', 'failed')
-                       ELSE '{}'::jsonb
-                   END,
-               updated_at = NOW()
-          FROM interrupted i
-         WHERE d.id = i.doc_id
-        "#,
+pub async fn resume_pending_document_jobs(state: &AppState) -> Result<usize, AppError> {
+    let Some(pool) = state.db_pool.as_ref() else {
+        return Ok(0);
+    };
+    let rows = sqlx::query(
+        "SELECT j.tenant_id, j.kb_id, j.doc_id, j.parse_job_id, j.parser_config,
+                j.parse_identity, d.parse_version, d.title, d.file_type,
+                COALESCE(d.metadata->>'original_filename', d.storage_key) AS file_name,
+                COALESCE(d.metadata->>'mime_type', 'application/octet-stream') AS mime_type,
+                d.storage_key
+         FROM document_parse_jobs j
+         JOIN documents d ON d.id = j.doc_id
+         WHERE j.status IN ('pending', 'ocr_queued')
+         ORDER BY j.created_at",
     )
-    .execute(pool)
+    .fetch_all(pool)
     .await?;
+    let mut resumed = 0;
+    for row in rows {
+        let storage_key: String = row.get("storage_key");
+        let bytes = match state.storage.get(&storage_key).await {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                sqlx::query(
+                    "UPDATE document_parse_jobs SET status = 'failed', error_code = 'ORIGINAL_FILE_MISSING',
+                     error_message = $1, completed_at = NOW(), updated_at = NOW() WHERE parse_job_id = $2",
+                )
+                .bind(error.to_string())
+                .bind(row.get::<Uuid, _>("parse_job_id"))
+                .execute(pool)
+                .await?;
+                continue;
+            }
+        };
+        let parser_config: Value = row.get("parser_config");
+        spawn_parse_job(
+            pool.clone(),
+            ParseJobTask {
+                tenant_id: row.get("tenant_id"),
+                kb_id: row.get("kb_id"),
+                doc_id: row.get("doc_id"),
+                parse_job_id: row.get("parse_job_id"),
+                parse_version: row.get("parse_version"),
+                title: row.get("title"),
+                file_name: row.get("file_name"),
+                mime_type: row.get("mime_type"),
+                file_type: row.get("file_type"),
+                force_index: parser_config
+                    .get("force_index")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                parser_config,
+                parse_identity: row.get("parse_identity"),
+                bytes,
+                embedding_config: state.config.rag.embedding.clone(),
+            },
+        );
+        resumed += 1;
+    }
+    Ok(resumed)
+}
+
+pub async fn recover_interrupted_document_jobs(pool: &sqlx::PgPool) -> Result<u64, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let result = sqlx::query(
+        "UPDATE document_parse_jobs
+         SET status = CASE WHEN parser_config->>'job_kind' = 'ocr' THEN 'ocr_queued' ELSE 'pending' END,
+             worker_id = NULL,
+             heartbeat_at = NULL,
+             attempt_count = attempt_count + 1,
+             available_at = NOW(),
+             error_code = 'RUNTIME_INTERRUPTED',
+             error_message = '任务因服务重启已自动重新排队',
+             started_at = NULL,
+             completed_at = NULL,
+             finished_at = NULL,
+             updated_at = NOW()
+         WHERE status = 'running'",
+    )
+    .execute(&mut *tx)
+    .await?;
+    sqlx::query(
+        "UPDATE documents d
+         SET parse_status = CASE WHEN j.parser_config->>'job_kind' = 'ocr' THEN 'ocr_pending' ELSE 'uploaded' END,
+             metadata = d.metadata || jsonb_build_object(
+                 'parse_progress', 10,
+                 'recovered_at', NOW(),
+                 'recovery_message', '任务因服务重启已自动重新排队'
+             ),
+             updated_at = NOW()
+         FROM document_parse_jobs j
+         WHERE j.doc_id = d.id
+           AND j.status IN ('pending', 'ocr_queued')
+           AND (d.latest_parse_job_id = j.parse_job_id OR d.metadata->>'active_ocr_job_id' = j.parse_job_id::text)",
+    )
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
     Ok(result.rows_affected())
 }
 
@@ -2691,6 +2721,16 @@ async fn insert_pending_parse_job(
     .await?;
 
     sqlx::query(
+        "INSERT INTO document_processing_events (tenant_id, doc_id, parse_job_id, stage, status, message)
+         VALUES ($1, $2, $3, 'waiting_parse', 'queued', '文件已保存，等待文档解析')",
+    )
+    .bind(scope.tenant_id)
+    .bind(scope.doc_id)
+    .bind(scope.parse_job_id)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
         "UPDATE documents
          SET latest_parse_job_id = $1,
              parse_status = 'uploaded',
@@ -2715,7 +2755,13 @@ async fn insert_pending_parse_job(
 }
 
 fn spawn_parse_job(pool: sqlx::PgPool, task: ParseJobTask) {
+    let slots = PARSE_WORKER_SLOTS
+        .get_or_init(|| Arc::new(Semaphore::new(PARSE_WORKER_CONCURRENCY)))
+        .clone();
     tokio::spawn(async move {
+        let Ok(_permit) = slots.acquire_owned().await else {
+            return;
+        };
         if let Err(err) = run_parse_job(pool.clone(), task).await {
             eprintln!("document parse job failed to update state: {err:#?}");
         }
@@ -2790,12 +2836,30 @@ async fn mark_parse_job_running(pool: &sqlx::PgPool, task: &ParseJobTask) -> Res
     sqlx::query(
         "UPDATE document_parse_jobs
          SET status = 'running',
+             attempt_count = attempt_count + 1,
+             worker_id = $4,
+             heartbeat_at = NOW(),
+             updated_at = NOW(),
              started_at = COALESCE(started_at, NOW())
-         WHERE tenant_id = $1 AND doc_id = $2 AND parse_job_id = $3",
+         WHERE tenant_id = $1 AND doc_id = $2 AND parse_job_id = $3
+           AND status IN ('pending', 'ocr_queued', 'running')",
     )
     .bind(task.tenant_id)
     .bind(task.doc_id)
     .bind(task.parse_job_id)
+    .bind(format!("parse-worker-{}", std::process::id()))
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO document_processing_events (tenant_id, doc_id, parse_job_id, stage, status, message)
+         VALUES ($1, $2, $3, $4, 'running', $5)",
+    )
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .bind(task.parse_job_id)
+    .bind(if is_ocr { "ocr" } else { "parsing" })
+    .bind(if is_ocr { "开始 OCR 增强" } else { "开始解析文档" })
     .execute(&mut *tx)
     .await?;
 
@@ -2831,6 +2895,9 @@ async fn mark_parse_job_failed(
          SET status = 'failed',
              error_code = $1,
              error_message = $2,
+             worker_id = NULL,
+             heartbeat_at = NOW(),
+             updated_at = NOW(),
              completed_at = NOW()
          WHERE tenant_id = $3 AND doc_id = $4 AND parse_job_id = $5",
     )
@@ -2839,6 +2906,20 @@ async fn mark_parse_job_failed(
     .bind(task.tenant_id)
     .bind(task.doc_id)
     .bind(task.parse_job_id)
+    .execute(&mut *tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO document_processing_events (
+            tenant_id, doc_id, parse_job_id, stage, status, message, error_code, error_message
+         ) VALUES ($1, $2, $3, $4, 'failed', '文档处理失败', $5, $6)",
+    )
+    .bind(task.tenant_id)
+    .bind(task.doc_id)
+    .bind(task.parse_job_id)
+    .bind(if is_ocr { "ocr" } else { "parsing" })
+    .bind(&error_code)
+    .bind(&error_message)
     .execute(&mut *tx)
     .await?;
 
@@ -2914,6 +2995,9 @@ async fn insert_parse_outputs(
              error_code = NULL,
              error_message = NULL,
              quality_score = EXCLUDED.quality_score,
+             worker_id = NULL,
+             heartbeat_at = NOW(),
+             updated_at = NOW(),
              started_at = COALESCE(document_parse_jobs.started_at, NOW()),
              completed_at = NOW()",
     )
@@ -2925,6 +3009,33 @@ async fn insert_parse_outputs(
     .bind(artifacts.parser_config.clone())
     .bind(&artifacts.parse_identity)
     .bind(artifacts.quality_score)
+    .execute(&mut **tx)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO document_processing_events (
+            tenant_id, doc_id, parse_job_id, stage, status, message, metrics
+         ) VALUES ($1, $2, $3, 'chunking', $4, $5, $6)",
+    )
+    .bind(scope.tenant_id)
+    .bind(scope.doc_id)
+    .bind(scope.parse_job_id)
+    .bind(if artifacts.parse_status == "parse_low_confidence" {
+        "warning"
+    } else {
+        "completed"
+    })
+    .bind(if artifacts.parse_status == "parse_low_confidence" {
+        "解析完成，但质量较低"
+    } else {
+        "解析、清洗和切片完成"
+    })
+    .bind(json!({
+        "blocks": artifacts.bundle.parsed.blocks.len(),
+        "tables": artifacts.bundle.parsed.tables.len(),
+        "chunks": artifacts.bundle.chunks.len(),
+        "quality_score": artifacts.quality_score,
+    }))
     .execute(&mut **tx)
     .await?;
 
@@ -3666,6 +3777,7 @@ async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, 
     let mut file_name: Option<String> = None;
     let mut title: Option<String> = None;
     let mut mime_type: Option<String> = None;
+    let mut upload_batch_id: Option<Uuid> = None;
     let mut bytes: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart
@@ -3697,6 +3809,14 @@ async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, 
                     title = Some(trimmed.to_string());
                 }
             }
+            "upload_batch_id" => {
+                let text = field.text().await.map_err(|e| {
+                    AppError::bad_request("INVALID_MULTIPART", format!("读取上传批次失败: {e}"))
+                })?;
+                upload_batch_id = Some(Uuid::parse_str(text.trim()).map_err(|_| {
+                    AppError::bad_request("INVALID_UPLOAD_BATCH_ID", "上传批次 ID 格式无效")
+                })?);
+            }
             _ => {}
         }
     }
@@ -3713,6 +3833,7 @@ async fn read_multipart_file(multipart: &mut Multipart) -> Result<UploadedFile, 
         title,
         file_name,
         mime_type,
+        upload_batch_id,
         bytes,
     })
 }

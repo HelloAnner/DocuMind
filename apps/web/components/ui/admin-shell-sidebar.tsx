@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Cpu,
   Database,
+  FileClock,
   FolderOpen,
   LayoutDashboard,
   ListChecks,
@@ -67,6 +68,7 @@ const tenantSections: NavSection[] = [
     title: "知识库",
     items: [
       { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
+      { label: "文档处理", href: "/admin/document-jobs", icon: FileClock },
       { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
     ],
   },

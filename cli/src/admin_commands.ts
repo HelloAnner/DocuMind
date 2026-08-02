@@ -13,6 +13,7 @@ import { printDocuments, printJson, printKnowledgeBases } from "./render.ts";
 import type {
   AdminDocument,
   AdminDocumentDetail,
+  DocumentJob,
   KnowledgeBase,
   KnowledgeBaseUpsert,
 } from "./types.ts";
@@ -77,7 +78,9 @@ export async function documentCommand(
   if (["show", "preview", "blocks", "cleaned-blocks", "chunks", "tables"].includes(subcommand)) {
     return showDocumentSection(args, api, json, subcommand);
   }
-  if (subcommand === "upload") return uploadDocument(args, api, json);
+  if (subcommand === "upload" || subcommand === "upload-batch") return uploadDocument(args, api, json);
+  if (subcommand === "jobs") return listDocumentJobs(args, api, json);
+  if (subcommand === "job" || subcommand === "job-wait") return showDocumentJob(args, api, json, subcommand === "job-wait");
   if (subcommand === "download") return downloadDocument(args, api, json);
   if (subcommand === "move") return moveDocument(args, api, json);
   if (subcommand === "delete") return deleteDocument(args, api, json);
@@ -127,22 +130,73 @@ async function showDocumentSection(
 }
 
 async function uploadDocument(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
-  const path = requiredPositional(args, 2, "documents upload 需要文件路径");
+  const paths = args.positionals.slice(2);
+  if (paths.length === 0) throw new CliError("documents upload 需要至少一个文件路径", 2);
+  if (paths.length > 50) throw new CliError("一次最多上传 50 个文件", 2);
   const kbId = requiredOption(args, "kb", "documents upload 需要 --kb <知识库ID>");
-  const file = await localUpload(path);
-  const uploaded = await api.uploadDocument(kbId, file.blob, file.name);
-  const document = booleanOption(args, "wait")
-    ? await waitForDocument(api, uploaded.document_id, waitOptions(args))
+  const files = await Promise.all(paths.map(localUpload));
+  const batchId = crypto.randomUUID();
+  const uploads = new Array<Awaited<ReturnType<ApiClient["uploadDocument"]>>>();
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(3, files.length) }, async () => {
+    while (cursor < files.length) {
+      const file = files[cursor++]!;
+      uploads.push(await api.uploadDocument(kbId, file.blob, file.name, batchId));
+    }
+  }));
+  const documents = booleanOption(args, "wait")
+    ? await Promise.all(uploads.map((item) => waitForDocument(api, item.document_id, waitOptions(args))))
     : undefined;
-  const result = document ? { upload: uploaded, document } : uploaded;
-  if (json) printJson(result);
+  const result = { batch_id: batchId, total: uploads.length, uploads, ...(documents ? { documents } : {}) };
+  if (json) printJson(paths.length === 1 ? { ...uploads[0], batch_id: batchId, ...(documents ? { document: documents[0] } : {}) } : result);
   else {
-    process.stdout.write(
-      `已上传 ${file.name} · document=${uploaded.document_id} · job=${uploaded.parse_job_id}\n`,
-    );
-    if (document) printDocuments([document]);
+    process.stdout.write(`批次 ${batchId} 已上传 ${uploads.length} 个文件并进入处理队列\n`);
+    uploads.forEach((item) => process.stdout.write(`  ${item.title} · document=${item.document_id} · job=${item.parse_job_id}\n`));
+    if (documents) printDocuments(documents);
   }
   return 0;
+}
+
+async function listDocumentJobs(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const status = stringOption(args, "status");
+  const kbId = stringOption(args, "kb");
+  const batchId = stringOption(args, "batch");
+  const query = stringOption(args, "query");
+  const result = await api.listDocumentJobs({
+    ...(status ? { status } : {}),
+    ...(kbId ? { kbId } : {}),
+    ...(batchId ? { batchId } : {}),
+    ...(query ? { query } : {}),
+    limit: numberOption(args, "limit", 100, { min: 1, max: 200 }),
+  });
+  if (json) printJson(result);
+  else {
+    process.stdout.write(`排队 ${result.summary.queued} · 处理中 ${result.summary.processing} · 24h失败 ${result.summary.failed_24h} · 24h完成 ${result.summary.completed_24h}\n`);
+    result.items.forEach(printDocumentJob);
+  }
+  return 0;
+}
+
+async function showDocumentJob(args: ParsedArgs, api: ApiClient, json: boolean, wait: boolean): Promise<number> {
+  const id = requiredPositional(args, 2, `documents ${wait ? "job-wait" : "job"} 需要任务 ID`);
+  const detail = wait ? await waitForJob(api, id, waitOptions(args).timeoutMs, waitOptions(args).intervalMs) : await api.getDocumentJob(id);
+  if (json) printJson(detail);
+  else { printDocumentJob(detail.job); printJson({ events: detail.events, vector_job: detail.vector_job ?? null }); }
+  return detail.job.job_status === "failed" ? 1 : 0;
+}
+
+async function waitForJob(api: ApiClient, id: string, timeoutMs: number, intervalMs: number) {
+  const startedAt = Date.now();
+  while (true) {
+    const detail = await api.getDocumentJob(id);
+    if (["completed", "warning", "failed"].includes(detail.job.job_status)) return detail;
+    if (Date.now() - startedAt >= timeoutMs) throw new CliError(`等待任务 ${id} 超时，当前状态 ${detail.job.job_status}`, 1, detail);
+    await Bun.sleep(intervalMs);
+  }
+}
+
+function printDocumentJob(job: DocumentJob) {
+  process.stdout.write(`${job.job_status.padEnd(10)} ${job.current_stage.padEnd(16)} ${job.file_name} · ${job.kb_name} · job=${job.job_id}${job.queue_position ? ` · queue=${job.queue_position}` : ""}${job.stalled ? " · STALLED" : ""}\n`);
 }
 
 async function downloadDocument(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {

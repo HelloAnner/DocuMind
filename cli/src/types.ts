@@ -356,6 +356,47 @@ export interface AdminDocumentDetail {
   tables: JsonObject[];
 }
 
+export interface DocumentJob {
+  job_id: string;
+  doc_id: string;
+  upload_batch_id?: string;
+  kb_id: string;
+  kb_name: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by?: string;
+  parse_status: string;
+  job_status: "queued" | "processing" | "completed" | "warning" | "failed";
+  current_stage: string;
+  queue_position?: number;
+  stalled: boolean;
+  attempt_count: number;
+  max_attempts: number;
+  quality_score?: number;
+  page_count?: number;
+  block_count?: number;
+  table_count?: number;
+  chunk_count: number;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+}
+
+export interface DocumentJobsResponse {
+  items: DocumentJob[];
+  summary: { queued: number; processing: number; failed_24h: number; completed_24h: number; stalled: number };
+}
+
+export interface DocumentJobDetail {
+  job: DocumentJob;
+  events: Array<{ id: string; stage: string; status: string; message: string; metrics: JsonObject; error_code?: string; error_message?: string; created_at: string }>;
+  vector_job?: { id: string; status: string; attempt_count: number; max_attempts: number; error_message?: string; available_at: string; started_at?: string; completed_at?: string };
+}
+
 export interface UploadDocumentResponse {
   document_id: string;
   parse_job_id: string;

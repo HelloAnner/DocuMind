@@ -1,306 +1,97 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { CheckCircle2, FileText, Upload, X } from "lucide-react";
-import {
-  getAdminDocument,
-  uploadAdminDocumentWithProgress,
-  type AdminDocument,
-  type UploadDocumentResponse,
-} from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
+import { uploadAdminDocumentWithProgress } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { formatSize, statusLabel, statusTone } from "@/components/ui/document-drawer";
-import { IconButton } from "@/components/ui/icon-button";
+import { formatSize } from "@/components/ui/document-drawer";
 
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
+const MAX_FILES = 50;
+const UPLOAD_CONCURRENCY = 3;
 const SUPPORTED_EXTENSIONS = new Set(["docx", "pptx", "pdf", "txt", "md", "markdown"]);
-const ACTIVE_PARSE_STATUSES = new Set(["uploaded", "parsing", "embedding", "ocr_pending"]);
-const SETTLING_PARSE_STATUSES = new Set(["parsed", "cleaned", "chunked"]);
 
-type UploadPhase = "idle" | "ready" | "uploading" | "uploaded" | "error";
+type ItemStatus = "ready" | "uploading" | "queued" | "failed" | "cancelled";
+type UploadItem = { id: string; file: File; status: ItemStatus; percent: number; error?: string; documentId?: string; jobId?: string; controller?: AbortController };
 
-interface TransferProgress {
-  loaded: number;
-  total: number;
-  percent: number;
-}
-
-function fileExtension(fileName: string): string {
-  return fileName.split(".").pop()?.toLowerCase() ?? "";
-}
-
-function validateFile(file: File): string | undefined {
-  if (!SUPPORTED_EXTENSIONS.has(fileExtension(file.name))) {
-    return "仅支持 DOCX、PPTX、PDF、TXT 和 Markdown 文件";
-  }
+function extension(name: string) { return name.split(".").pop()?.toLowerCase() ?? ""; }
+function validation(file: File) {
+  if (!SUPPORTED_EXTENSIONS.has(extension(file.name))) return "不支持该文件格式";
+  if (!file.size) return "文件为空";
   if (file.size > MAX_UPLOAD_BYTES) return "单个文件不能超过 100MB";
-  if (file.size === 0) return "不能上传空文件";
-  return undefined;
 }
 
-export function AdminDocumentUploadModal({
-  kbId,
-  kbName,
-  onClose,
-  onUploaded,
-}: {
-  kbId: string;
-  kbName: string;
-  onClose: () => void;
-  onUploaded: () => Promise<void> | void;
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
-  const [file, setFile] = useState<File>();
-  const [phase, setPhase] = useState<UploadPhase>("idle");
+export function AdminDocumentUploadModal({ kbId, kbName, onClose, onUploaded }: { kbId: string; kbName: string; onClose: () => void; onUploaded: () => void | Promise<void> }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [items, setItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
-  const [message, setMessage] = useState("选择文件后开始上传");
-  const [progress, setProgress] = useState<TransferProgress>({ loaded: 0, total: 0, percent: 0 });
-  const [uploadResult, setUploadResult] = useState<UploadDocumentResponse>();
-  const [document, setDocument] = useState<AdminDocument>();
+  const [running, setRunning] = useState(false);
+  const batchIdRef = useRef(crypto.randomUUID());
 
-  useEffect(() => {
-    const docId = uploadResult?.document_id;
-    if (!docId) return;
-    let stopped = false;
-    let settlingChecks = 0;
-    let timer: number | undefined;
-
-    const poll = async () => {
-      try {
-        const detail = await getAdminDocument(docId);
-        if (stopped) return;
-        setDocument(detail.document);
-        const parseStatus = detail.document.parse_status;
-        if (ACTIVE_PARSE_STATUSES.has(parseStatus)) {
-          timer = window.setTimeout(poll, 1800);
-        } else if (SETTLING_PARSE_STATUSES.has(parseStatus) && settlingChecks < 2) {
-          settlingChecks += 1;
-          timer = window.setTimeout(poll, 1800);
-        }
-      } catch (error) {
-        if (!stopped) {
-          setMessage(error instanceof Error ? error.message : "解析状态获取失败");
-        }
-      }
-    };
-
-    poll().catch(console.error);
-    return () => {
-      stopped = true;
-      if (timer) window.clearTimeout(timer);
-    };
-  }, [uploadResult?.document_id]);
-
-  useEffect(() => {
-    return () => abortRef.current?.abort();
-  }, []);
-
-  function selectFile(nextFile: File | undefined) {
-    if (!nextFile || phase === "uploading") return;
-    const validationError = validateFile(nextFile);
-    setUploadResult(undefined);
-    setDocument(undefined);
-    setProgress({ loaded: 0, total: nextFile.size, percent: 0 });
-    setFile(nextFile);
-    if (validationError) {
-      setPhase("error");
-      setMessage(validationError);
-      return;
-    }
-    setPhase("ready");
-    setMessage("文件已就绪，可以开始上传");
+  function addFiles(files: FileList | File[]) {
+    const selected = Array.from(files);
+    setItems((current) => {
+      const available = Math.max(0, MAX_FILES - current.length);
+      const existing = new Set(current.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
+      return [...current, ...selected.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`)).slice(0, available).map((file) => {
+        const error = validation(file);
+        return { id: crypto.randomUUID(), file, status: error ? "failed" as const : "ready" as const, percent: 0, error };
+      })];
+    });
   }
 
-  function resetUpload() {
-    if (phase === "uploading") return;
-    setFile(undefined);
-    setPhase("idle");
-    setMessage("选择文件后开始上传");
-    setProgress({ loaded: 0, total: 0, percent: 0 });
-    setUploadResult(undefined);
-    setDocument(undefined);
-    if (fileInputRef.current) fileInputRef.current.value = "";
+  function patch(id: string, update: Partial<UploadItem>) {
+    setItems((current) => current.map((item) => item.id === id ? { ...item, ...update } : item));
   }
 
-  async function handleUpload() {
-    if (!file || phase === "uploading") return;
+  async function uploadOne(item: UploadItem) {
     const controller = new AbortController();
-    abortRef.current = controller;
-    setPhase("uploading");
-    setMessage("正在上传文件，请保持页面开启");
-    setProgress({ loaded: 0, total: file.size, percent: 0 });
+    patch(item.id, { status: "uploading", percent: 0, error: undefined, controller });
     try {
-      const result = await uploadAdminDocumentWithProgress(
-        kbId,
-        file,
-        (nextProgress) => {
-          setProgress(nextProgress);
-          if (nextProgress.percent === 100) setMessage("文件传输完成，服务器正在保存");
-        },
-        controller.signal
-      );
-      setProgress((current) => ({
-        loaded: current.total || file.size,
-        total: current.total || file.size,
-        percent: 100,
-      }));
-      setUploadResult(result);
-      setPhase("uploaded");
-      setMessage("文件上传完成，后台解析任务已创建");
+      const result = await uploadAdminDocumentWithProgress(kbId, item.file, (progress) => patch(item.id, { percent: progress.percent }), controller.signal, batchIdRef.current);
+      patch(item.id, { status: "queued", percent: 100, controller: undefined, documentId: result.document_id, jobId: result.parse_job_id });
     } catch (error) {
-      const aborted = error instanceof DOMException && error.name === "AbortError";
-      setPhase(aborted ? "ready" : "error");
-      setMessage(aborted ? "上传已取消，可以重新开始" : error instanceof Error ? error.message : "上传失败");
-    } finally {
-      abortRef.current = null;
+      const cancelled = error instanceof DOMException && error.name === "AbortError";
+      patch(item.id, { status: cancelled ? "cancelled" : "failed", controller: undefined, error: cancelled ? "已取消" : error instanceof Error ? error.message : "上传失败" });
     }
   }
 
-  const progressTone = phase === "error" ? "danger" : phase === "uploaded" ? "success" : "dark";
-  const status = document ? statusLabel(document.parse_status) : undefined;
+  async function startUpload() {
+    const queue = items.filter((item) => item.status === "ready" || item.status === "cancelled" || (item.status === "failed" && !validation(item.file)));
+    if (!queue.length) return;
+    setRunning(true);
+    let cursor = 0;
+    await Promise.all(Array.from({ length: Math.min(UPLOAD_CONCURRENCY, queue.length) }, async () => {
+      while (cursor < queue.length) {
+        const item = queue[cursor++];
+        await uploadOne(item);
+      }
+    }));
+    setRunning(false);
+    await onUploaded();
+  }
 
-  return (
-    <div className="dm-modal-overlay" onClick={onClose}>
-      <div className="dm-modal dm-upload-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="dm-modal-head">
-          <h2>上传文档</h2>
-          <IconButton onClick={onClose} aria-label="关闭">
-            <X size={18} />
-          </IconButton>
-        </div>
+  const counts = useMemo(() => items.reduce((value, item) => ({ ...value, [item.status]: value[item.status] + 1 }), { ready: 0, uploading: 0, queued: 0, failed: 0, cancelled: 0 } as Record<ItemStatus, number>), [items]);
+  const totalProgress = items.length ? Math.round(items.reduce((sum, item) => sum + item.percent, 0) / items.length) : 0;
+  const close = () => { items.forEach((item) => item.controller?.abort()); onClose(); };
 
-        <div className="dm-upload-intro">
-          <span>目标知识库</span>
-          <div>
-            <strong>{kbName}</strong>
-            <p>文档上传后会自动进入解析、切片和索引流程。</p>
-          </div>
-        </div>
-
-        <button
-          className={`dm-upload-drop-zone${dragging ? " is-dragging" : ""}`}
-          disabled={phase === "uploading"}
-          onClick={() => fileInputRef.current?.click()}
-          onDragEnter={(event) => {
-            event.preventDefault();
-            if (phase !== "uploading") setDragging(true);
-          }}
-          onDragLeave={(event) => {
-            event.preventDefault();
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setDragging(false);
-          }}
-          onDragOver={(event) => event.preventDefault()}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragging(false);
-            selectFile(event.dataTransfer.files?.[0]);
-          }}
-          type="button"
-        >
-          <span className="dm-upload-drop-icon">
-            <Upload size={24} />
-          </span>
-          <strong>{file ? "重新选择文件" : "选择文件或拖放到这里"}</strong>
-          <span>支持 DOCX / PPTX / PDF / TXT / Markdown，单个文件不超过 100MB</span>
-        </button>
-
-        <input
-          accept=".docx,.pptx,.pdf,.txt,.md,.markdown"
-          hidden
-          onChange={(event) => selectFile(event.target.files?.[0])}
-          ref={fileInputRef}
-          type="file"
-        />
-
-        <section className="dm-upload-file-card" aria-label="待上传文件">
-          <div className="dm-upload-file-main">
-            <span className="dm-upload-file-icon">
-              {phase === "uploaded" ? <CheckCircle2 size={20} /> : <FileText size={20} />}
-            </span>
-            <div>
-              <strong>{file?.name ?? "尚未选择文件"}</strong>
-              <span>{file ? `${fileExtension(file.name).toUpperCase()} · ${formatSize(file.size)}` : "选择文件后将在这里核对信息"}</span>
-            </div>
-          </div>
-          <div className="dm-upload-file-actions">
-            {file && phase !== "uploading" && phase !== "uploaded" ? (
-              <button aria-label="移除已选文件" className="dm-icon-button" onClick={resetUpload} type="button">
-                <X size={16} />
-              </button>
-            ) : null}
-            {phase === "uploading" ? (
-              <Button onClick={() => abortRef.current?.abort()} variant="secondary">
-                取消上传
-              </Button>
-            ) : phase === "uploaded" ? (
-              <Button onClick={resetUpload} variant="secondary">
-                继续上传
-              </Button>
-            ) : (
-              <Button disabled={!file || phase === "error"} onClick={() => handleUpload().catch(console.error)}>
-                开始上传
-              </Button>
-            )}
-          </div>
-        </section>
-
-        <section className="dm-upload-progress-panel" aria-label="文件上传进度">
-          <div className="dm-upload-progress-head">
-            <div>
-              <span>上传进度</span>
-              <strong>{message}</strong>
-            </div>
-            <strong>{progress.percent}%</strong>
-          </div>
-          <div
-            aria-label={`已上传 ${progress.percent}%`}
-            aria-valuemax={100}
-            aria-valuemin={0}
-            aria-valuenow={progress.percent}
-            className="dm-bar dm-upload-real-progress"
-            role="progressbar"
-          >
-            <span className={progressTone} style={{ width: `${progress.percent}%` }} />
-          </div>
-          <div className="dm-upload-progress-meta">
-            <span>
-              {progress.total > 0
-                ? `${formatSize(Math.min(progress.loaded, progress.total))} / ${formatSize(progress.total)}`
-                : "等待开始"}
-            </span>
-            <span>进度来自浏览器实际传输事件</span>
-          </div>
-          {uploadResult ? (
-            <div className="dm-upload-processing-status" role="status">
-              <div>
-                <span>解析状态</span>
-                <strong>{document ? `任务 ${document.latest_parse_job_id?.slice(0, 8) ?? uploadResult.parse_job_id.slice(0, 8)}` : `任务 ${uploadResult.parse_job_id.slice(0, 8)}`}</strong>
-              </div>
-              <Badge tone={document ? statusTone(document.parse_status) : "warning"}>{status ?? "等待解析"}</Badge>
-            </div>
-          ) : null}
-        </section>
-
-        <div className="dm-modal-actions">
-          {phase === "uploaded" ? (
-            <Button
-              onClick={() => {
-                onUploaded();
-                onClose();
-              }}
-              variant="primary"
-            >
-              完成并返回列表
-            </Button>
-          ) : (
-            <Button onClick={onClose} variant="secondary">
-              关闭
-            </Button>
-          )}
-        </div>
-      </div>
+  return <div className="dm-modal-overlay" onClick={close}>
+    <div className="dm-modal dm-upload-modal dm-batch-upload-modal" onClick={(event) => event.stopPropagation()}>
+      <div className="dm-modal-head"><div><h2>批量上传文档</h2><p>上传到“{kbName}” · 单次最多 {MAX_FILES} 个文件</p></div><button className="dm-icon-button" aria-label="关闭" onClick={close} type="button"><X size={18} /></button></div>
+      <button className={`dm-upload-drop-zone${dragging ? " is-dragging" : ""}`} disabled={running} onClick={() => inputRef.current?.click()} onDragEnter={(event) => { event.preventDefault(); setDragging(true); }} onDragLeave={(event) => { event.preventDefault(); setDragging(false); }} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); setDragging(false); addFiles(event.dataTransfer.files); }} type="button">
+        <span className="dm-upload-drop-icon"><Upload size={24} /></span><strong>选择多个文件或拖放到这里</strong><span>DOCX / PPTX / PDF / TXT / Markdown，单个文件不超过 100MB</span>
+      </button>
+      <input accept=".docx,.pptx,.pdf,.txt,.md,.markdown" hidden multiple onChange={(event) => event.target.files && addFiles(event.target.files)} ref={inputRef} type="file" />
+      {items.length ? <>
+        <div className="dm-batch-upload-summary"><div><strong>共 {items.length} 个文件</strong><span>已入队 {counts.queued} · 上传中 {counts.uploading} · 等待 {counts.ready + counts.cancelled} · 失败 {counts.failed}</span></div><strong>{totalProgress}%</strong></div>
+        <div className="dm-bar"><span className={counts.failed ? "danger" : "dark"} style={{ width: `${totalProgress}%` }} /></div>
+        <div className="dm-batch-upload-list">{items.map((item) => <article key={item.id}>
+          <span className="dm-upload-file-icon">{item.status === "queued" ? <CheckCircle2 size={18} /> : <FileText size={18} />}</span>
+          <div><strong>{item.file.name}</strong><small>{formatSize(item.file.size)} · {item.error ?? ({ ready: "等待上传", uploading: `上传中 ${item.percent}%`, queued: `已入队 · ${item.jobId?.slice(0, 8)}`, failed: "上传失败", cancelled: "已取消" }[item.status])}</small>{item.status === "uploading" ? <div className="dm-bar"><span className="dark" style={{ width: `${item.percent}%` }} /></div> : null}</div>
+          {item.status === "uploading" ? <button className="dm-row-action" onClick={() => item.controller?.abort()} type="button">取消</button> : item.status !== "queued" && !running ? <button className="dm-row-action danger" onClick={() => setItems((current) => current.filter((entry) => entry.id !== item.id))} type="button">移除</button> : null}
+        </article>)}</div>
+      </> : null}
+      <div className="dm-modal-actions"><Button variant="secondary" onClick={close}>{counts.queued ? "关闭" : "取消"}</Button><Button disabled={running || !items.some((item) => item.status !== "queued" && !validation(item.file))} onClick={() => startUpload().catch(console.error)}>{running ? "正在上传" : counts.queued ? "上传剩余文件" : "开始上传"}</Button></div>
     </div>
-  );
+  </div>;
 }

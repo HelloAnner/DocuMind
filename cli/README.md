@@ -140,7 +140,10 @@ documind documents chunks <document-id>
 documind documents tables <document-id> --json
 
 # 上传、下载、移动、替换和删除
-documind documents upload ./contract.pdf --kb <kb-id>
+documind documents upload ./contract.pdf ./handbook.docx ./policy.md --kb <kb-id>
+documind documents jobs --status processing --json
+documind documents job <parse-job-id> --json
+documind documents job-wait <parse-job-id> --timeout 300 --json
 documind documents download <document-id> --output ./contract.pdf
 documind documents move <document-id> --kb <target-kb-id>
 documind documents replace <document-id> ./contract-v2.pdf

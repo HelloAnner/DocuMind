@@ -847,6 +847,81 @@ export async function downloadAdminDocumentOriginal(docId: string, fileName: str
   URL.revokeObjectURL(url);
 }
 
+export interface DocumentJob {
+  job_id: string;
+  doc_id: string;
+  upload_batch_id?: string;
+  kb_id: string;
+  kb_name: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by?: string;
+  parse_status: string;
+  job_status: "queued" | "processing" | "completed" | "warning" | "failed";
+  current_stage: string;
+  queue_position?: number;
+  stalled: boolean;
+  attempt_count: number;
+  max_attempts: number;
+  quality_score?: number;
+  page_count?: number;
+  block_count?: number;
+  table_count?: number;
+  chunk_count: number;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+}
+
+export interface DocumentJobEvent {
+  id: string;
+  stage: string;
+  status: "queued" | "running" | "completed" | "failed" | "warning";
+  message: string;
+  metrics: Record<string, unknown>;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+}
+
+export interface DocumentJobsResponse {
+  items: DocumentJob[];
+  summary: { queued: number; processing: number; failed_24h: number; completed_24h: number; stalled: number };
+}
+
+export interface DocumentJobDetail {
+  job: DocumentJob;
+  events: DocumentJobEvent[];
+  vector_job?: {
+    id: string;
+    status: string;
+    attempt_count: number;
+    max_attempts: number;
+    error_message?: string;
+    available_at: string;
+    started_at?: string;
+    completed_at?: string;
+  };
+}
+
+export async function listDocumentJobs(params?: { status?: string; kb_id?: string; batch_id?: string; q?: string; limit?: number }): Promise<DocumentJobsResponse> {
+  const query = new URLSearchParams();
+  if (params?.status) query.set("status", params.status);
+  if (params?.kb_id) query.set("kb_id", params.kb_id);
+  if (params?.batch_id) query.set("batch_id", params.batch_id);
+  if (params?.q) query.set("q", params.q);
+  if (params?.limit) query.set("limit", String(params.limit));
+  return fetchJson(`/api/admin/document-jobs${query.size ? `?${query}` : ""}`);
+}
+
+export async function getDocumentJob(jobId: string): Promise<DocumentJobDetail> {
+  return fetchJson(`/api/admin/document-jobs/${encodeURIComponent(jobId)}`);
+}
+
 export interface DocumentUploadProgress {
   loaded: number;
   total: number;
@@ -857,10 +932,12 @@ export function uploadAdminDocumentWithProgress(
   kbId: string,
   file: File,
   onProgress: (progress: DocumentUploadProgress) => void,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  uploadBatchId?: string
 ): Promise<UploadDocumentResponse> {
   return new Promise((resolve, reject) => {
     const form = new FormData();
+    if (uploadBatchId) form.set("upload_batch_id", uploadBatchId);
     form.set("file", file);
     const request = new XMLHttpRequest();
     const abortRequest = () => request.abort();

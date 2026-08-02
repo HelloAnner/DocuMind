@@ -12,6 +12,8 @@ import type {
   ConversationSummary,
   DeleteDocumentResponse,
   DeleteKnowledgeBaseResponse,
+  DocumentJobDetail,
+  DocumentJobsResponse,
   DownloadedDocument,
   ExcludeFromSearchResponse,
   Identity,
@@ -201,13 +203,29 @@ export class ApiClient {
     kbId: string,
     file: Blob,
     fileName: string,
+    uploadBatchId?: string,
   ): Promise<UploadDocumentResponse> {
     const form = new FormData();
+    if (uploadBatchId) form.set("upload_batch_id", uploadBatchId);
     form.set("file", file, fileName);
     return this.requestJson(
       `/api/knowledge-bases/${encodeURIComponent(kbId)}/documents`,
       { method: "POST", body: form },
     );
+  }
+
+  async listDocumentJobs(options: { status?: string; kbId?: string; batchId?: string; query?: string; limit?: number } = {}): Promise<DocumentJobsResponse> {
+    const query = new URLSearchParams();
+    if (options.status) query.set("status", options.status);
+    if (options.kbId) query.set("kb_id", options.kbId);
+    if (options.batchId) query.set("batch_id", options.batchId);
+    if (options.query) query.set("q", options.query);
+    if (options.limit) query.set("limit", String(options.limit));
+    return this.requestJson(`/api/admin/document-jobs${query.size ? `?${query}` : ""}`);
+  }
+
+  async getDocumentJob(id: string): Promise<DocumentJobDetail> {
+    return this.requestJson(`/api/admin/document-jobs/${encodeURIComponent(id)}`);
   }
 
   async retryDocument(id: string): Promise<AdminDocument> {

@@ -106,7 +106,11 @@ const DOCUMENTS_HELP = `用法: documind documents <subcommand> [options]\n\n` +
   `  show <doc-id>                文档、解析任务和各内容区段摘要\n` +
   `  preview|blocks|cleaned-blocks|chunks|tables <doc-id>\n\n` +
   `文件与知识库管理:\n` +
-  `  upload <file> --kb ID        上传文件到当前租户的指定知识库\n` +
+  `  upload <file...> --kb ID     批量上传文件（最多 50 个，并发 3）\n` +
+  `  upload-batch <file...> --kb ID  upload 的显式批量别名\n` +
+  `  jobs [--status STATUS]       查看当前租户文档处理队列与汇总\n` +
+  `  job <job-id>                 查看阶段事件、错误与向量任务\n` +
+  `  job-wait <job-id>            等待任务进入完成、警告或失败状态\n` +
   `  download <doc-id> [--output PATH] [--force]\n` +
   `  move <doc-id> --kb ID        移动到目标知识库\n` +
   `  replace <doc-id> <file>      替换原件并重新解析\n` +

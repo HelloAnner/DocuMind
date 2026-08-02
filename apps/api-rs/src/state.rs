@@ -140,14 +140,21 @@ pub async fn build_state(config: AppConfig) -> Result<AppState> {
         );
     }
 
-    Ok(AppState {
+    let state = AppState {
         config,
         repository,
         agent_kernel,
         db_pool,
         redis_client,
         storage,
-    })
+    };
+    let resumed = crate::api::documents::resume_pending_document_jobs(&state)
+        .await
+        .map_err(|error| anyhow::anyhow!("failed to resume document jobs: {error:?}"))?;
+    if resumed > 0 {
+        warn!(resumed, "resumed pending document jobs");
+    }
+    Ok(state)
 }
 
 async fn recover_interrupted_agent_runs(pool: &PgPool) -> Result<()> {
