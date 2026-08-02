@@ -16,7 +16,7 @@ async fn list_knowledge_bases(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
 ) -> Result<Json<Vec<KnowledgeBaseSummary>>, crate::error::AppError> {
-    if actor.allowed_kb_ids.is_empty() {
+    if !actor.has_permission("kb.read") || actor.allowed_kb_ids.is_empty() {
         return Ok(Json(vec![]));
     }
 

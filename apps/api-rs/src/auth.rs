@@ -258,7 +258,11 @@ async fn authenticate_from_db(
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
-    let allowed_kb_ids = allowed_kb_ids(pool, tenant_id, user_id, &roles).await?;
+    let allowed_kb_ids = if is_super_admin {
+        Vec::new()
+    } else {
+        allowed_kb_ids(pool, tenant_id, user_id, &roles).await?
+    };
     let permissions = effective_permissions_for_membership(&roles, &attributes);
     let email: String = user.get("email");
     let name: Option<String> = user.try_get("name").ok();
@@ -411,7 +415,11 @@ pub(crate) async fn resolve_actor_from_db(
         return Err(AppError::unauthorized());
     }
 
-    let allowed_kb_ids = allowed_kb_ids(pool, tenant_id, user_id, &roles).await?;
+    let allowed_kb_ids = if is_super_admin {
+        Vec::new()
+    } else {
+        allowed_kb_ids(pool, tenant_id, user_id, &roles).await?
+    };
     let permissions = effective_permissions_for_membership(&roles, &attributes);
     let email = user.1;
     let name = user.2;
