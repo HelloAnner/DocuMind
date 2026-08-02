@@ -13,7 +13,6 @@ import {
 import { copyToClipboard } from "@/lib/clipboard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { IconButton } from "@/components/ui/icon-button";
 import { Panel } from "@/components/ui/panel";
 import { SearchInput } from "@/components/ui/search-input";
 import { Segmented } from "@/components/ui/segmented";
@@ -267,13 +266,15 @@ export function SystemTenants() {
               </span>
               <span>{planLabel[tenant.plan]}</span>
               <div className="dm-row-actions" style={{ justifyContent: "flex-start" }}>
-                <IconButton
+                <button
                   aria-label="复制成员登录链接"
                   onClick={() => copyAccessUrl(tenant.slug)}
-                  title={`复制给 ${tenant.name} 成员使用的登录链接：${tenantAccessUrl(tenant.slug)}`}
+                  title={tenantAccessUrl(tenant.slug)}
+                  type="button"
                 >
                   {copiedSlug === tenant.slug ? <Check size={14} /> : <Link2 size={14} />}
-                </IconButton>
+                  {copiedSlug === tenant.slug ? "已复制" : "复制入口"}
+                </button>
               </div>
               <div className="dm-row-actions">
                 {tenant.status === "pending" ? (
