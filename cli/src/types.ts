@@ -19,6 +19,10 @@ export interface ChatConfig {
   stream: boolean;
 }
 
+export interface ExternalConfig {
+  token_env: string;
+}
+
 export interface DiagnosticsConfig {
   ssh_host: string;
   elasticsearch_url: string;
@@ -29,6 +33,7 @@ export interface CliConfig {
   version: number;
   server: ServerConfig;
   auth: AuthConfig;
+  external: ExternalConfig;
   chat: ChatConfig;
   diagnostics: DiagnosticsConfig;
 }
@@ -66,6 +71,41 @@ export interface SessionState extends Partial<Identity> {
   access_token?: string;
   last_conversation_id?: string;
   saved_at?: string;
+}
+
+export interface ApiTokenSummary {
+  id: string;
+  token_prefix: string;
+  status: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  created_at: string;
+}
+
+export interface ApiClientSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  scopes: string[];
+  status: string;
+  rate_limit_per_minute: number;
+  kb_ids: string[];
+  tokens: ApiTokenSummary[];
+  created_at: string;
+}
+
+export interface CreatedApiClient {
+  client: ApiClientSummary;
+  token: string;
+}
+
+export interface ExternalIdentity {
+  client_id: string;
+  client_name: string;
+  tenant_id: string;
+  scopes: string[];
+  allowed_kb_ids: string[];
+  token_expires_at: string;
 }
 
 export interface KnowledgeBase {

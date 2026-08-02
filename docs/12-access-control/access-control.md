@@ -51,3 +51,4 @@
 
 - [用户角色认证与页面设计](./user-role-authentication.md)
 - [后台导航统一契约](../frontend/admin-navigation.md)
+- [外部 API 接入](./external-api.md)

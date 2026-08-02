@@ -362,6 +362,64 @@ export async function revokeKnowledgeBasePermission(id: string): Promise<{ id: s
   return fetchJson(`/api/admin/permissions/${id}`, { method: "DELETE" });
 }
 
+export interface ApiTokenSummary {
+  id: string;
+  token_prefix: string;
+  status: "active" | "revoked";
+  expires_at: string;
+  last_used_at?: string;
+  created_at: string;
+}
+
+export interface ApiClientSummary {
+  id: string;
+  name: string;
+  description?: string;
+  scopes: string[];
+  status: "active" | "disabled";
+  rate_limit_per_minute: number;
+  kb_ids: string[];
+  tokens: ApiTokenSummary[];
+  created_at: string;
+}
+
+export interface CreatedApiClient {
+  client: ApiClientSummary;
+  token: string;
+}
+
+export async function listApiClients(): Promise<ApiClientSummary[]> {
+  return fetchJson("/api/admin/api-clients");
+}
+
+export async function createApiClient(input: {
+  name: string;
+  description?: string;
+  kb_ids: string[];
+  expires_in_days: number;
+  rate_limit_per_minute: number;
+}): Promise<CreatedApiClient> {
+  return fetchJson("/api/admin/api-clients", { method: "POST", body: JSON.stringify(input) });
+}
+
+export async function createApiClientToken(clientId: string, expiresInDays = 90): Promise<{ token: ApiTokenSummary; secret: string }> {
+  return fetchJson(`/api/admin/api-clients/${clientId}/tokens`, {
+    method: "POST",
+    body: JSON.stringify({ expires_in_days: expiresInDays }),
+  });
+}
+
+export async function revokeApiClientToken(clientId: string, tokenId: string): Promise<void> {
+  await fetchJson(`/api/admin/api-clients/${clientId}/tokens/${tokenId}/revoke`, { method: "POST" });
+}
+
+export async function updateApiClientStatus(clientId: string, status: "active" | "disabled"): Promise<ApiClientSummary> {
+  return fetchJson(`/api/admin/api-clients/${clientId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status }),
+  });
+}
+
 export interface AdminRuntimeConfig {
   read_only: boolean;
   source: string;

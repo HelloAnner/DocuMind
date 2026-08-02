@@ -4199,7 +4199,8 @@ fn app_error_details(err: &AppError) -> (String, String) {
         | AppError::InvalidState { code, message }
         | AppError::Timeout { code, message }
         | AppError::BadRequest { code, message }
-        | AppError::Unauthorized { code, message } => (code.clone(), message.clone()),
+        | AppError::Unauthorized { code, message }
+        | AppError::RateLimited { code, message } => (code.clone(), message.clone()),
         AppError::Internal(err) => ("PARSE_INTERNAL_ERROR".to_string(), err.to_string()),
     }
 }

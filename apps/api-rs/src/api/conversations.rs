@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use crate::agent::{AgentKernel, AgentProgress};
 use crate::api::runtime_events::{tool_step, RuntimeEventFactory, SseProtocol};
-use crate::auth::ActorExtractor;
+use crate::auth::{require_permission, ActorExtractor};
 use crate::conversation_title::spawn_title_update;
 use crate::error::AppError;
 use crate::models::agent::{
@@ -94,11 +94,12 @@ pub fn router() -> axum::Router<AppState> {
         )
 }
 
-async fn create_conversation(
+pub(crate) async fn create_conversation(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Json(req): Json<CreateConversationRequest>,
 ) -> Result<impl IntoResponse, AppError> {
+    require_permission(&actor, "chat.ask")?;
     let effective_kb_ids = intersect_kb_ids(&req.kb_ids, &actor.allowed_kb_ids);
     if !req.kb_ids.is_empty() && effective_kb_ids.is_empty() {
         return Err(AppError::kb_scope_denied());
@@ -130,11 +131,12 @@ async fn create_conversation(
     })))
 }
 
-async fn list_conversations(
+pub(crate) async fn list_conversations(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Query(query): Query<ListConversationsQuery>,
 ) -> Result<Json<ConversationListResponse>, AppError> {
+    require_api_scope_if_needed(&actor, "conversations:read")?;
     let resp = state
         .repository
         .list_sessions(actor.tenant_id, actor.user_id, query.limit, query.cursor)
@@ -142,16 +144,13 @@ async fn list_conversations(
     Ok(Json(resp))
 }
 
-async fn get_messages(
+pub(crate) async fn get_messages(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<Json<MessageListResponse>, AppError> {
-    let session = state
-        .repository
-        .get_session(actor.tenant_id, conversation_id)
-        .await?
-        .ok_or_else(AppError::conversation_not_found)?;
+    require_api_scope_if_needed(&actor, "conversations:read")?;
+    let session = owned_session(&state, &actor, conversation_id).await?;
     let messages = state
         .repository
         .get_messages(actor.tenant_id, session.id)
@@ -391,13 +390,14 @@ impl SseEvent {
     }
 }
 
-async fn send_message(
+pub(crate) async fn send_message(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path(conversation_id): Path<Uuid>,
     headers: HeaderMap,
     Json(req): Json<SendMessageRequest>,
 ) -> Result<Sse<UnboundedReceiverStream<Result<Event, Infallible>>>, AppError> {
+    require_permission(&actor, "chat.ask")?;
     let content = req.content.trim().to_string();
     if content.is_empty() {
         return Err(AppError::bad_request("EMPTY_MESSAGE", "消息内容不能为空"));
@@ -1464,11 +1464,7 @@ async fn resolve_conversation_scope(
     conversation_id: Uuid,
     requested_kb_ids: &[Uuid],
 ) -> Result<(ConversationSession, Vec<Uuid>), AppError> {
-    let session = state
-        .repository
-        .get_session(actor.tenant_id, conversation_id)
-        .await?
-        .ok_or_else(AppError::conversation_not_found)?;
+    let session = owned_session(state, actor, conversation_id).await?;
 
     let base: Vec<Uuid> = if requested_kb_ids.is_empty() {
         session.kb_ids.clone()
@@ -1709,16 +1705,13 @@ async fn validate_feedback_target(
     Ok(())
 }
 
-async fn get_conversation(
+pub(crate) async fn get_conversation(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path(conversation_id): Path<Uuid>,
 ) -> Result<impl IntoResponse, AppError> {
-    let session = state
-        .repository
-        .get_session(actor.tenant_id, conversation_id)
-        .await?
-        .ok_or_else(AppError::conversation_not_found)?;
+    require_api_scope_if_needed(&actor, "conversations:read")?;
+    let session = owned_session(&state, &actor, conversation_id).await?;
     Ok(Json(json!({
         "conversation_id": session.id,
         "title": session.title,
@@ -1785,6 +1778,27 @@ async fn delete_conversation(
     ))
 }
 
+fn require_api_scope_if_needed(actor: &ActorScope, scope: &str) -> Result<(), AppError> {
+    if actor.api_client_id.is_some() {
+        crate::api::external_api::require_scope(actor, scope)
+    } else {
+        Ok(())
+    }
+}
+
+async fn owned_session(
+    state: &AppState,
+    actor: &ActorScope,
+    conversation_id: Uuid,
+) -> Result<ConversationSession, AppError> {
+    state
+        .repository
+        .get_session(actor.tenant_id, conversation_id)
+        .await?
+        .filter(|session| session.user_id == actor.user_id)
+        .ok_or_else(AppError::conversation_not_found)
+}
+
 fn send_conversation_title_updated(
     tx: &tokio::sync::mpsc::UnboundedSender<Result<Event, Infallible>>,
     protocol: SseProtocol,
@@ -1812,16 +1826,13 @@ fn send_conversation_title_updated(
     }
 }
 
-async fn get_message_traces(
+pub(crate) async fn get_message_traces(
     State(state): State<AppState>,
     ActorExtractor(actor): ActorExtractor,
     Path((conversation_id, message_id)): Path<(Uuid, Uuid)>,
 ) -> Result<impl IntoResponse, AppError> {
-    let session = state
-        .repository
-        .get_session(actor.tenant_id, conversation_id)
-        .await?
-        .ok_or_else(AppError::conversation_not_found)?;
+    require_api_scope_if_needed(&actor, "conversations:read")?;
+    let session = owned_session(&state, &actor, conversation_id).await?;
     let message = state
         .repository
         .get_message(actor.tenant_id, message_id)

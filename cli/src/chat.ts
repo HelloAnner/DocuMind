@@ -41,7 +41,7 @@ export class ChatService {
     const started = performance.now();
     const startedAt = new Date();
     const response = await this.api.sse(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      this.api.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
       {
         content: request.content,
         kb_ids: kbIds,

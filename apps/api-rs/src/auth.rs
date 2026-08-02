@@ -51,6 +51,11 @@ impl FromRequestParts<AppState> for ActorExtractor {
         if let Some(actor) = actor_from_bearer_token(state, headers).await? {
             return Ok(ActorExtractor(actor));
         }
+        if let Some(actor) =
+            crate::api::external_api::actor_from_api_headers(state, headers).await?
+        {
+            return Ok(ActorExtractor(actor));
+        }
 
         // 2. In a database-backed deployment, API requests must use the local
         // JWT/session identity. The header fallback is kept only for no-DB
@@ -265,6 +270,10 @@ async fn authenticate_from_db(
         permissions,
         allowed_kb_ids,
         is_super_admin,
+        api_client_id: None,
+        api_token_id: None,
+        api_scopes: Vec::new(),
+        api_token_expires_at: None,
     })
 }
 
@@ -330,7 +339,7 @@ pub async fn actor_from_claims(
     }
 }
 
-async fn resolve_actor_from_db(
+pub(crate) async fn resolve_actor_from_db(
     pool: &PgPool,
     tenant_id: Uuid,
     user_id: Uuid,
@@ -397,6 +406,10 @@ async fn resolve_actor_from_db(
         permissions,
         allowed_kb_ids,
         is_super_admin,
+        api_client_id: None,
+        api_token_id: None,
+        api_scopes: Vec::new(),
+        api_token_expires_at: None,
     })
 }
 
@@ -520,6 +533,10 @@ fn build_actor_from_fallback(
             default_kb_ids
         },
         is_super_admin: include_super_admin,
+        api_client_id: None,
+        api_token_id: None,
+        api_scopes: Vec::new(),
+        api_token_expires_at: None,
     }
 }
 
@@ -687,6 +704,9 @@ pub fn derive_permissions(roles: &[String]) -> Vec<String> {
                         "audit.read",
                         "chat.ask",
                         "answer.feedback",
+                        "api_client.read",
+                        "api_client.write",
+                        "api_client.revoke",
                     ]
                     .map(String::from),
                 );

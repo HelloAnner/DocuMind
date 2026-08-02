@@ -12,6 +12,7 @@ import {
   FileClock,
   FolderOpen,
   LayoutDashboard,
+  KeyRound,
   ListChecks,
   MessageSquare,
   Scissors,
@@ -77,6 +78,7 @@ const tenantSections: NavSection[] = [
     items: [
       { label: "成员与邀请", href: "/admin/members", icon: Users },
       { label: "访问权限", href: "/admin/permissions", icon: Shield },
+      { label: "API 接入", href: "/admin/api-clients", icon: KeyRound },
     ],
   },
   {

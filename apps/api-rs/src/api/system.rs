@@ -60,7 +60,7 @@ async fn overview(
         let row = sqlx::query(
             "SELECT
                 (SELECT COUNT(*) FROM tenant) AS tenant_count,
-                (SELECT COUNT(*) FROM app_user) AS user_count,
+                (SELECT COUNT(*) FROM app_user WHERE auth_provider <> 'api') AS user_count,
                 (SELECT COUNT(*) FROM knowledge_base) AS kb_count,
                 (SELECT COUNT(*) FROM documents) AS doc_count,
                 (SELECT COUNT(*) FROM documents WHERE parse_status = 'indexed') AS indexed_doc_count,
@@ -244,7 +244,7 @@ async fn list_users(
 
     if let Some(pool) = &state.db_pool {
         let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, String)>(
-            "SELECT id, email, name, status FROM app_user ORDER BY created_at DESC",
+            "SELECT id, email, name, status FROM app_user WHERE auth_provider <> 'api' ORDER BY created_at DESC",
         )
         .fetch_all(pool)
         .await?;

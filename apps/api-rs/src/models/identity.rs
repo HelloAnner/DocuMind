@@ -12,6 +12,10 @@ pub struct CurrentActor {
     pub permissions: Vec<String>,
     pub allowed_kb_ids: Vec<Uuid>,
     pub is_super_admin: bool,
+    pub api_client_id: Option<Uuid>,
+    pub api_token_id: Option<Uuid>,
+    pub api_scopes: Vec<String>,
+    pub api_token_expires_at: Option<DateTime<Utc>>,
 }
 
 impl CurrentActor {

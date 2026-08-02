@@ -17,6 +17,7 @@ import {
   redactedConfig,
 } from "./config.ts";
 import { CliError } from "./errors.ts";
+import { verifyExternalApi } from "./external_verify.ts";
 import { printHelp } from "./help.ts";
 import {
   LiveChatRenderer,
@@ -57,6 +58,8 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "auth": return authCommand(args, api, json);
     case "health": return healthCommand(api, json);
     case "doctor": return doctorCommand(api, json);
+    case "external": return externalCommand(args, api, json);
+    case "api-clients": return apiClientsCommand(args, api, json);
     case "kb": return knowledgeBaseCommand(args, api, json);
     case "chat": return chatCommand(args, api, json);
     case "run": return runCommand(args, api, json);
@@ -158,6 +161,102 @@ async function doctorCommand(api: ApiClient, json: boolean): Promise<number> {
     }
   }
   return ok ? 0 : 1;
+}
+
+async function externalCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "doctor";
+  if (subcommand === "verify") {
+    const kbId = stringOption(args, "kb");
+    const deniedKbId = stringOption(args, "denied-kb");
+    const otherConfigPath = stringOption(args, "other-config");
+    const report = await verifyExternalApi(api, {
+      ...(kbId ? { kbId } : {}),
+      ...(deniedKbId ? { deniedKbId } : {}),
+      ...(otherConfigPath ? { otherConfigPath } : {}),
+      question: stringOption(args, "question") ?? "这个知识库主要包含什么内容？请给出引用。",
+    });
+    if (json) printJson(report);
+    else {
+      process.stdout.write(`DocuMind external verify: ${report.ok === true ? "PASS" : "FAIL"}\n`);
+      printJson(report);
+    }
+    return report.ok === true ? 0 : 1;
+  }
+  api.enableExternalMode();
+  if (subcommand === "whoami") {
+    const identity = await api.externalMe();
+    if (json) printJson(identity);
+    else process.stdout.write(`${identity.client_name} · tenant ${identity.tenant_id} · ${identity.scopes.join(", ")}\n`);
+    return 0;
+  }
+  if (subcommand === "doctor") {
+    const checks: Array<{ name: string; ok: boolean; detail?: unknown; error?: string }> = [];
+    await doctorCheck(checks, "external.identity", () => api.externalMe());
+    await doctorCheck(checks, "external.knowledge_bases", () => api.listKnowledgeBases());
+    const ok = checks.every((check) => check.ok);
+    if (json) printJson({ ok, server: api.baseUrl, checks });
+    else {
+      process.stdout.write(`DocuMind external doctor: ${ok ? "PASS" : "FAIL"}\n`);
+      for (const check of checks) process.stdout.write(`${check.ok ? "✓" : "✗"} ${check.name}${check.error ? ` — ${check.error}` : ""}\n`);
+    }
+    return ok ? 0 : 1;
+  }
+  if (subcommand === "chat") {
+    return chatCommand({ ...args, positionals: ["chat", ...args.positionals.slice(2)] }, api, json);
+  }
+  throw new CliError(`未知 external 子命令: ${subcommand}`, 2);
+}
+
+async function apiClientsCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "list";
+  if (subcommand === "list") {
+    const clients = await api.listApiClients();
+    if (json) printJson(clients);
+    else printTable(["ID", "名称", "状态", "知识库", "Token"], clients.map((client) => [client.id, client.name, client.status, String(client.kb_ids.length), String(client.tokens.length)]));
+    return 0;
+  }
+  if (subcommand === "create") {
+    const name = stringOption(args, "name") ?? args.positionals.slice(2).join(" ").trim();
+    const kbIds = listOption(args, "kb");
+    if (!name) throw new CliError("api-clients create 需要 --name", 2);
+    if (!kbIds.length) throw new CliError("api-clients create 至少需要一个 --kb", 2);
+    const description = stringOption(args, "description");
+    const scopes = listOption(args, "scope");
+    const created = await api.createApiClient({
+      name,
+      kb_ids: kbIds,
+      ...(description ? { description } : {}),
+      ...(scopes.length ? { scopes } : {}),
+      expires_in_days: numberOption(args, "expires-in-days", 90, { min: 1, max: 365 }),
+      rate_limit_per_minute: numberOption(args, "rate-limit", 60, { min: 1, max: 10_000 }),
+    });
+    if (json) printJson(created);
+    else process.stdout.write(`已创建 ${created.client.name}\nToken 仅显示一次：${created.token}\n`);
+    return 0;
+  }
+  const clientId = args.positionals[2];
+  if (!clientId) throw new CliError(`api-clients ${subcommand} 需要 client-id`, 2);
+  if (subcommand === "token") {
+    const created = await api.createApiToken(
+      clientId,
+      numberOption(args, "expires-in-days", 90, { min: 1, max: 365 }),
+    );
+    if (json) printJson(created); else process.stdout.write(`Token 仅显示一次：${created.secret}\n`);
+    return 0;
+  }
+  if (subcommand === "revoke") {
+    const tokenId = args.positionals[3];
+    if (!tokenId) throw new CliError("api-clients revoke 需要 client-id 和 token-id", 2);
+    const result = await api.revokeApiToken(clientId, tokenId);
+    if (json) printJson(result); else process.stdout.write(`已吊销 Token ${tokenId}\n`);
+    return 0;
+  }
+  if (subcommand === "disable" || subcommand === "enable") {
+    const result = await api.updateApiClientStatus(clientId, subcommand === "enable" ? "active" : "disabled");
+    if (json) printJson(result); else process.stdout.write(`${result.name}: ${result.status}\n`);
+    return 0;
+  }
+  throw new CliError(`未知 api-clients 子命令: ${subcommand}`, 2);
 }
 
 async function doctorCheck(

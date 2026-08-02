@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS api_token;
+DROP TABLE IF EXISTS api_client;

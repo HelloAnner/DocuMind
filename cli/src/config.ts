@@ -17,6 +17,9 @@ export const DEFAULT_CONFIG: CliConfig = {
     password_env: "DOCUMIND_PASSWORD",
     tenant: "acme",
   },
+  external: {
+    token_env: "DOCUMIND_API_TOKEN",
+  },
   chat: {
     kb_ids: [],
     trace: "full",
@@ -53,6 +56,7 @@ export function parseConfig(text: string): CliConfig {
   const value = parsed as Record<string, unknown>;
   const server = objectValue(value.server, "server");
   const auth = objectValue(value.auth, "auth");
+  const external = optionalObjectValue(value.external);
   const chat = optionalObjectValue(value.chat);
   const diagnostics = optionalObjectValue(value.diagnostics);
   const trace = stringValue(chat.trace, DEFAULT_CONFIG.chat.trace);
@@ -76,6 +80,9 @@ export function parseConfig(text: string): CliConfig {
       password: stringValue(auth.password, ""),
       password_env: stringValue(auth.password_env, "DOCUMIND_PASSWORD"),
       tenant: stringValue(auth.tenant, ""),
+    },
+    external: {
+      token_env: stringValue(external.token_env, "DOCUMIND_API_TOKEN"),
     },
     chat: {
       kb_ids: stringArrayValue(chat.kb_ids),
@@ -147,6 +154,8 @@ export function serializeConfig(config: CliConfig): string {
     `password = ${tomlString(config.auth.password)}\n` +
     `password_env = ${tomlString(config.auth.password_env)}\n` +
     `tenant = ${tomlString(config.auth.tenant)}\n\n` +
+    `[external]\n` +
+    `token_env = ${tomlString(config.external.token_env)}\n\n` +
     `[chat]\n` +
     `kb_ids = [${config.chat.kb_ids.map(tomlString).join(", ")}]\n` +
     `trace = ${tomlString(config.chat.trace)}\n` +
@@ -188,6 +197,13 @@ export function configuredPassword(config: CliConfig): string {
     );
   }
   return password;
+}
+
+export function configuredApiToken(config: CliConfig): string {
+  const envName = config.external.token_env.trim();
+  const token = envName ? process.env[envName] : undefined;
+  if (!token) throw new CliError(`缺少 API Token：设置环境变量 ${envName || "DOCUMIND_API_TOKEN"}`, 2);
+  return token;
 }
 
 export function redactedConfig(config: CliConfig): Record<string, unknown> {

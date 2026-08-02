@@ -32,7 +32,11 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  config show|path             查看脱敏配置或配置路径\n` +
   `  auth login|whoami|logout     登录、身份检查、退出\n` +
   `  health                       检查真实服务器健康状态\n` +
-  `  doctor                       检查 API、认证、租户与 Elasticsearch\n\n` +
+  `  doctor                       检查 API、认证、租户与 Elasticsearch\n` +
+  `  external doctor|whoami       使用 DOCUMIND_API_TOKEN 检查外部 API\n` +
+  `  external chat <问题>         使用外部 API Token 真实问答\n` +
+  `  external verify              自动验证真实问答、权限、限流与租户隔离\n` +
+  `  api-clients list|create      管理租户 API 接入与 Token\n\n` +
   `对话与评测\n` +
   `  chat|ask <问题>              真实 SSE 对话并合并落库 trace\n` +
   `  chat --interactive           多轮交互 REPL\n` +

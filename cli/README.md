@@ -50,6 +50,36 @@ documind doctor
 
 密码优先从 `auth.password_env` 指向的环境变量读取；也可以写入权限为 `0600` 的 TOML。JWT 缓存在同目录的 `session.json`，同样使用 `0600` 权限。`config show` 始终脱敏密码。
 
+## 外部 API 接入
+
+API Token 只从 `[external].token_env` 指定的环境变量读取，默认是 `DOCUMIND_API_TOKEN`：
+
+```bash
+export DOCUMIND_API_TOKEN='dm_live_...'
+documind external whoami
+documind external doctor
+documind external chat --kb <kb-id> --json '问题'
+```
+
+租户管理员可以管理 API Client：
+
+```bash
+documind api-clients list
+documind api-clients create --name crm --kb <kb-id> --json
+documind api-clients token <client-id> --expires-in-days 90 --json
+documind api-clients revoke <client-id> <token-id>
+documind api-clients disable <client-id>
+```
+
+部署后的完整真实验收：
+
+```bash
+documind external verify --kb <kb-id> --denied-kb <other-kb-id> --json
+documind external verify --kb <kb-id> --other-config /path/to/other-tenant.toml --json
+```
+
+该命令真实调用 Agent/LLM，并检查知识库范围、会话隔离、Token 轮换与吊销、应用停用、Redis 限流和跨租户访问。
+
 ## 快速对话
 
 ```bash

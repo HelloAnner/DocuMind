@@ -532,6 +532,7 @@ async fn list_members(
              LEFT JOIN platform_admin pa ON pa.user_id = u.id AND pa.status = 'active'
              WHERE tm.tenant_id = $1
                AND tm.status <> 'removed'
+               AND u.auth_provider <> 'api'
                AND pa.user_id IS NULL
              ORDER BY CASE WHEN 'tenant_admin' = ANY(tm.roles) THEN 0 ELSE 1 END,
                       tm.joined_at DESC NULLS LAST",

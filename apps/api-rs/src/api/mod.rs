@@ -1,11 +1,14 @@
 pub mod account;
 pub mod admin;
+pub mod admin_api_clients;
+mod admin_api_clients_model;
 pub mod admin_members;
 pub mod auth;
 mod conversation_file_access;
 pub mod conversations;
 pub mod document_jobs;
 pub mod documents;
+pub mod external_api;
 pub mod history;
 pub mod knowledge;
 pub mod runtime_events;
@@ -17,11 +20,13 @@ pub mod vector_diagnostics;
 
 pub use account::router as account_router;
 pub use admin::router as admin_router;
+pub use admin_api_clients::router as admin_api_clients_router;
 pub use admin_members::router as admin_members_router;
 pub use auth::router as auth_router;
 pub use conversations::router as conversations_router;
 pub use document_jobs::router as document_jobs_router;
 pub use documents::router as documents_router;
+pub use external_api::router as external_api_router;
 pub use history::router as history_router;
 pub use knowledge::router as knowledge_router;
 pub use system::router as system_router;

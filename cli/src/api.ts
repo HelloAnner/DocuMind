@@ -1,6 +1,7 @@
 import { ApiError, CliError } from "./errors.ts";
 import {
   clearSession,
+  configuredApiToken,
   configuredPassword,
   readSession,
   writeSession,
@@ -8,6 +9,10 @@ import {
 import type {
   AdminDocument,
   AdminDocumentDetail,
+  ApiClientSummary,
+  ApiTokenSummary,
+  CreatedApiClient,
+  ExternalIdentity,
   CliConfig,
   ConversationSummary,
   DeleteDocumentResponse,
@@ -34,6 +39,7 @@ import type {
 export class ApiClient {
   readonly baseUrl: string;
   private session: SessionState | undefined;
+  private externalMode = false;
 
   constructor(
     readonly config: CliConfig,
@@ -41,6 +47,51 @@ export class ApiClient {
     private readonly fetcher: typeof fetch = fetch,
   ) {
     this.baseUrl = buildBaseUrl(config);
+  }
+
+  enableExternalMode(): this {
+    this.externalMode = true;
+    return this;
+  }
+
+  async externalMe(): Promise<ExternalIdentity> {
+    return this.requestJson("/api/v1/external/me", undefined, true, false);
+  }
+
+  async listApiClients(): Promise<ApiClientSummary[]> {
+    return this.requestJson("/api/admin/api-clients");
+  }
+
+  async createApiClient(input: {
+    name: string;
+    description?: string;
+    kb_ids: string[];
+    scopes?: string[];
+    expires_in_days?: number;
+    rate_limit_per_minute?: number;
+  }): Promise<CreatedApiClient> {
+    return this.requestJson("/api/admin/api-clients", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async createApiToken(clientId: string, expiresInDays = 90): Promise<{ token: ApiTokenSummary; secret: string }> {
+    return this.requestJson(`/api/admin/api-clients/${encodeURIComponent(clientId)}/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+  }
+
+  async revokeApiToken(clientId: string, tokenId: string): Promise<unknown> {
+    return this.requestJson(
+      `/api/admin/api-clients/${encodeURIComponent(clientId)}/tokens/${encodeURIComponent(tokenId)}/revoke`,
+      { method: "POST" },
+    );
+  }
+
+  async updateApiClientStatus(clientId: string, status: "active" | "disabled"): Promise<ApiClientSummary> {
+    return this.requestJson(`/api/admin/api-clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
   }
 
   async login(force = false): Promise<Identity> {
@@ -112,7 +163,9 @@ export class ApiClient {
   }
 
   async listKnowledgeBases(): Promise<KnowledgeBase[]> {
-    return this.requestJson("/api/knowledge-bases");
+    return this.requestJson(
+      this.externalMode ? "/api/v1/external/knowledge-bases" : "/api/knowledge-bases",
+    );
   }
 
   async listAdminKnowledgeBases(): Promise<KnowledgeBase[]> {
@@ -139,35 +192,40 @@ export class ApiClient {
     });
   }
 
+  conversationPath(suffix = ""): string {
+    const base = this.externalMode ? "/api/v1/external/conversations" : "/api/conversations";
+    return `${base}${suffix}`;
+  }
+
   async listConversations(limit = 20, cursor?: string): Promise<{
     items: ConversationSummary[];
     next_cursor?: string;
   }> {
     const query = new URLSearchParams({ limit: String(limit) });
     if (cursor) query.set("cursor", cursor);
-    return this.requestJson(`/api/conversations?${query}`);
+    return this.requestJson(`${this.conversationPath()}?${query}`);
   }
 
   async createConversation(kbIds: string[], title?: string): Promise<ConversationSummary> {
-    return this.requestJson("/api/conversations", {
+    return this.requestJson(this.conversationPath(), {
       method: "POST",
       body: JSON.stringify({ kb_ids: kbIds, ...(title ? { title } : {}) }),
     });
   }
 
   async getConversation(id: string): Promise<ConversationSummary> {
-    return this.requestJson(`/api/conversations/${encodeURIComponent(id)}`);
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`));
   }
 
   async deleteConversation(id: string): Promise<unknown> {
-    return this.requestJson(`/api/conversations/${encodeURIComponent(id)}`, {
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`), {
       method: "DELETE",
     });
   }
 
   async getMessages(conversationId: string): Promise<MessageListResponse> {
     return this.requestJson(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages`,
+      this.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
     );
   }
 
@@ -176,7 +234,7 @@ export class ApiClient {
     messageId: string,
   ): Promise<MessageTraceResponse> {
     return this.requestJson(
-      `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/traces`,
+      this.conversationPath(`/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/traces`),
     );
   }
 
@@ -328,7 +386,7 @@ export class ApiClient {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
     });
-    if (response.status === 401 && retryAuthentication) {
+    if (response.status === 401 && retryAuthentication && !this.externalMode) {
       await this.login(true);
       return this.sse(path, body, false);
     }
@@ -381,7 +439,7 @@ export class ApiClient {
       headers,
       signal: init.signal ?? AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
     });
-    if (authenticated && retryAuthentication && response.status === 401) {
+    if (authenticated && retryAuthentication && response.status === 401 && !this.externalMode) {
       await this.login(true);
       return this.request(path, init, authenticated, false);
     }
@@ -396,6 +454,7 @@ export class ApiClient {
   }
 
   private async accessToken(): Promise<string> {
+    if (this.externalMode) return configuredApiToken(this.config);
     const state = await this.getSession();
     if (state.access_token) return state.access_token;
     await this.login(true);

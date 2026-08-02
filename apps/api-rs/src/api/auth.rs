@@ -537,6 +537,7 @@ fn portal_callback_error(err: AppError) -> Response {
         AppError::Timeout { message, .. } => (StatusCode::GATEWAY_TIMEOUT, message),
         AppError::BadRequest { message, .. } => (StatusCode::BAD_REQUEST, message),
         AppError::Unauthorized { message, .. } => (StatusCode::UNAUTHORIZED, message),
+        AppError::RateLimited { message, .. } => (StatusCode::TOO_MANY_REQUESTS, message),
         AppError::Internal(err) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{err}")),
     };
     let html = format!(
@@ -565,6 +566,7 @@ fn portal_error_code(err: &AppError) -> &'static str {
         AppError::Timeout { .. } => "timeout",
         AppError::BadRequest { .. } => "bad_request",
         AppError::Unauthorized { .. } => "unauthorized",
+        AppError::RateLimited { .. } => "rate_limited",
         AppError::Internal(_) => "internal_error",
     }
 }

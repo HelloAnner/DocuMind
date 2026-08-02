@@ -13,6 +13,7 @@ pub enum AppError {
     Internal(anyhow::Error),
     BadRequest { code: String, message: String },
     Unauthorized { code: String, message: String },
+    RateLimited { code: String, message: String },
 }
 
 impl AppError {
@@ -106,6 +107,9 @@ impl IntoResponse for AppError {
             }
             AppError::Unauthorized { code, message } => {
                 (StatusCode::UNAUTHORIZED, code.clone(), message.clone())
+            }
+            AppError::RateLimited { code, message } => {
+                (StatusCode::TOO_MANY_REQUESTS, code.clone(), message.clone())
             }
         };
         let body = Json(json!({ "code": code, "message": message }));
