@@ -20,7 +20,8 @@ export function InviteAcceptView() {
     setError(null);
     try {
       const me = await acceptInvitation(token, email, password);
-      window.location.replace(authenticatedHomePath(me.scope, me.roles));
+      const basePath = window.location.pathname.startsWith("/documind") ? "/documind" : "";
+      window.location.replace(`${basePath}${authenticatedHomePath(me.scope, me.roles)}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "接受邀请失败");
     } finally {
