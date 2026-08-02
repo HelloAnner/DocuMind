@@ -188,10 +188,16 @@ async fn authenticate_from_db(
 
     let user_id: Uuid = user.get("id");
     let is_platform_admin = platform_admin_active(pool, user_id).await?;
-    let tenant_key = scoped_tenant_key(is_platform_admin, tenant_key);
-    let membership = if let Some(tenant_key) = tenant_key {
-        sqlx::query(
-            r#"
+    if is_platform_admin && tenant_key.is_some_and(|value| !value.trim().is_empty()) {
+        return Err(AppError::Forbidden {
+            code: "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN".to_string(),
+            message: "平台管理员不能从租户专属入口登录，请使用平台登录入口".to_string(),
+        });
+    }
+    let membership =
+        if let Some(tenant_key) = tenant_key.filter(|value| !value.trim().is_empty()) {
+            sqlx::query(
+                r#"
             SELECT tm.tenant_id, tm.roles, tm.attributes, t.name, t.slug, t.plan, t.status
             FROM tenant_member tm
             JOIN tenant t ON t.id = tm.tenant_id
@@ -207,14 +213,14 @@ async fn authenticate_from_db(
               AND (tm.tenant_id::text = $2 OR t.slug = $2)
             LIMIT 1
             "#,
-        )
-        .bind(user_id)
-        .bind(tenant_key)
-        .fetch_optional(pool)
-        .await?
-    } else {
-        sqlx::query(
-            r#"
+            )
+            .bind(user_id)
+            .bind(tenant_key)
+            .fetch_optional(pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
             SELECT tm.tenant_id, tm.roles, tm.attributes, t.name, t.slug, t.plan, t.status
             FROM tenant_member tm
             JOIN tenant t ON t.id = tm.tenant_id
@@ -242,12 +248,12 @@ async fn authenticate_from_db(
               tm.joined_at DESC NULLS LAST
             LIMIT 1
             "#,
-        )
-        .bind(user_id)
-        .fetch_optional(pool)
-        .await?
-    }
-    .ok_or_else(AppError::unauthorized)?;
+            )
+            .bind(user_id)
+            .fetch_optional(pool)
+            .await?
+        }
+        .ok_or_else(AppError::unauthorized)?;
 
     let tenant_id: Uuid = membership.get("tenant_id");
     let membership_roles: Vec<String> = membership.get("roles");
@@ -437,14 +443,6 @@ pub(crate) async fn resolve_actor_from_db(
         api_scopes: Vec::new(),
         api_token_expires_at: None,
     })
-}
-
-fn scoped_tenant_key(is_platform_admin: bool, tenant_key: Option<&str>) -> Option<&str> {
-    if is_platform_admin {
-        None
-    } else {
-        tenant_key.filter(|value| !value.trim().is_empty())
-    }
 }
 
 async fn platform_admin_active(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
@@ -1073,13 +1071,6 @@ async fn upsert_acl(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn platform_admin_tenant_hint_never_selects_tenant_scope() {
-        assert_eq!(scoped_tenant_key(true, Some("acme")), None);
-        assert_eq!(scoped_tenant_key(false, Some("acme")), Some("acme"));
-        assert_eq!(scoped_tenant_key(false, Some("  ")), None);
-    }
 
     #[test]
     fn platform_admin_has_no_tenant_content_permissions() {

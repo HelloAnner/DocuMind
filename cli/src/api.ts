@@ -105,19 +105,36 @@ export class ApiClient {
         }
       }
     }
-    const response = await this.requestJson<LoginResponse>(
-      "/api/auth/login",
-      {
-        method: "POST",
-        body: JSON.stringify({
-          username: this.config.auth.username,
-          password: configuredPassword(this.config),
-          tenant_slug: this.config.auth.tenant,
-        }),
-      },
-      false,
-      false,
-    );
+    const credentials = {
+      username: this.config.auth.username,
+      password: configuredPassword(this.config),
+    };
+    let response: LoginResponse;
+    try {
+      response = await this.requestJson<LoginResponse>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify({ ...credentials, tenant_slug: this.config.auth.tenant }),
+        },
+        false,
+        false,
+      );
+    } catch (error) {
+      const body = error instanceof ApiError && error.body && typeof error.body === "object"
+        ? error.body as Record<string, unknown>
+        : null;
+      if (error instanceof ApiError && body?.code === "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN") {
+        response = await this.requestJson<LoginResponse>(
+          "/api/auth/login",
+          { method: "POST", body: JSON.stringify(credentials) },
+          false,
+          false,
+        );
+      } else {
+        throw error;
+      }
+    }
     this.session = {
       access_token: response.access_token,
       user: response.user,

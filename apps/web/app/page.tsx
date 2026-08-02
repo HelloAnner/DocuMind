@@ -3,7 +3,7 @@
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
-import { AUTHENTICATED_HOME_PATH } from "@/lib/auth";
+import { authenticatedHomePath } from "@/lib/auth";
 
 export default function HomePage() {
   const router = useRouter();
@@ -12,7 +12,7 @@ export default function HomePage() {
   useEffect(() => {
     if (loading) return;
     if (me) {
-      router.replace(AUTHENTICATED_HOME_PATH);
+      router.replace(authenticatedHomePath(me.roles));
     } else {
       router.replace("/login");
     }

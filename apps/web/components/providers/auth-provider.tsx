@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  AUTHENTICATED_HOME_PATH,
+  authenticatedHomePath,
   getMe,
   getStoredAuth,
   loginWithPassword,
@@ -52,7 +52,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (username: string, password: string, tenantSlug?: string) => {
       const data = await loginWithPassword(username, password, tenantSlug);
       setMe(data);
-      router.replace(AUTHENTICATED_HOME_PATH);
+      router.replace(authenticatedHomePath(data.roles));
     },
     [router]
   );

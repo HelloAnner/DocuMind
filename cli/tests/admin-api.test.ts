@@ -86,6 +86,37 @@ describe("ApiClient admin management", () => {
       await rm(temporary, { recursive: true, force: true });
     }
   });
+
+  test("retries platform login without tenant scope", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-platform-"));
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      bodies.push(body);
+      if (bodies.length === 1) {
+        return jsonResponse(
+          { code: "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN", message: "use platform login" },
+          403,
+        );
+      }
+      return jsonResponse(identity());
+    }) as typeof fetch;
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+      auth: { ...DEFAULT_CONFIG.auth, password: "secret", tenant: "acme" },
+    };
+
+    try {
+      await new ApiClient(config, join(temporary, "config.toml"), fetcher).login(true);
+      expect(bodies).toEqual([
+        { username: config.auth.username, password: "secret", tenant_slug: "acme" },
+        { username: config.auth.username, password: "secret" },
+      ]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFetcher(requests: CapturedRequest[]): typeof fetch {
@@ -145,8 +176,8 @@ function createFetcher(requests: CapturedRequest[]): typeof fetch {
   }) as typeof fetch;
 }
 
-function jsonResponse(value: unknown): Response {
-  return Response.json(value, { headers: { "Content-Type": "application/json" } });
+function jsonResponse(value: unknown, status = 200): Response {
+  return Response.json(value, { status, headers: { "Content-Type": "application/json" } });
 }
 
 function identity(): unknown {

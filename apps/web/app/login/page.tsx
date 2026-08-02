@@ -24,7 +24,7 @@ function LoginForm({
   tenantState: TenantContextState;
 }) {
   const { login } = useAuth();
-  const [email, setEmail] = useState("Anner");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

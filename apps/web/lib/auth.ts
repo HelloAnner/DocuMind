@@ -60,6 +60,12 @@ const AUTH_KEY = "documind-auth";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
+export function authenticatedHomePath(roles: UserRole[] | string[]): string {
+  if (roles.includes("super_admin")) return "/system";
+  if (isTenantAdminRole(roles)) return "/admin";
+  return AUTHENTICATED_HOME_PATH;
+}
+
 export interface StoredAuth {
   token: string;
   userId: string;
@@ -183,7 +189,10 @@ export async function loginWithPassword(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error("用户名或密码错误");
+  if (!res.ok) {
+    const error = await res.json().catch(() => null) as { message?: string } | null;
+    throw new Error(error?.message || "用户名或密码错误");
+  }
   const data: LoginResponse = await res.json();
   storeLoginResponse(data);
   return data;

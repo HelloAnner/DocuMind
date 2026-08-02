@@ -31,7 +31,7 @@ import {
   printVectorResult,
 } from "./render.ts";
 import { loadScenario, runScenario } from "./scenario.ts";
-import type { ChatRequest, MessageTraceResponse } from "./types.ts";
+import type { ChatRequest, Identity, MessageTraceResponse } from "./types.ts";
 import { VectorDiagnostics } from "./vector.ts";
 import { VERSION } from "./version.ts";
 
@@ -146,12 +146,22 @@ async function healthCommand(api: ApiClient, json: boolean): Promise<number> {
 
 async function doctorCommand(api: ApiClient, json: boolean): Promise<number> {
   const checks: Array<{ name: string; ok: boolean; detail?: unknown; error?: string }> = [];
+  let identity: Identity | undefined;
   await doctorCheck(checks, "api.health", () => api.health());
-  await doctorCheck(checks, "auth.identity", () => api.me());
-  await doctorCheck(checks, "tenant.knowledge_bases", () => api.listKnowledgeBases());
-  await doctorCheck(checks, "vector.elasticsearch", async () => ({
-    count: await new VectorDiagnostics(api).count(),
-  }));
+  await doctorCheck(checks, "auth.identity", async () => {
+    identity = await api.me();
+    return identity;
+  });
+  if (identity?.roles.includes("super_admin")) {
+    const detail = { skipped: "平台身份不进入租户知识空间" };
+    checks.push({ name: "tenant.knowledge_bases", ok: true, detail });
+    checks.push({ name: "vector.elasticsearch", ok: true, detail });
+  } else {
+    await doctorCheck(checks, "tenant.knowledge_bases", () => api.listKnowledgeBases());
+    await doctorCheck(checks, "vector.elasticsearch", async () => ({
+      count: await new VectorDiagnostics(api).count(),
+    }));
+  }
   const ok = checks.every((check) => check.ok);
   if (json) printJson({ ok, server: api.baseUrl, checks });
   else {
