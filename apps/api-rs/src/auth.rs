@@ -188,13 +188,8 @@ async fn authenticate_from_db(
 
     let user_id: Uuid = user.get("id");
     let is_platform_admin = platform_admin_active(pool, user_id).await?;
-    if is_platform_admin && tenant_key.is_some_and(|value| !value.trim().is_empty()) {
-        return Err(AppError::Forbidden {
-            code: "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN".to_string(),
-            message: "平台管理员不能登录租户数据空间".to_string(),
-        });
-    }
-    let membership = if let Some(tenant_key) = tenant_key.filter(|v| !v.trim().is_empty()) {
+    let tenant_key = scoped_tenant_key(is_platform_admin, tenant_key);
+    let membership = if let Some(tenant_key) = tenant_key {
         sqlx::query(
             r#"
             SELECT tm.tenant_id, tm.roles, tm.attributes, t.name, t.slug, t.plan, t.status
@@ -434,6 +429,14 @@ pub(crate) async fn resolve_actor_from_db(
         api_scopes: Vec::new(),
         api_token_expires_at: None,
     })
+}
+
+fn scoped_tenant_key(is_platform_admin: bool, tenant_key: Option<&str>) -> Option<&str> {
+    if is_platform_admin {
+        None
+    } else {
+        tenant_key.filter(|value| !value.trim().is_empty())
+    }
 }
 
 async fn platform_admin_active(pool: &PgPool, user_id: Uuid) -> Result<bool, AppError> {
@@ -1062,6 +1065,13 @@ async fn upsert_acl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn platform_admin_tenant_hint_never_selects_tenant_scope() {
+        assert_eq!(scoped_tenant_key(true, Some("acme")), None);
+        assert_eq!(scoped_tenant_key(false, Some("acme")), Some("acme"));
+        assert_eq!(scoped_tenant_key(false, Some("  ")), None);
+    }
 
     #[test]
     fn platform_admin_has_no_tenant_content_permissions() {
