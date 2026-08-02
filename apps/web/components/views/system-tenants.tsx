@@ -126,9 +126,11 @@ export function SystemTenants() {
       });
       const url = absoluteUrl(result.invitation.invite_url);
       setInviteUrl(url);
-      await copyToClipboard(url);
+      const copied = await copyToClipboard(url);
       await reload();
-      setMessage("租户已创建，初始管理员邀请链接已复制。接受邀请后租户会自动启用。");
+      setMessage(copied
+        ? "租户已创建，初始管理员邀请链接已复制。接受邀请后租户会自动启用。"
+        : "租户已创建。请在下方复制初始管理员邀请链接；接受邀请后租户会自动启用。");
       setForm(initialForm);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "创建失败");
@@ -171,8 +173,8 @@ export function SystemTenants() {
     }
   };
 
-  const resendInvitation = async (tenant: SystemTenant) => {
-    const raw = prompt("请输入新邀请链接的有效天数（1-30）：", "7");
+  const copyInitialAdminInvitation = async (tenant: SystemTenant) => {
+    const raw = prompt("将生成新的初始管理员邀请链接，旧链接立即失效。请输入有效天数（1-30）：", "7");
     if (raw === null) return;
     const days = Number(raw);
     if (!Number.isInteger(days) || days < 1 || days > 30) {
@@ -184,9 +186,11 @@ export function SystemTenants() {
     try {
       const invitation = await resendSystemTenantInvitation(tenant.id, days);
       const url = absoluteUrl(invitation.invite_url);
-      await copyToClipboard(url);
+      const copied = await copyToClipboard(url);
       await reload();
-      setMessage(`已为 ${invitation.email} 生成新邀请链接并复制，有效期 ${days} 天`);
+      setMessage(copied
+        ? `已复制 ${invitation.email} 的管理员邀请链接，有效期 ${days} 天`
+        : `已生成 ${invitation.email} 的管理员邀请链接，但自动复制失败，请重试`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "邀请重发失败");
     } finally {
@@ -278,8 +282,8 @@ export function SystemTenants() {
               </div>
               <div className="dm-row-actions">
                 {tenant.status === "pending" ? (
-                  <button disabled={busy === tenant.id} onClick={() => resendInvitation(tenant)} type="button">
-                    重发邀请
+                  <button disabled={busy === tenant.id} onClick={() => copyInitialAdminInvitation(tenant)} type="button">
+                    <Copy size={14} /> 复制管理员邀请
                   </button>
                 ) : null}
                 {tenant.status === "active" ? (
