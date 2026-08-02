@@ -47,7 +47,6 @@ async fn update_member(
         .db_pool
         .as_ref()
         .ok_or_else(|| AppError::bad_request("DB_REQUIRED", "成员管理功能需要数据库"))?;
-    ensure_not_platform_admin(pool, user_id).await?;
     let mut transaction = pool.begin().await?;
     lock_tenant_members(&mut transaction, actor.tenant_id).await?;
 
@@ -124,7 +123,6 @@ async fn remove_member(
         .db_pool
         .as_ref()
         .ok_or_else(|| AppError::bad_request("DB_REQUIRED", "成员管理功能需要数据库"))?;
-    ensure_not_platform_admin(pool, user_id).await?;
     let mut transaction = pool.begin().await?;
     lock_tenant_members(&mut transaction, actor.tenant_id).await?;
     let membership = sqlx::query(
@@ -192,22 +190,6 @@ fn normalize_member_status(value: &str) -> Result<String, AppError> {
             "成员状态只能是 active 或 suspended",
         )),
     }
-}
-
-async fn ensure_not_platform_admin(pool: &sqlx::PgPool, user_id: Uuid) -> Result<(), AppError> {
-    let is_platform_admin: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM platform_admin WHERE user_id = $1 AND status = 'active')",
-    )
-    .bind(user_id)
-    .fetch_one(pool)
-    .await?;
-    if is_platform_admin {
-        return Err(AppError::Forbidden {
-            code: "PLATFORM_ADMIN_MEMBER_IMMUTABLE".to_string(),
-            message: "平台管理员不能在租户成员页面修改".to_string(),
-        });
-    }
-    Ok(())
 }
 
 async fn lock_tenant_members(

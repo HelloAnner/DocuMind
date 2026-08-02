@@ -596,6 +596,10 @@ fn invitation_token_hash(token: &str) -> String {
     hex::encode(digest)
 }
 
+fn is_platform_compat_membership(roles: &[String]) -> bool {
+    !roles.is_empty() && roles.iter().all(|role| role == "super_admin")
+}
+
 fn hash_password(password: &str) -> Result<String, crate::error::AppError> {
     if password.len() < 8 {
         return Err(crate::error::AppError::bad_request(
@@ -609,6 +613,18 @@ fn hash_password(password: &str) -> Result<String, crate::error::AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_platform_compat_membership_can_be_replaced_by_invitation() {
+        assert!(is_platform_compat_membership(&["super_admin".to_string()]));
+        assert!(!is_platform_compat_membership(
+            &["tenant_admin".to_string()]
+        ));
+        assert!(!is_platform_compat_membership(&[
+            "super_admin".to_string(),
+            "tenant_admin".to_string()
+        ]));
+    }
 
     #[test]
     fn maps_portal_permissions_to_local_names() {
@@ -853,15 +869,11 @@ async fn accept_invitation(
         .or(invitation_name)
         .unwrap_or_else(|| email.clone());
 
+    let mut replace_platform_compat_membership = false;
     let user_id = if let Some(user) = existing_user {
         let user_id: Uuid = user.get("id");
         let user_status: String = user.get("status");
-        if user.get::<bool, _>("is_platform_admin") {
-            return Err(crate::error::AppError::Forbidden {
-                code: "PLATFORM_ADMIN_TENANT_MEMBERSHIP_FORBIDDEN".to_string(),
-                message: "平台管理员不能加入租户数据空间".to_string(),
-            });
-        }
+        let is_platform_admin: bool = user.get("is_platform_admin");
         if user_status != "active" {
             return Err(crate::error::AppError::Forbidden {
                 code: "ACCOUNT_NOT_ACTIVE".to_string(),
@@ -882,18 +894,22 @@ async fn accept_invitation(
                 message: "账号密码验证失败".to_string(),
             });
         }
-        let member_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM tenant_member WHERE tenant_id = $1 AND user_id = $2)",
+        let membership_roles: Option<Vec<String>> = sqlx::query_scalar(
+            "SELECT roles FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 FOR UPDATE",
         )
         .bind(tenant_id)
         .bind(user_id)
-        .fetch_one(&mut *tx)
+        .fetch_optional(&mut *tx)
         .await?;
-        if member_exists {
-            return Err(crate::error::AppError::Conflict {
-                code: "TENANT_MEMBER_EXISTS".to_string(),
-                message: "该账号已经是当前租户成员，请直接修改成员状态或角色".to_string(),
-            });
+        if let Some(existing_roles) = membership_roles {
+            if is_platform_admin && is_platform_compat_membership(&existing_roles) {
+                replace_platform_compat_membership = true;
+            } else {
+                return Err(crate::error::AppError::Conflict {
+                    code: "TENANT_MEMBER_EXISTS".to_string(),
+                    message: "该账号已经是当前租户成员，请直接修改成员状态或角色".to_string(),
+                });
+            }
         }
         user_id
     } else {
@@ -919,18 +935,36 @@ async fn accept_invitation(
         user_id
     };
 
-    sqlx::query(
-        r#"
-        INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_by, invited_at, joined_at)
-        VALUES ($1, $2, $3, 'active', $4, NOW(), NOW())
-        "#,
-    )
-    .bind(tenant_id)
-    .bind(user_id)
-    .bind(&roles)
-    .bind(invitation.get::<Uuid, _>("invited_by"))
-    .execute(&mut *tx)
-    .await?;
+    let invited_by = invitation.get::<Uuid, _>("invited_by");
+    if replace_platform_compat_membership {
+        sqlx::query(
+            r#"
+            UPDATE tenant_member
+            SET roles = $3, status = 'active', invited_by = $4,
+                invited_at = NOW(), joined_at = COALESCE(joined_at, NOW()), updated_at = NOW()
+            WHERE tenant_id = $1 AND user_id = $2
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .bind(&roles)
+        .bind(invited_by)
+        .execute(&mut *tx)
+        .await?;
+    } else {
+        sqlx::query(
+            r#"
+            INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_by, invited_at, joined_at)
+            VALUES ($1, $2, $3, 'active', $4, NOW(), NOW())
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .bind(&roles)
+        .bind(invited_by)
+        .execute(&mut *tx)
+        .await?;
+    }
 
     let grants_value: serde_json::Value = invitation.get("kb_grants");
     let grants: Vec<InvitationGrantStored> = serde_json::from_value(grants_value)

@@ -124,7 +124,9 @@ export class ApiClient {
       const body = error instanceof ApiError && error.body && typeof error.body === "object"
         ? error.body as Record<string, unknown>
         : null;
-      if (error instanceof ApiError && body?.code === "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN") {
+      const platformScopeError = body?.code === "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN"
+        || body?.code === "PLATFORM_ADMIN_TENANT_MEMBERSHIP_REQUIRED";
+      if (error instanceof ApiError && platformScopeError) {
         response = await this.requestJson<LoginResponse>(
           "/api/auth/login",
           { method: "POST", body: JSON.stringify(credentials) },

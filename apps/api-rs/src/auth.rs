@@ -188,12 +188,6 @@ async fn authenticate_from_db(
 
     let user_id: Uuid = user.get("id");
     let is_platform_admin = platform_admin_active(pool, user_id).await?;
-    if is_platform_admin && tenant_key.is_some_and(|value| !value.trim().is_empty()) {
-        return Err(AppError::Forbidden {
-            code: "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN".to_string(),
-            message: "平台管理员不能从租户专属入口登录，请使用平台登录入口".to_string(),
-        });
-    }
     let membership =
         if let Some(tenant_key) = tenant_key.filter(|value| !value.trim().is_empty()) {
             sqlx::query(
@@ -203,13 +197,7 @@ async fn authenticate_from_db(
             JOIN tenant t ON t.id = tm.tenant_id
             WHERE tm.user_id = $1
               AND tm.status = 'active'
-              AND (
-                t.status = 'active'
-                OR EXISTS (
-                  SELECT 1 FROM platform_admin pa
-                  WHERE pa.user_id = tm.user_id AND pa.status = 'active'
-                )
-              )
+              AND t.status = 'active'
               AND (tm.tenant_id::text = $2 OR t.slug = $2)
             LIMIT 1
             "#,
@@ -264,6 +252,16 @@ async fn authenticate_from_db(
     let attributes: serde_json::Value = membership
         .try_get("attributes")
         .unwrap_or_else(|_| serde_json::json!({}));
+    if roles.is_empty() {
+        return if is_platform_admin && explicit_tenant {
+            Err(AppError::Forbidden {
+                code: "PLATFORM_ADMIN_TENANT_MEMBERSHIP_REQUIRED".to_string(),
+                message: "该平台账号未被授予当前租户成员身份".to_string(),
+            })
+        } else {
+            Err(AppError::unauthorized())
+        };
+    }
     let allowed_kb_ids = if is_super_admin {
         Vec::new()
     } else {
@@ -385,6 +383,9 @@ pub(crate) async fn resolve_actor_from_db(
         return Err(AppError::unauthorized());
     }
 
+    let is_platform_admin = platform_admin_active(pool, user_id).await?;
+    let include_super_admin = _requested_role == "super_admin";
+    let is_super_admin = is_platform_admin && include_super_admin;
     let membership = sqlx::query(
         r#"
         SELECT tm.roles, tm.attributes
@@ -393,25 +394,17 @@ pub(crate) async fn resolve_actor_from_db(
         WHERE tm.tenant_id = $1
           AND tm.user_id = $2
           AND tm.status = 'active'
-          AND (
-            t.status = 'active'
-            OR EXISTS (
-              SELECT 1 FROM platform_admin pa
-              WHERE pa.user_id = tm.user_id AND pa.status = 'active'
-            )
-          )
+          AND (t.status = 'active' OR $3)
         LIMIT 1
         "#,
     )
     .bind(tenant_id)
     .bind(user_id)
+    .bind(is_super_admin)
     .fetch_optional(pool)
     .await?
     .ok_or_else(AppError::unauthorized)?;
     let membership_roles: Vec<String> = membership.get("roles");
-    let include_super_admin = _requested_role == "super_admin";
-    let is_platform_admin = platform_admin_active(pool, user_id).await?;
-    let is_super_admin = is_platform_admin && include_super_admin;
     let roles = normalized_actor_roles(&membership_roles, is_super_admin);
     let attributes: serde_json::Value = membership
         .try_get("attributes")
@@ -948,12 +941,16 @@ pub async fn seed_identity(pool: &PgPool, config: &AppConfig) -> anyhow::Result<
         &["tenant_admin"],
     )
     .await?;
-    upsert_membership(
-        pool,
-        config.default_tenant_id,
-        config.super_admin_user_id,
-        &["super_admin"],
+    sqlx::query(
+        r#"
+        INSERT INTO tenant_member (tenant_id, user_id, roles, status, joined_at)
+        VALUES ($1, $2, ARRAY['super_admin'], 'active', NOW())
+        ON CONFLICT (tenant_id, user_id) DO NOTHING
+        "#,
     )
+    .bind(config.default_tenant_id)
+    .bind(config.super_admin_user_id)
+    .execute(pool)
     .await?;
     upsert_membership(
         pool,
@@ -1107,6 +1104,13 @@ mod tests {
                 true
             ),
             vec!["super_admin".to_string()]
+        );
+        assert_eq!(
+            normalized_actor_roles(
+                &["super_admin".to_string(), "tenant_admin".to_string()],
+                false
+            ),
+            vec!["tenant_admin".to_string()]
         );
         assert!(normalized_actor_roles(&["super_admin".to_string()], false).is_empty());
     }

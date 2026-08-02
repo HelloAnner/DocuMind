@@ -95,7 +95,7 @@ describe("ApiClient admin management", () => {
       bodies.push(body);
       if (bodies.length === 1) {
         return jsonResponse(
-          { code: "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN", message: "use platform login" },
+          { code: "PLATFORM_ADMIN_TENANT_MEMBERSHIP_REQUIRED", message: "use platform login" },
           403,
         );
       }

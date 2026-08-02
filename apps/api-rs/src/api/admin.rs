@@ -529,11 +529,10 @@ async fn list_members(
                     0::bigint as query_count
              FROM app_user u
              JOIN tenant_member tm ON tm.user_id = u.id
-             LEFT JOIN platform_admin pa ON pa.user_id = u.id AND pa.status = 'active'
              WHERE tm.tenant_id = $1
                AND tm.status <> 'removed'
                AND u.auth_provider <> 'api'
-               AND pa.user_id IS NULL
+               AND NOT ('super_admin' = ANY(tm.roles))
              ORDER BY CASE WHEN 'tenant_admin' = ANY(tm.roles) THEN 0 ELSE 1 END,
                       tm.joined_at DESC NULLS LAST",
         )
@@ -702,7 +701,16 @@ async fn create_invitation(
             SELECT 1
             FROM app_user u
             JOIN tenant_member tm ON tm.user_id = u.id
-            WHERE tm.tenant_id = $1 AND lower(u.email) = lower($2)
+            WHERE tm.tenant_id = $1
+              AND lower(u.email) = lower($2)
+              AND NOT (
+                tm.roles <@ ARRAY['super_admin']::text[]
+                AND cardinality(tm.roles) > 0
+                AND EXISTS (
+                  SELECT 1 FROM platform_admin pa
+                  WHERE pa.user_id = u.id AND pa.status = 'active'
+                )
+              )
         )
         "#,
     )

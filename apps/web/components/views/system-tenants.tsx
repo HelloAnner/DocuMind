@@ -205,7 +205,7 @@ export function SystemTenants() {
 
   return (
     <>
-      <Topbar title="租户管理" subtitle="管理租户生命周期；成员登录链接用于分发给租户成员，超级管理员自身登录仍会进入系统管理后台">
+      <Topbar title="租户管理" subtitle="复制成员登录链接；平台管理员只有被明确加入该租户后，才会以租户成员身份进入">
         <Button icon={<Plus size={14} />} onClick={() => { setDrawerOpen(true); setInviteUrl(""); }}>
           新建租户
         </Button>
