@@ -2658,6 +2658,7 @@ a {
   gap: 4px;
   height: 28px;
   padding: 0 10px;
+  white-space: nowrap;
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -2691,7 +2692,7 @@ a {
 }
 
 .dm-tenant-row {
-  grid-template-columns: minmax(0, 1.25fr) 90px 110px 120px 90px 210px 190px;
+  grid-template-columns: minmax(190px, 1fr) 90px 110px 120px 90px 100px 390px;
 }
 
 .dm-tenant-row > span {

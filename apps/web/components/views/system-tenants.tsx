@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Check, Copy, ExternalLink, Link2, MoreHorizontal, Plus, X } from "lucide-react";
+import { Building2, Copy, ExternalLink, MoreHorizontal, Plus, X } from "lucide-react";
 import {
   createSystemTenant,
   generateSystemTenantAdminInvitation,
@@ -89,7 +89,6 @@ export function SystemTenants() {
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const [inviteUrl, setInviteUrl] = useState("");
-  const [copiedSlug, setCopiedSlug] = useState<string | null>(null);
 
   const reload = async () => setTenants(await listSystemTenants());
 
@@ -203,17 +202,9 @@ export function SystemTenants() {
     }
   };
 
-  const copyAccessUrl = async (slug: string) => {
-    const ok = await copyToClipboard(tenantAccessUrl(slug));
-    if (ok) {
-      setCopiedSlug(slug);
-      setTimeout(() => setCopiedSlug((current) => (current === slug ? null : current)), 1500);
-    }
-  };
-
   return (
     <>
-      <Topbar title="租户管理" subtitle="复制成员登录链接；平台管理员只有被明确加入该租户后，才会以租户成员身份进入">
+      <Topbar title="租户管理" subtitle="打开租户登录页面；平台管理员只有被明确加入该租户后，才会以租户成员身份进入">
         <Button icon={<Plus size={14} />} onClick={() => { setDrawerOpen(true); setInviteUrl(""); }}>
           新建租户
         </Button>
@@ -250,7 +241,7 @@ export function SystemTenants() {
             <span>成员 / 管理员</span>
             <span>内容规模</span>
             <span>套餐</span>
-            <span>成员登录链接</span>
+            <span>登录访问</span>
             <span>操作</span>
           </div>
           {filtered.map((tenant) => (
@@ -275,15 +266,6 @@ export function SystemTenants() {
               </span>
               <span>{planLabel[tenant.plan]}</span>
               <div className="dm-row-actions" style={{ justifyContent: "flex-start" }}>
-                <button
-                  aria-label="复制成员登录链接"
-                  onClick={() => copyAccessUrl(tenant.slug)}
-                  title={tenantAccessUrl(tenant.slug)}
-                  type="button"
-                >
-                  {copiedSlug === tenant.slug ? <Check size={14} /> : <Link2 size={14} />}
-                  {copiedSlug === tenant.slug ? "已复制" : "复制链接"}
-                </button>
                 <a href={tenantAccessUrl(tenant.slug)} rel="noreferrer" target="_blank">
                   <ExternalLink size={14} /> 打开登录
                 </a>
