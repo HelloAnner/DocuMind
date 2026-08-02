@@ -61,8 +61,6 @@ const initialForm = {
   name: "",
   slug: "",
   plan: "enterprise" as SystemTenant["plan"],
-  admin_email: "",
-  admin_name: "",
   expires_in_days: 7,
 };
 
@@ -121,7 +119,6 @@ export function SystemTenants() {
       const result = await createSystemTenant({
         ...form,
         slug: form.slug || undefined,
-        admin_name: form.admin_name || undefined,
       });
       const url = absoluteUrl(result.invitation.invite_url);
       setInviteUrl(url);
@@ -173,28 +170,17 @@ export function SystemTenants() {
   };
 
   const copyAdminInvitation = async (tenant: SystemTenant) => {
-    const email = tenant.status === "active"
-      ? prompt("请输入要邀请为租户管理员的邮箱：")?.trim()
-      : undefined;
-    if (tenant.status === "active" && !email) return;
-    const raw = prompt("将生成新的管理员邀请链接；同一邮箱的旧链接立即失效。请输入有效天数（1-30）：", "7");
-    if (raw === null) return;
-    const days = Number(raw);
-    if (!Number.isInteger(days) || days < 1 || days > 30) {
-      setMessage("有效天数必须是 1 到 30 之间的整数");
-      return;
-    }
     setBusy(tenant.id);
     setMessage("");
     try {
-      const invitation = await generateSystemTenantAdminInvitation(tenant.id, days, email);
+      const invitation = await generateSystemTenantAdminInvitation(tenant.id);
       const url = absoluteUrl(invitation.invite_url);
       const copied = await copyToClipboard(url);
       if (!copied) prompt("自动复制失败，请手动复制管理员邀请链接：", url);
       await reload();
       setMessage(copied
-        ? `已复制 ${invitation.email} 的管理员邀请链接，有效期 ${days} 天`
-        : `已生成 ${invitation.email} 的管理员邀请链接`);
+        ? "管理员邀请链接已复制，有效期 7 天"
+        : "管理员邀请链接已生成");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "管理员邀请生成失败");
     } finally {
@@ -215,7 +201,7 @@ export function SystemTenants() {
           <StatCard label="全部租户" value={String(metrics.total)} hint="平台实例" />
           <StatCard label="运行中" value={String(metrics.active)} hint="可登录" />
           <StatCard label="有效成员" value={metrics.members.toLocaleString()} hint="跨租户汇总" />
-          <StatCard label="待接受邀请" value={String(metrics.pendingInvitations)} hint="初始管理员" />
+          <StatCard label="待接受邀请" value={String(metrics.pendingInvitations)} hint="管理员邀请" />
         </div>
 
         {message ? <div className="dm-inline-error" style={{ marginTop: 16 }}>{message}</div> : null}
@@ -332,15 +318,8 @@ export function SystemTenants() {
                 <option value="enterprise">企业版</option>
               </select>
             </label>
-            <div className={styles.separator}><span>初始租户管理员</span></div>
-            <label className={styles.field}>
-              <span>管理员邮箱 *</span>
-              <input onChange={(event) => setForm({ ...form, admin_email: event.target.value })} placeholder="admin@company.com" type="email" value={form.admin_email} />
-            </label>
-            <label className={styles.field}>
-              <span>管理员姓名</span>
-              <input onChange={(event) => setForm({ ...form, admin_name: event.target.value })} placeholder="可选" value={form.admin_name} />
-            </label>
+            <div className={styles.separator}><span>管理员邀请</span></div>
+            <p className={styles.drawerIntro}>创建后生成一次性管理员邀请链接。领取人使用已有账号登录，或填写新账号自动注册。</p>
             <label className={styles.field}>
               <span>邀请有效期</span>
               <select onChange={(event) => setForm({ ...form, expires_in_days: Number(event.target.value) })} value={form.expires_in_days}>
@@ -364,7 +343,7 @@ export function SystemTenants() {
               <button onClick={() => setDrawerOpen(false)} type="button">取消</button>
               <button
                 className={styles.primary}
-                disabled={busy === "create" || !form.name.trim() || !form.admin_email.trim()}
+                disabled={busy === "create" || !form.name.trim()}
                 onClick={createTenant}
                 type="button"
               >

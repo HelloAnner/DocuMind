@@ -190,7 +190,7 @@ export function AdminMembers() {
   };
 
   const revoke = async (invitation: TenantInvitation) => {
-    if (!confirm(`确定撤销发给 ${invitation.email} 的邀请吗？`)) return;
+    if (!confirm(`确定撤销${invitation.email ? `发给 ${invitation.email} 的` : "公开"}邀请吗？`)) return;
     setBusy(invitation.id);
     setMessage("");
     try {
@@ -303,8 +303,8 @@ export function AdminMembers() {
           {invitations.map((invitation) => (
             <div className="dm-table-row dm-invite-row" key={invitation.id}>
               <span>
-                <strong>{invitation.name || invitation.email}</strong>
-                <small>{invitation.email}</small>
+                <strong>{invitation.name || invitation.email || "管理员公开邀请"}</strong>
+                <small>{invitation.email || "领取后绑定账号"}</small>
               </span>
               <span>{invitation.roles.map(roleLabel).join("、")}</span>
               <span>{new Date(invitation.created_at).toLocaleDateString()}</span>

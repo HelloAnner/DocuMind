@@ -103,7 +103,7 @@ struct KnowledgeBaseAuthorization {
 struct TenantInvitationSummary {
     id: Uuid,
     tenant_id: Uuid,
-    email: String,
+    email: Option<String>,
     name: Option<String>,
     roles: Vec<String>,
     kb_grants: serde_json::Value,
@@ -1315,7 +1315,7 @@ fn invitation_from_row(row: sqlx::postgres::PgRow) -> TenantInvitationSummary {
     TenantInvitationSummary {
         id: row.get("id"),
         tenant_id: row.get("tenant_id"),
-        email: row.get("email"),
+        email: row.try_get("email").ok().flatten(),
         name: row.try_get("name").ok(),
         roles: row.get("roles"),
         kb_grants: row

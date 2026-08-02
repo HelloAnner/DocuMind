@@ -40,6 +40,7 @@ pub struct LoginResponse {
 #[derive(Debug, Deserialize)]
 pub struct AcceptInvitationRequest {
     pub token: String,
+    pub email: Option<String>,
     pub name: Option<String>,
     pub password: Option<String>,
 }
@@ -596,6 +597,17 @@ fn invitation_token_hash(token: &str) -> String {
     hex::encode(digest)
 }
 
+fn normalize_invitation_account(value: &str) -> Result<String, crate::error::AppError> {
+    let account = value.trim().to_lowercase();
+    if account.is_empty() || account.chars().count() > 128 {
+        return Err(crate::error::AppError::bad_request(
+            "ACCOUNT_INVALID",
+            "请输入有效账号",
+        ));
+    }
+    Ok(account)
+}
+
 fn is_platform_compat_membership(roles: &[String]) -> bool {
     !roles.is_empty() && roles.iter().all(|role| role == "super_admin")
 }
@@ -613,6 +625,16 @@ fn hash_password(password: &str) -> Result<String, crate::error::AppError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validates_invitation_account() {
+        assert_eq!(
+            normalize_invitation_account(" Admin@Example.com ").unwrap(),
+            "admin@example.com"
+        );
+        assert_eq!(normalize_invitation_account("Anner").unwrap(), "anner");
+        assert!(normalize_invitation_account("").is_err());
+    }
 
     #[test]
     fn only_platform_compat_membership_can_be_replaced_by_invitation() {
@@ -786,7 +808,17 @@ async fn accept_invitation(
 
     let invitation_id: Uuid = invitation.get("id");
     let tenant_id: Uuid = invitation.get("tenant_id");
-    let email: String = invitation.get("email");
+    let invited_email: Option<String> = invitation.try_get("email")?;
+    let email = normalize_invitation_account(req.email.as_deref().unwrap_or_default())?;
+    if invited_email
+        .as_deref()
+        .is_some_and(|invited| !invited.eq_ignore_ascii_case(&email))
+    {
+        return Err(crate::error::AppError::Forbidden {
+            code: "INVITATION_EMAIL_MISMATCH".to_string(),
+            message: "该邀请不属于此账号".to_string(),
+        });
+    }
     let invitation_name: Option<String> = invitation.try_get("name").ok();
     let invitation_roles: Vec<String> = invitation.get("roles");
     let mut roles = invitation_roles
@@ -913,6 +945,12 @@ async fn accept_invitation(
         }
         user_id
     } else {
+        if !email.contains('@') {
+            return Err(crate::error::AppError::bad_request(
+                "EMAIL_REQUIRED_FOR_REGISTRATION",
+                "新账号请使用邮箱注册",
+            ));
+        }
         let password = req.password.as_deref().ok_or_else(|| {
             crate::error::AppError::bad_request("PASSWORD_REQUIRED", "首次接受邀请需要设置密码")
         })?;

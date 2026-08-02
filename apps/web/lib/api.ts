@@ -219,8 +219,6 @@ export interface CreateSystemTenantRequest {
   name: string;
   slug?: string;
   plan: SystemTenant["plan"];
-  admin_email: string;
-  admin_name?: string;
   expires_in_days: number;
 }
 
@@ -228,7 +226,7 @@ export interface CreateSystemTenantResponse {
   tenant: Pick<SystemTenant, "id" | "name" | "slug" | "plan" | "status">;
   invitation: {
     id: string;
-    email: string;
+    email?: string;
     roles: string[];
     status: string;
     expires_at: string;
@@ -264,12 +262,12 @@ export async function requestSystemTenantDeletion(id: string, slug: string) {
   );
 }
 
-export async function generateSystemTenantAdminInvitation(id: string, expiresInDays: number, email?: string) {
-  return fetchJson<{ id: string; email: string; expires_at: string; invite_url: string }>(
+export async function generateSystemTenantAdminInvitation(id: string) {
+  return fetchJson<{ id: string; expires_at: string; invite_url: string }>(
     `/api/system/tenants/${id}/invitations/resend`,
     {
       method: "POST",
-      body: JSON.stringify({ expires_in_days: expiresInDays, email }),
+      body: JSON.stringify({ expires_in_days: 7 }),
     }
   );
 }
@@ -277,7 +275,7 @@ export async function generateSystemTenantAdminInvitation(id: string, expiresInD
 export interface TenantInvitation {
   id: string;
   tenant_id: string;
-  email: string;
+  email?: string;
   name?: string;
   roles: string[];
   kb_grants: { kb_id: string; permission: KnowledgeBasePermission }[];

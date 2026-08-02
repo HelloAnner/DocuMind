@@ -200,15 +200,18 @@ export async function loginWithPassword(
 
 export async function acceptInvitation(
   token: string,
-  name: string,
+  email: string,
   password: string
 ): Promise<MeResponse> {
   const res = await fetch(`${BASE}/api/v1/invitations/accept`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, name: name || undefined, password }),
+    body: JSON.stringify({ token, email, password }),
   });
-  if (!res.ok) throw new Error("邀请链接无效、已过期或密码不符合要求");
+  if (!res.ok) {
+    const error = await res.json().catch(() => null) as { message?: string } | null;
+    throw new Error(error?.message || "邀请链接无效、已过期或账号信息不正确");
+  }
   const data: LoginResponse = await res.json();
   storeLoginResponse(data);
   return data;

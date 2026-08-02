@@ -16,8 +16,6 @@ pub struct CreateTenantRequest {
     name: String,
     slug: Option<String>,
     plan: Option<String>,
-    admin_email: String,
-    admin_name: Option<String>,
     expires_in_days: Option<i64>,
 }
 
@@ -45,7 +43,7 @@ struct CreatedTenant {
 #[derive(Debug, Serialize)]
 struct CreatedInvitation {
     id: Uuid,
-    email: String,
+    email: Option<String>,
     roles: Vec<String>,
     status: String,
     expires_at: chrono::DateTime<Utc>,
@@ -71,12 +69,6 @@ pub async fn create_tenant(
     let name = normalize_name(&req.name)?;
     let slug = normalize_slug(req.slug.as_deref().unwrap_or(&name))?;
     let plan = normalize_plan(req.plan.as_deref())?;
-    let email = normalize_email(&req.admin_email)?;
-    let admin_name = req
-        .admin_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
     let expires_at = Utc::now() + Duration::days(req.expires_in_days.unwrap_or(7).clamp(1, 30));
 
     let slug_exists: bool =
@@ -112,13 +104,11 @@ pub async fn create_tenant(
         r#"
         INSERT INTO tenant_invitation
           (id, tenant_id, email, name, roles, kb_grants, token_hash, status, invited_by, expires_at)
-        VALUES ($1, $2, $3, $4, ARRAY['tenant_admin'], '[]'::jsonb, $5, 'pending', $6, $7)
+        VALUES ($1, $2, NULL, NULL, ARRAY['tenant_admin'], '[]'::jsonb, $3, 'pending', $4, $5)
         "#,
     )
     .bind(invitation_id)
     .bind(tenant_id)
-    .bind(&email)
-    .bind(admin_name)
     .bind(&token_hash)
     .bind(actor.user_id)
     .bind(expires_at)
@@ -135,7 +125,6 @@ pub async fn create_tenant(
             "name": name,
             "slug": slug,
             "plan": plan,
-            "initial_admin_email": email,
             "invitation_id": invitation_id,
             "expires_at": expires_at,
         }),
@@ -153,7 +142,7 @@ pub async fn create_tenant(
         },
         invitation: CreatedInvitation {
             id: invitation_id,
-            email,
+            email: None,
             roles: vec!["tenant_admin".to_string()],
             status: "pending".to_string(),
             expires_at,
@@ -341,14 +330,6 @@ fn normalize_slug(value: &str) -> Result<String, AppError> {
         ));
     }
     Ok(slug)
-}
-
-fn normalize_email(value: &str) -> Result<String, AppError> {
-    let email = value.trim().to_lowercase();
-    if email.is_empty() || !email.contains('@') || email.chars().count() > 128 {
-        return Err(AppError::bad_request("EMAIL_INVALID", "请输入有效邮箱"));
-    }
-    Ok(email)
 }
 
 fn normalize_plan(value: Option<&str>) -> Result<String, AppError> {

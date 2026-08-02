@@ -9,7 +9,7 @@ export function InviteAcceptView() {
   const router = useRouter();
   const params = useSearchParams();
   const token = params.get("token") ?? "";
-  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -18,7 +18,7 @@ export function InviteAcceptView() {
     setSubmitting(true);
     setError(null);
     try {
-      await acceptInvitation(token, name, password);
+      await acceptInvitation(token, email, password);
       router.replace(AUTHENTICATED_HOME_PATH);
     } catch (err) {
       setError(err instanceof Error ? err.message : "接受邀请失败");
@@ -32,22 +32,23 @@ export function InviteAcceptView() {
       <section className="dm-login-card">
         <div className="dm-login-brand">DocuMind</div>
         <h1>接受邀请</h1>
-        <p>设置账号信息后即可加入当前租户。</p>
+        <p>已有账号直接验证登录；新账号将自动注册并加入租户。</p>
         <label>
-          <span>姓名</span>
-          <input value={name} onChange={(event) => setName(event.target.value)} placeholder="你的姓名" />
+          <span>账号</span>
+          <input autoComplete="username" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="已有账号或新邮箱" />
         </label>
         <label>
           <span>密码</span>
           <input
+            autoComplete="current-password"
             type="password"
             value={password}
             onChange={(event) => setPassword(event.target.value)}
-            placeholder="至少 8 个字符"
+            placeholder="已有账号密码；新账号至少 8 位"
           />
         </label>
         {error ? <div className="dm-login-error">{error}</div> : null}
-        <Button disabled={submitting || !token || password.length < 8} onClick={submit}>
+        <Button disabled={submitting || !token || !email.trim() || !password} onClick={submit}>
           加入租户
         </Button>
       </section>
