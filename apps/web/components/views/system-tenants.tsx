@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Building2, Check, Copy, Link2, MoreHorizontal, Plus, X } from "lucide-react";
+import { Building2, Check, Copy, ExternalLink, Link2, MoreHorizontal, Plus, X } from "lucide-react";
 import {
   createSystemTenant,
+  generateSystemTenantAdminInvitation,
   listSystemTenants,
   requestSystemTenantDeletion,
-  resendSystemTenantInvitation,
   updateSystemTenant,
   type SystemTenant,
 } from "@/lib/api";
@@ -173,8 +173,12 @@ export function SystemTenants() {
     }
   };
 
-  const copyInitialAdminInvitation = async (tenant: SystemTenant) => {
-    const raw = prompt("将生成新的初始管理员邀请链接，旧链接立即失效。请输入有效天数（1-30）：", "7");
+  const copyAdminInvitation = async (tenant: SystemTenant) => {
+    const email = tenant.status === "active"
+      ? prompt("请输入要邀请为租户管理员的邮箱：")?.trim()
+      : undefined;
+    if (tenant.status === "active" && !email) return;
+    const raw = prompt("将生成新的管理员邀请链接；同一邮箱的旧链接立即失效。请输入有效天数（1-30）：", "7");
     if (raw === null) return;
     const days = Number(raw);
     if (!Number.isInteger(days) || days < 1 || days > 30) {
@@ -184,15 +188,16 @@ export function SystemTenants() {
     setBusy(tenant.id);
     setMessage("");
     try {
-      const invitation = await resendSystemTenantInvitation(tenant.id, days);
+      const invitation = await generateSystemTenantAdminInvitation(tenant.id, days, email);
       const url = absoluteUrl(invitation.invite_url);
       const copied = await copyToClipboard(url);
+      if (!copied) prompt("自动复制失败，请手动复制管理员邀请链接：", url);
       await reload();
       setMessage(copied
         ? `已复制 ${invitation.email} 的管理员邀请链接，有效期 ${days} 天`
-        : `已生成 ${invitation.email} 的管理员邀请链接，但自动复制失败，请重试`);
+        : `已生成 ${invitation.email} 的管理员邀请链接`);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "邀请重发失败");
+      setMessage(error instanceof Error ? error.message : "管理员邀请生成失败");
     } finally {
       setBusy(null);
     }
@@ -277,12 +282,15 @@ export function SystemTenants() {
                   type="button"
                 >
                   {copiedSlug === tenant.slug ? <Check size={14} /> : <Link2 size={14} />}
-                  {copiedSlug === tenant.slug ? "已复制" : "复制入口"}
+                  {copiedSlug === tenant.slug ? "已复制" : "复制链接"}
                 </button>
+                <a href={tenantAccessUrl(tenant.slug)} rel="noreferrer" target="_blank">
+                  <ExternalLink size={14} /> 打开登录
+                </a>
               </div>
               <div className="dm-row-actions">
-                {tenant.status === "pending" ? (
-                  <button disabled={busy === tenant.id} onClick={() => copyInitialAdminInvitation(tenant)} type="button">
+                {tenant.status === "pending" || tenant.status === "active" ? (
+                  <button disabled={busy === tenant.id} onClick={() => copyAdminInvitation(tenant)} type="button">
                     <Copy size={14} /> 复制管理员邀请
                   </button>
                 ) : null}

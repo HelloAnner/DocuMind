@@ -2645,7 +2645,8 @@ a {
   justify-content: flex-end;
 }
 
-.dm-row-actions button {
+.dm-row-actions button,
+.dm-row-actions a {
   align-items: center;
   background: transparent;
   border: 1px solid var(--border-subtle);
@@ -2660,7 +2661,8 @@ a {
   transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
 }
 
-.dm-row-actions button:hover {
+.dm-row-actions button:hover,
+.dm-row-actions a:hover {
   background: var(--hover-bg);
   border-color: var(--border-subtle);
   color: var(--text-primary);
@@ -2689,7 +2691,7 @@ a {
 }
 
 .dm-tenant-row {
-  grid-template-columns: minmax(0, 1.25fr) 90px 110px 120px 90px 120px 120px;
+  grid-template-columns: minmax(0, 1.25fr) 90px 110px 120px 90px 210px 190px;
 }
 
 .dm-tenant-row > span {

@@ -26,7 +26,7 @@ pub fn router() -> Router<AppState> {
         )
         .route(
             "/api/system/tenants/:id/invitations/resend",
-            axum::routing::post(super::system_tenant_invitations::resend_initial_invitation),
+            axum::routing::post(super::system_tenant_invitations::generate_admin_invitation),
         )
         .route("/api/system/users", get(list_users))
         .route("/api/system/models", get(list_models))

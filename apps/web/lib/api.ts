@@ -264,12 +264,12 @@ export async function requestSystemTenantDeletion(id: string, slug: string) {
   );
 }
 
-export async function resendSystemTenantInvitation(id: string, expiresInDays: number) {
+export async function generateSystemTenantAdminInvitation(id: string, expiresInDays: number, email?: string) {
   return fetchJson<{ id: string; email: string; expires_at: string; invite_url: string }>(
     `/api/system/tenants/${id}/invitations/resend`,
     {
       method: "POST",
-      body: JSON.stringify({ expires_in_days: expiresInDays }),
+      body: JSON.stringify({ expires_in_days: expiresInDays, email }),
     }
   );
 }
