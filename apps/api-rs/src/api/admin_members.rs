@@ -48,13 +48,15 @@ async fn update_member(
         .as_ref()
         .ok_or_else(|| AppError::bad_request("DB_REQUIRED", "成员管理功能需要数据库"))?;
     ensure_not_platform_admin(pool, user_id).await?;
+    let mut transaction = pool.begin().await?;
+    lock_tenant_members(&mut transaction, actor.tenant_id).await?;
 
     let current = sqlx::query(
-        "SELECT roles, status FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 LIMIT 1",
+        "SELECT roles, status FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE",
     )
     .bind(actor.tenant_id)
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *transaction)
     .await?
     .ok_or_else(member_not_found)?;
     let current_roles: Vec<String> = current.get("roles");
@@ -70,7 +72,7 @@ async fn update_member(
             }
         }) == "tenant_admin";
     if currently_active_admin && !remains_active_admin {
-        ensure_other_active_admin(pool, actor.tenant_id, user_id).await?;
+        ensure_other_active_admin(&mut transaction, actor.tenant_id, user_id).await?;
     }
 
     let updated = sqlx::query(
@@ -87,8 +89,9 @@ async fn update_member(
     .bind(user_id)
     .bind(role.as_deref())
     .bind(status.as_deref())
-    .fetch_one(pool)
+    .fetch_one(&mut *transaction)
     .await?;
+    transaction.commit().await?;
     let roles: Vec<String> = updated.get("roles");
     let status: String = updated.get("status");
 
@@ -122,21 +125,22 @@ async fn remove_member(
         .as_ref()
         .ok_or_else(|| AppError::bad_request("DB_REQUIRED", "成员管理功能需要数据库"))?;
     ensure_not_platform_admin(pool, user_id).await?;
+    let mut transaction = pool.begin().await?;
+    lock_tenant_members(&mut transaction, actor.tenant_id).await?;
     let membership = sqlx::query(
-        "SELECT roles, status FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 LIMIT 1",
+        "SELECT roles, status FROM tenant_member WHERE tenant_id = $1 AND user_id = $2 LIMIT 1 FOR UPDATE",
     )
     .bind(actor.tenant_id)
     .bind(user_id)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *transaction)
     .await?
     .ok_or_else(member_not_found)?;
     let roles: Vec<String> = membership.get("roles");
     let status: String = membership.get("status");
     if status == "active" && roles.iter().any(|item| item == "tenant_admin") {
-        ensure_other_active_admin(pool, actor.tenant_id, user_id).await?;
+        ensure_other_active_admin(&mut transaction, actor.tenant_id, user_id).await?;
     }
 
-    let mut transaction = pool.begin().await?;
     sqlx::query(
         "UPDATE tenant_member SET status = 'removed', updated_at = NOW() WHERE tenant_id = $1 AND user_id = $2",
     )
@@ -206,8 +210,19 @@ async fn ensure_not_platform_admin(pool: &sqlx::PgPool, user_id: Uuid) -> Result
     Ok(())
 }
 
+async fn lock_tenant_members(
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: Uuid,
+) -> Result<(), AppError> {
+    sqlx::query("SELECT id FROM tenant WHERE id = $1 FOR UPDATE")
+        .bind(tenant_id)
+        .fetch_one(&mut **transaction)
+        .await?;
+    Ok(())
+}
+
 async fn ensure_other_active_admin(
-    pool: &sqlx::PgPool,
+    transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant_id: Uuid,
     user_id: Uuid,
 ) -> Result<(), AppError> {
@@ -223,7 +238,7 @@ async fn ensure_other_active_admin(
     )
     .bind(tenant_id)
     .bind(user_id)
-    .fetch_one(pool)
+    .fetch_one(&mut **transaction)
     .await?;
     if count == 0 {
         return Err(AppError::Conflict {

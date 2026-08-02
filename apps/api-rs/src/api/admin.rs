@@ -550,8 +550,7 @@ async fn list_members(
             .bind(&row.roles)
             .bind(row.id.to_string())
             .fetch_all(pool)
-            .await
-            .unwrap_or_default();
+            .await?;
             members.push(MemberSummary {
                 id: row.id,
                 email: row.email,
@@ -697,6 +696,26 @@ async fn create_invitation(
     };
 
     let email = normalize_email(&req.email)?;
+    let member_exists: bool = sqlx::query_scalar(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM app_user u
+            JOIN tenant_member tm ON tm.user_id = u.id
+            WHERE tm.tenant_id = $1 AND lower(u.email) = lower($2)
+        )
+        "#,
+    )
+    .bind(actor.tenant_id)
+    .bind(&email)
+    .fetch_one(pool)
+    .await?;
+    if member_exists {
+        return Err(crate::error::AppError::Conflict {
+            code: "TENANT_MEMBER_EXISTS".to_string(),
+            message: "该账号已经是当前租户成员，请直接修改成员状态或角色".to_string(),
+        });
+    }
     let roles = normalize_invitation_roles(&req.roles)?;
     let grants =
         normalize_invitation_grants(pool, actor.tenant_id, req.kb_grants.unwrap_or_default())
@@ -789,7 +808,7 @@ async fn resend_invitation(
             updated_at = NOW()
         WHERE tenant_id = $1
           AND id = $2
-          AND status = 'pending'
+          AND status IN ('pending', 'expired', 'revoked')
           AND accepted_at IS NULL
         RETURNING id,
                   tenant_id,

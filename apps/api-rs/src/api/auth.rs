@@ -3,7 +3,7 @@ use axum::http::{header, HeaderMap, HeaderValue, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use bcrypt::{hash, DEFAULT_COST};
+use bcrypt::{hash, verify, DEFAULT_COST};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -738,24 +738,30 @@ async fn accept_invitation(
             "邀请链接无效",
         ));
     }
+
     let token_hash = invitation_token_hash(token);
+    let mut tx = pool.begin().await?;
     let invitation = sqlx::query(
         r#"
-        SELECT id,
-               tenant_id,
-               email,
-               name,
-               roles,
-               kb_grants,
-               status,
-               expires_at
-        FROM tenant_invitation
-        WHERE token_hash = $1
+        SELECT inv.id,
+               inv.tenant_id,
+               inv.email,
+               inv.name,
+               inv.roles,
+               inv.kb_grants,
+               inv.invited_by,
+               inv.status,
+               inv.expires_at,
+               t.status AS tenant_status
+        FROM tenant_invitation inv
+        JOIN tenant t ON t.id = inv.tenant_id
+        WHERE inv.token_hash = $1
         LIMIT 1
+        FOR UPDATE OF inv, t
         "#,
     )
     .bind(&token_hash)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?
     .ok_or_else(|| crate::error::AppError::NotFound {
         code: "INVITATION_NOT_FOUND".to_string(),
@@ -779,8 +785,10 @@ async fn accept_invitation(
         .collect::<Vec<_>>();
     roles.sort();
     roles.dedup();
+
     let status: String = invitation.get("status");
     let expires_at: chrono::DateTime<chrono::Utc> = invitation.get("expires_at");
+    let tenant_status: String = invitation.get("tenant_status");
     if status != "pending" {
         return Err(crate::error::AppError::Conflict {
             code: "INVITATION_NOT_PENDING".to_string(),
@@ -789,11 +797,12 @@ async fn accept_invitation(
     }
     if expires_at < chrono::Utc::now() {
         sqlx::query(
-            "UPDATE tenant_invitation SET status = 'expired', updated_at = NOW() WHERE id = $1 AND status = 'pending'",
+            "UPDATE tenant_invitation SET status = 'expired', updated_at = NOW() WHERE id = $1",
         )
         .bind(invitation_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
+        tx.commit().await?;
         return Err(crate::error::AppError::Conflict {
             code: "INVITATION_EXPIRED".to_string(),
             message: "邀请已过期".to_string(),
@@ -805,47 +814,86 @@ async fn accept_invitation(
             message: "邀请角色无效或无权授予".to_string(),
         });
     }
+    let primary_role = roles.first().cloned().ok_or_else(|| {
+        crate::error::AppError::bad_request("INVITATION_ROLE_INVALID", "邀请角色无效")
+    })?;
+    let activates_pending_tenant =
+        tenant_status == "pending" && roles.iter().any(|role| role == "tenant_admin");
+    if tenant_status != "active" && !activates_pending_tenant {
+        return Err(crate::error::AppError::Conflict {
+            code: "TENANT_NOT_ACTIVE".to_string(),
+            message: "租户当前不可接受邀请".to_string(),
+        });
+    }
 
     let existing_user = sqlx::query(
-        "SELECT id, password_hash FROM app_user WHERE lower(email) = lower($1) LIMIT 1",
+        r#"
+        SELECT u.id,
+               u.password_hash,
+               u.status,
+               EXISTS(
+                   SELECT 1 FROM platform_admin pa
+                   WHERE pa.user_id = u.id AND pa.status = 'active'
+               ) AS is_platform_admin
+        FROM app_user u
+        WHERE lower(u.email) = lower($1)
+        LIMIT 1
+        FOR UPDATE OF u
+        "#,
     )
     .bind(&email)
-    .fetch_optional(pool)
+    .fetch_optional(&mut *tx)
     .await?;
     let display_name = req
         .name
         .as_deref()
         .map(str::trim)
-        .filter(|v| !v.is_empty())
+        .filter(|value| !value.is_empty())
         .map(str::to_string)
         .or(invitation_name)
         .unwrap_or_else(|| email.clone());
+
     let user_id = if let Some(user) = existing_user {
         let user_id: Uuid = user.get("id");
+        let user_status: String = user.get("status");
+        if user.get::<bool, _>("is_platform_admin") {
+            return Err(crate::error::AppError::Forbidden {
+                code: "PLATFORM_ADMIN_TENANT_MEMBERSHIP_FORBIDDEN".to_string(),
+                message: "平台管理员不能加入租户数据空间".to_string(),
+            });
+        }
+        if user_status != "active" {
+            return Err(crate::error::AppError::Forbidden {
+                code: "ACCOUNT_NOT_ACTIVE".to_string(),
+                message: "账号已停用，不能接受邀请".to_string(),
+            });
+        }
         let password_hash: Option<String> = user.try_get("password_hash").ok();
-        if password_hash.as_deref().unwrap_or_default().is_empty() {
-            let password = req.password.as_deref().ok_or_else(|| {
-                crate::error::AppError::bad_request("PASSWORD_REQUIRED", "首次接受邀请需要设置密码")
-            })?;
-            let password_hash = hash_password(password)?;
-            sqlx::query(
-                "UPDATE app_user SET name = $2, password_hash = $3, status = 'active', last_active_tenant = $4, updated_at = NOW() WHERE id = $1",
-            )
-            .bind(user_id)
-            .bind(&display_name)
-            .bind(password_hash)
-            .bind(tenant_id)
-            .execute(pool)
-            .await?;
-        } else {
-            sqlx::query(
-                "UPDATE app_user SET name = COALESCE(NULLIF($2, ''), name), status = 'active', last_active_tenant = $3, updated_at = NOW() WHERE id = $1",
-            )
-            .bind(user_id)
-            .bind(&display_name)
-            .bind(tenant_id)
-            .execute(pool)
-            .await?;
+        let password = req.password.as_deref().ok_or_else(|| {
+            crate::error::AppError::bad_request("PASSWORD_REQUIRED", "已有账号接受邀请需要验证密码")
+        })?;
+        let password_matches = password_hash
+            .as_deref()
+            .filter(|value| !value.is_empty())
+            .is_some_and(|value| verify(password, value).unwrap_or(false));
+        if !password_matches {
+            return Err(crate::error::AppError::Unauthorized {
+                code: "INVITATION_ACCOUNT_VERIFICATION_FAILED".to_string(),
+                message: "账号密码验证失败".to_string(),
+            });
+        }
+        let member_exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM tenant_member WHERE tenant_id = $1 AND user_id = $2)",
+        )
+        .bind(tenant_id)
+        .bind(user_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if member_exists {
+            return Err(crate::error::AppError::Conflict {
+                code: "TENANT_MEMBER_EXISTS".to_string(),
+                message: "该账号已经是当前租户成员，请直接修改成员状态或角色".to_string(),
+            });
         }
         user_id
     } else {
@@ -866,33 +914,27 @@ async fn accept_invitation(
         .bind(&display_name)
         .bind(password_hash)
         .bind(tenant_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
         user_id
     };
 
     sqlx::query(
         r#"
-        INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_at, joined_at)
-        VALUES ($1, $2, $3, 'active', NOW(), NOW())
-        ON CONFLICT (tenant_id, user_id)
-        DO UPDATE SET roles = EXCLUDED.roles,
-                      status = 'active',
-                      joined_at = COALESCE(tenant_member.joined_at, NOW()),
-                      updated_at = NOW()
+        INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_by, invited_at, joined_at)
+        VALUES ($1, $2, $3, 'active', $4, NOW(), NOW())
         "#,
     )
     .bind(tenant_id)
     .bind(user_id)
     .bind(&roles)
-    .execute(pool)
+    .bind(invitation.get::<Uuid, _>("invited_by"))
+    .execute(&mut *tx)
     .await?;
 
-    let grants_value: serde_json::Value = invitation
-        .try_get("kb_grants")
-        .unwrap_or_else(|_| serde_json::json!([]));
-    let grants: Vec<InvitationGrantStored> =
-        serde_json::from_value(grants_value).unwrap_or_default();
+    let grants_value: serde_json::Value = invitation.get("kb_grants");
+    let grants: Vec<InvitationGrantStored> = serde_json::from_value(grants_value)
+        .map_err(|error| crate::error::AppError::Internal(error.into()))?;
     for grant in grants {
         sqlx::query(
             r#"
@@ -906,49 +948,52 @@ async fn accept_invitation(
         .bind(grant.kb_id)
         .bind(user_id.to_string())
         .bind(&grant.permission)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
     }
 
-    let accepted = sqlx::query(
+    sqlx::query(
         r#"
         UPDATE tenant_invitation
-        SET status = 'accepted',
-            accepted_by = $2,
-            accepted_at = NOW(),
-            updated_at = NOW()
+        SET status = 'accepted', accepted_by = $2, accepted_at = NOW(), updated_at = NOW()
         WHERE id = $1
-          AND status = 'pending'
-          AND accepted_by IS NULL
         "#,
     )
     .bind(invitation_id)
     .bind(user_id)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
-    if accepted.rows_affected() == 0 {
-        return Err(crate::error::AppError::Conflict {
-            code: "INVITATION_ALREADY_USED".to_string(),
-            message: "邀请已被使用".to_string(),
-        });
+    if activates_pending_tenant {
+        sqlx::query("UPDATE tenant SET status = 'active', updated_at = NOW() WHERE id = $1")
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await?;
     }
-
-    if roles.iter().any(|role| role == "tenant_admin") {
-        sqlx::query(
-            "UPDATE tenant SET status = 'active', updated_at = NOW() WHERE id = $1 AND status = 'pending'",
-        )
+    sqlx::query("UPDATE app_user SET last_active_tenant = $2, updated_at = NOW() WHERE id = $1")
+        .bind(user_id)
         .bind(tenant_id)
-        .execute(pool)
+        .execute(&mut *tx)
         .await?;
-    }
+    sqlx::query(
+        r#"
+        INSERT INTO audit_log
+          (tenant_id, actor_user_id, actor_role, action, resource_type, resource_id, detail)
+        VALUES ($1, $2, $3, 'tenant_invitation.accept', 'tenant_invitation', $4, $5)
+        "#,
+    )
+    .bind(tenant_id)
+    .bind(user_id)
+    .bind(&primary_role)
+    .bind(invitation_id.to_string())
+    .bind(json!({ "email": email, "roles": roles }))
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
 
     let claims = auth::Claims {
         sub: user_id,
         email: email.clone(),
-        role: roles
-            .first()
-            .cloned()
-            .unwrap_or_else(|| "end_user".to_string()),
+        role: primary_role,
         tenant_id,
         sid: None,
         exp: (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize,
@@ -956,15 +1001,6 @@ async fn accept_invitation(
     let actor = auth::actor_from_claims(&state, &claims).await?;
     let session_id = auth::create_auth_session(&state, &actor).await?;
     let access_token = auth::issue_token(&state.config, &actor, Some(&session_id))?;
-    auth::record_audit_event(
-        &state,
-        Some(&actor),
-        "tenant_invitation.accept",
-        Some("tenant_invitation"),
-        Some(&invitation_id.to_string()),
-        json!({ "email": email, "roles": roles }),
-    )
-    .await?;
     let me = me_response(&state, actor).await?;
     Ok(Json(LoginResponse {
         access_token,
