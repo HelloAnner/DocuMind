@@ -62,6 +62,11 @@ export async function verifyExternalApi(
     if (secondary.created.client.id === primary.created.client.id) {
       throw new CliError("两个租户生成了相同 API Client ID");
     }
+    if (secondary.chat.identity.tenant_id === primary.chat.identity.tenant_id) {
+      throw new CliError("--other-config 必须登录另一个租户", 2, {
+        tenant_id: primary.chat.identity.tenant_id,
+      });
+    }
     setExternalToken(primary.admin.config, rotated.secret);
     await expectStatus(
       () => primary.external.getMessages(secondary!.chat.request.conversation_id),
