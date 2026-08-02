@@ -130,7 +130,7 @@ async fn list_jobs(
     let summary_row = sqlx::query(
         "SELECT
            COUNT(*) FILTER (WHERE j.status IN ('pending', 'ocr_queued')) AS queued,
-           COUNT(*) FILTER (WHERE j.status = 'running' OR v.status = 'running') AS processing,
+           COUNT(*) FILTER (WHERE j.status = 'running' OR v.status IN ('pending', 'running')) AS processing,
            COUNT(*) FILTER (WHERE (j.status = 'failed' OR v.status = 'failed') AND COALESCE(j.completed_at, v.completed_at, j.updated_at) >= NOW() - INTERVAL '24 hours') AS failed_24h,
            COUNT(*) FILTER (WHERE d.parse_status = 'indexed' AND d.updated_at >= NOW() - INTERVAL '24 hours') AS completed_24h,
            COUNT(*) FILTER (WHERE j.status = 'running' AND COALESCE(j.heartbeat_at, j.updated_at, j.started_at) < NOW() - INTERVAL '10 minutes') AS stalled
