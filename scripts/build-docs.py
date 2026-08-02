@@ -19,6 +19,7 @@ BUNDLE_NAME = "DocuMind项目交付文档书"
 DOCUMENTS = [
     ("independent-deployment.md", "DocuMind独立部署说明书.docx"),
     ("system-architecture.md", "DocuMind系统架构与业务逻辑说明书.docx"),
+    ("external-api-integration.md", "DocuMind第三方系统API接入说明书.docx"),
 ]
 W = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 
