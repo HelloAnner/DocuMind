@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
-import { AppError, toAppError } from './errors.ts';
+import { toAppError } from './errors.ts';
 import { buildState } from './state.ts';
 import type { AppConfig } from './config.ts';
 import { healthPayload, type HealthDeps } from './http/health.ts';
@@ -28,7 +28,9 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
     vectorConsistency: state.vectorConsistency,
   };
 
+  // 业务 API 路由（与 Rust 一致：同时挂载在 / 与 /documind 下）
   const api = new Hono<AppEnv>();
+  api.get('/api/health', async (c) => c.json(await healthPayload(healthDeps)));
   api.get('/api/metrics', async (c) => c.text(await metricsPayload(healthDeps), 200, {
     'Content-Type': 'text/plain; version=0.0.4; charset=utf-8',
   }));
@@ -49,13 +51,14 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', conversationsRouter());
 
   const app = new Hono<AppEnv>();
-  app.use(logger());
-  app.use(cors({
+  app.use('*', logger());
+  app.use('*', cors({
     origin: '*',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: ['*'],
+    exposeHeaders: ['*'],
   }));
-  // 先注入 state，再做身份解析
+  // 先注入 state，再做身份解析（仅 /api 路径需要身份）
   app.use('*', async (c, next) => {
     c.set('appState', state);
     await next();
@@ -67,21 +70,27 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
     redis: c.get('appState').redis,
     dbPoolPresent: c.get('appState').sql !== null,
   })));
+  app.use('/documind/api/*', extractActorMiddleware((c) => ({
+    state: c.get('appState'),
+    config: c.get('appState').config,
+    sql: c.get('appState').sql,
+    redis: c.get('appState').redis,
+    dbPoolPresent: c.get('appState').sql !== null,
+  })));
 
-  const healthApi = new Hono<AppEnv>();
-  healthApi.get('/api/health', async (c) => c.json(await healthPayload(healthDeps)));
-  app.route('/', healthApi);
   app.route('/', api);
   app.route('/documind', api);
 
   // 静态资源 + SPA 回退
   app.all('*', (c) => {
     const path = new URL(c.req.url).pathname;
-    if (path.startsWith('/api/')) {
+    if (path.startsWith('/api/') || path.startsWith('/documind/api/')) {
       return c.json({ detail: 'not found' }, 404);
     }
     const asset = getAsset(path) ?? getAsset('/index.html') ?? fallbackHtml();
-    return new Response(asset.bytes as unknown as ArrayBuffer, { status: 200, headers: { 'Content-Type': asset.contentType } });
+    return new Response(asset.bytes as unknown as ArrayBuffer, {
+      status: 200, headers: { 'Content-Type': asset.contentType },
+    });
   });
 
   app.onError((error, c) => {
