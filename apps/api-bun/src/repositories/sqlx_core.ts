@@ -278,23 +278,25 @@ export class SqlxConversationCore {
   }
 
   async getMessage(tenantId: string, messageId: string): Promise<ConversationMessage | null> {
-    const rows = await this.pool`
-      SELECT ${this.pool(MESSAGE_COLUMNS)}
-      FROM conversation_messages
-      WHERE id = ${messageId} AND tenant_id = ${tenantId}
-    `;
+    const rows = await this.pool.unsafe(
+      `SELECT ${MESSAGE_COLUMNS}
+       FROM conversation_messages
+       WHERE id = $1 AND tenant_id = $2`,
+      [messageId, tenantId],
+    );
     const row = rows[0];
     if (row === undefined) return null;
     return parseMessage(row);
   }
 
   async getMessages(tenantId: string, conversationId: string): Promise<ConversationMessage[]> {
-    const rows = await this.pool`
-      SELECT ${this.pool(MESSAGE_COLUMNS)}
-      FROM conversation_messages
-      WHERE conversation_id = ${conversationId} AND tenant_id = ${tenantId}
-      ORDER BY created_at ASC
-    `;
+    const rows = await this.pool.unsafe(
+      `SELECT ${MESSAGE_COLUMNS}
+       FROM conversation_messages
+       WHERE conversation_id = $1 AND tenant_id = $2
+       ORDER BY created_at ASC`,
+      [conversationId, tenantId],
+    );
     return rows.map((row) => parseMessage(row));
   }
 
@@ -315,11 +317,12 @@ export class SqlxConversationCore {
   async findMessageByClientRequestId(
     tenantId: string, userId: string, clientRequestId: string,
   ): Promise<ConversationMessage | null> {
-    const rows = await this.pool`
-      SELECT ${this.pool(MESSAGE_COLUMNS)}
-      FROM conversation_messages
-      WHERE tenant_id = ${tenantId} AND user_id = ${userId} AND client_request_id = ${clientRequestId}
-    `;
+    const rows = await this.pool.unsafe(
+      `SELECT ${MESSAGE_COLUMNS}
+       FROM conversation_messages
+       WHERE tenant_id = $1 AND user_id = $2 AND client_request_id = $3`,
+      [tenantId, userId, clientRequestId],
+    );
     const row = rows[0];
     if (row === undefined) return null;
     return parseMessage(row);
