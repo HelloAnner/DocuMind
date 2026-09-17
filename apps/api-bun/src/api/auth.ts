@@ -10,7 +10,8 @@ import { claimsFromAuthorizationHeader, issueToken, type Claims } from '../auth/
 import { createAuthSession, deleteAuthSession, validateAndRenewAuthSession } from '../auth/session.ts';
 import { derivePermissions, roleMatrix } from '../auth/permissions.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
-import type { MeResponse, TenantProfile, UserProfile } from '../models/identity.ts';
+import type { MeResponse, TenantProfile } from '../models/identity.ts';
+import type { LoginResponse } from './auth_types.ts';
 import { newUuid } from '../infra/uuid.ts';
 
 const AUTHENTICATED_HOME_PATH = '/chat';
@@ -18,11 +19,6 @@ const AUTHENTICATED_HOME_PATH = '/chat';
 interface LoginRequest {
   username?: string | null; email?: string | null; password: string;
   tenant_id?: string | null; tenant_slug?: string | null;
-}
-interface LoginResponse {
-  access_token: string; token_type: 'bearer'; scope: string;
-  user: UserProfile; tenant: TenantProfile;
-  roles: string[]; permissions: string[]; allowed_kb_ids: string[];
 }
 interface AcceptInvitationRequest {
   token: string; login_id?: string | null; name?: string | null; password?: string | null;
