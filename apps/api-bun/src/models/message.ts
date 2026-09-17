@@ -20,11 +20,14 @@ export interface CitationResponse {
   quote: string; source_status: string; anchor?: CitationAnchor | null;
 }
 export function citationToResponse(citation: Citation): CitationResponse {
-  return {
+  const response: CitationResponse = {
     index: citation.index, doc_id: citation.doc_id, chunk_id: citation.chunk_id,
     doc_title: citation.doc_title, page_range: citation.page_range, quote: citation.quote,
-    source_status: citation.source_status, anchor: citation.anchor,
+    source_status: citation.source_status,
   };
+  // Rust: #[serde(skip_serializing_if = "Option::is_none")] —— 无 anchor 时省略该键
+  if (citation.anchor !== null) response.anchor = citation.anchor;
+  return response;
 }
 
 export interface MessageResponse {

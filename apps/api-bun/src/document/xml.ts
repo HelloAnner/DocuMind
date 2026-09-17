@@ -185,7 +185,11 @@ class XmlParser {
         continue;
       }
       if (this.xml.startsWith('<?', this.pos)) { this.skipPi(); continue; }
-      if (this.xml[this.pos] === '<') throw new XmlParseError('invalid_markup');
+      if (this.xml[this.pos] === '<') {
+        // 子元素：roxmltree 的 children 语义（文本与元素按文档序混排）
+        element.children.push(this.parseElement(element));
+        continue;
+      }
       const lt = this.xml.indexOf('<', this.pos);
       const textEnd = lt < 0 ? this.xml.length : lt;
       const text = this.xml.slice(this.pos, textEnd);

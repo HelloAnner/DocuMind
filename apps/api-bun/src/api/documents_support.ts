@@ -1,12 +1,28 @@
 // 移植自 apps/api-rs/src/api/documents.rs —— 纯函数助手（不含 IO）
+import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
+import type { AppEnv } from '../http/types.ts';
 import { PARSER_VERSION } from '../document/types.ts';
 import { CLEANER_VERSION } from '../document/cleaning.ts';
 import type { ParsedBundle } from '../document/types.ts';
 import { MAX_OFFICE_ZIP_ENTRIES, MAX_OFFICE_UNCOMPRESSED_BYTES, MAX_OFFICE_ENTRY_BYTES,
   MAX_OFFICE_XML_BYTES, MAX_OFFICE_COMPRESSION_RATIO, MAX_PDF_PAGES, MAX_PDF_PAGE_TEXT_CHARS,
 } from '../document/types.ts';
+import { PREVIEW_CHAR_LIMIT } from './documents_types.ts';
 import type { DocumentRecord, ParseJobTask } from './documents_types.ts';
+
+// ---------------------------------------------------------------------------
+// HTTP 助手
+// ---------------------------------------------------------------------------
+
+/** 取路径参数；Hono 未标注路由字面量时可能返回 undefined（Rust 由 axum 保证存在） */
+export function pathParam(c: Context<AppEnv>, name: string): string {
+  const value = c.req.param(name);
+  if (value === undefined || value === '') {
+    throw AppError.badRequest('BAD_REQUEST', `缺少路径参数 ${name}`);
+  }
+  return value;
+}
 
 /** Rust: ingest::CHUNKER_VERSION（document/chunking.rs 尚未移植，常量值与 Rust 对齐） */
 export const CHUNKER_VERSION = 'documind-chunker@0.2.0';
@@ -112,6 +128,11 @@ export function sha256Hex(bytes: Uint8Array | string): string {
   const hasher = new Bun.CryptoHasher('sha256');
   hasher.update(typeof bytes === 'string' ? new TextEncoder().encode(bytes) : bytes);
   return hasher.digest('hex');
+}
+
+/** 收敛为 postgres.js 可接受的 JSON 参数（等价于 serde_json::Value） */
+export function toJson(value: unknown): import('postgres').JSONValue {
+  return JSON.parse(JSON.stringify(value ?? null)) as import('postgres').JSONValue;
 }
 
 /** 对应 serde_json::Value 的 Display：对象 key 按字典序（serde_json 默认 BTreeMap） */

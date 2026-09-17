@@ -13,7 +13,7 @@ import type { AppEnv } from './http/types.ts';
 import { getAsset, fallbackHtml } from './web_assets.ts';
 import {
   accountRouter, adminApiClientsRouter, adminMembersRouter, adminRouter, authRouter,
-  conversationsRouter, documentsRouter, historyRouter, knowledgeRouter,
+  conversationsRouter, documentsRouter, externalApiRouter, historyRouter, knowledgeRouter,
   systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
@@ -48,6 +48,7 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', documentsRouter());
   api.route('/', knowledgeRouter());
   api.route('/', historyRouter());
+  api.route('/', externalApiRouter());
   api.route('/', conversationsRouter());
 
   const app = new Hono<AppEnv>();

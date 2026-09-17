@@ -63,7 +63,7 @@ ORDER BY preview.used_at DESC, doc_title ASC
 
 export function parseConversationFileRow(row: Row): ConversationFile {
   const anchorValue: unknown = row['preview_anchor'];
-  return {
+  const file: ConversationFile = {
     doc_id: strCol(row, 'doc_id'),
     doc_title: strCol(row, 'doc_title'),
     file_name: strCol(row, 'file_name'),
@@ -76,10 +76,12 @@ export function parseConversationFileRow(row: Row): ConversationFile {
     last_used_at: dateCol(row, 'last_used_at'),
     preview_page_range: numListOrEmpty(row, 'preview_page_range'),
     preview_quote: strCol(row, 'preview_quote'),
-    preview_anchor: anchorValue === null || anchorValue === undefined
-      ? null
-      : (anchorValue as ConversationFile['preview_anchor']),
   };
+  // Rust: #[serde(skip_serializing_if = "Option::is_none")] —— 无 anchor 时省略该键
+  if (anchorValue !== null && anchorValue !== undefined) {
+    file.preview_anchor = anchorValue as ConversationFile['preview_anchor'];
+  }
+  return file;
 }
 
 export async function queryConversationFiles(

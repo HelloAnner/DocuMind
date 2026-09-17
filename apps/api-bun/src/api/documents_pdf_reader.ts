@@ -255,7 +255,7 @@ export function bytesOfString(value: PdfValue | null): Uint8Array | null {
 
 export function inflate(data: Uint8Array): Uint8Array {
   try {
-    return new Uint8Array(Bun.inflateSync(data));
+    return new Uint8Array(Bun.inflateSync(Buffer.from(data)));
   } catch (error) {
     throw new Error(`failed to inflate pdf stream: ${(error as Error).message}`);
   }

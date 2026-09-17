@@ -2,6 +2,9 @@
 
 // document 模块公共类型与常量（JSON key 与 serde 输出一致，snake_case）
 
+import type { SourceAnchor } from '../models/source_anchor.ts';
+import type { CleanStats, CleanedBlock } from './cleaning.ts';
+
 export const PARSER_VERSION = 'documind-parser@0.4.0';
 export const SCHEMA_VERSION = 'parsed-document-v1';
 export const MAX_OFFICE_ZIP_ENTRIES = 10_000;
@@ -26,7 +29,7 @@ export interface ParsedDocument {
   pages: number | null;
   blocks: ParsedBlock[];
   tables: ParsedTable[];
-  anchors: unknown[];
+  anchors: SourceAnchor[];
   warnings: string[];
   quality_score: number;
 }
@@ -103,7 +106,7 @@ export interface ParsedBundle {
   file_type: FileType;
   file_sha256: string;
   parsed: ParsedDocument;
-  cleaned_blocks: unknown[];
-  clean_stats: unknown;
+  cleaned_blocks: CleanedBlock[];
+  clean_stats: CleanStats;
   chunks: ChunkDraft[];
 }

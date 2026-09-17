@@ -263,8 +263,7 @@ export function sendProgressEvent(
     case 'thinking_delta':
       sendRuntimeEvent(ctx, 'thinking.delta', { delta: progress.delta });
       break;
-    case 'flush':
-      break;
+    // flush 已在上方提前 ack 并 return
   }
 }
 
