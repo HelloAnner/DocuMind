@@ -132,8 +132,8 @@ export async function buildState(config: AppConfig): Promise<AppState> {
 
   const storage = buildStorage(config);
   const vectorConsistency = () => quickConsistency(sql, config.rag.embedding, esUrl);
-  // 后台向量 worker：构建时不自动运行（由入口按需启动）
-  void startVectorWorker;
+  // 与 Rust 一致：有数据库时启动后台向量 worker（DB 轮询消费，无 AMQP 队列加速）
+  startVectorWorker(sql, config.rag.embedding, esUrl, config.rabbitmqUrl);
 
   return {
     config, sql, redis, repository, agentKernel, cache, storage, vectorConsistency,

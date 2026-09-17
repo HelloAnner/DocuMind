@@ -133,6 +133,9 @@ class XmlParser {
     this.expect('<');
     const rawName = this.readName();
     const element: XmlElement = { name: localName(rawName), attrs: {}, children: [], parent };
+    // roxmltree 按原始属性名判重（id 与 r:id 是不同属性，pptx/p:sldId 常见）；
+    // 本地名相同则后出现的覆盖前者，attrs 只保留扁平本地名映射
+    const rawAttrNames = new Set<string>();
     for (;;) {
       this.skipWhitespace();
       if (this.eof()) throw new XmlParseError('unclosed_element:' + rawName);
@@ -153,9 +156,10 @@ class XmlParser {
       const valueEnd = this.xml.indexOf(quote, this.pos);
       if (valueEnd < 0) throw new XmlParseError('unclosed_attribute:' + attrRawName);
       const attrLocal = localName(attrRawName);
-      if (Object.prototype.hasOwnProperty.call(element.attrs, attrLocal)) {
-        throw new XmlParseError('duplicate_attribute:' + attrLocal);
+      if (rawAttrNames.has(attrRawName)) {
+        throw new XmlParseError('duplicate_attribute:' + attrRawName);
       }
+      rawAttrNames.add(attrRawName);
       element.attrs[attrLocal] = decodeEntities(normalizeAttrValue(this.xml.slice(this.pos, valueEnd)));
       this.pos = valueEnd + 1;
     }

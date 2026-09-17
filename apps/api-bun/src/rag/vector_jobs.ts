@@ -2,6 +2,9 @@
 import type { Sql, TransactionSql } from 'postgres';
 import type { EmbeddingConfig } from '../config.ts';
 
+/** 对应 Rust serde_json::Value：vector_jobs.metadata 等 jsonb 参数。 */
+export type JobMetadata = import('postgres').JSONValue;
+
 export interface VectorJob {
   id: string;
   operation: string;
@@ -233,7 +236,7 @@ export async function heartbeat(sql: Sql, id: string, workerId: string): Promise
   );
 }
 
-export async function complete(sql: Sql, id: string, metadata: Record<string, unknown>): Promise<void> {
+export async function complete(sql: Sql, id: string, metadata: JobMetadata): Promise<void> {
   await sql.unsafe(
     `UPDATE vector_jobs
      SET status = 'completed',

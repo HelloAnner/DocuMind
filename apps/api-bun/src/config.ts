@@ -10,7 +10,12 @@ export interface EmbeddingConfig {
 }
 export interface GenerationConfig { model: string; baseUrl: string; apiKey: string; useRealLlm: boolean; temperature: number; maxOutputTokens: number; }
 export interface CitationConfig { requireCitation: boolean; verifyClaims: boolean; verifyConsensus: boolean; }
-export interface RagConfig { rewrite: RewriteConfig; retrieval: RetrievalConfig; rerank: RerankConfig; embedding: EmbeddingConfig; generation: GenerationConfig; citation: CitationConfig; }
+/** 对齐 Rust document::ChunkConfig::default()（RAG_* 环境变量，见 apps/api-rs/src/document/chunking.rs） */
+export interface ChunkingConfig {
+  targetChunkTokens: number; maxChunkTokens: number; hardSplitTokens: number; minChunkTokens: number;
+  overlapTokens: number; maxTableRowsPerChunk: number; maxTableTokenPerChunk: number;
+}
+export interface RagConfig { rewrite: RewriteConfig; retrieval: RetrievalConfig; rerank: RerankConfig; embedding: EmbeddingConfig; generation: GenerationConfig; citation: CitationConfig; chunking: ChunkingConfig; }
 export interface AgentConfig {
   reasoningModel: string; defaultTone: string; proactiveFollowup: boolean; maxFollowupSuggestions: number;
   allowAnalystMode: boolean; requireCitationForAnalysis: boolean; clarificationStyle: string;
@@ -60,6 +65,19 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     envStr(key) ?? defaultValue;
   const isUuid = (value: string): boolean =>
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  // Rust 用 std::env::var(name).ok().and_then(|v| v.parse().ok())：严格整数解析，失败回退默认值
+  const envRustI32 = (key: string, defaultValue: number): number => {
+    const raw = env[key];
+    if (raw === undefined || !/^[+-]?\d+$/.test(raw)) return defaultValue;
+    const parsed = Number.parseInt(raw, 10);
+    return parsed < -2147483648 || parsed > 2147483647 ? defaultValue : parsed;
+  };
+  const envRustUsize = (key: string, defaultValue: number): number => {
+    const raw = env[key];
+    if (raw === undefined || !/^\d+$/.test(raw)) return defaultValue;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isSafeInteger(parsed) ? parsed : defaultValue;
+  };
   const envUuidList = (key: string, defaultValue: string[]): string[] => {
     const raw = envStr(key);
     if (raw === undefined) return defaultValue;
@@ -122,6 +140,15 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       requireCitation: envBool('RAG_REQUIRE_CITATION', true),
       verifyClaims: envBool('RAG_VERIFY_CLAIMS', false),
       verifyConsensus: envBool('RAG_VERIFY_CONSENSUS', false),
+    },
+    chunking: {
+      targetChunkTokens: envRustI32('RAG_TARGET_CHUNK_TOKENS', 800),
+      maxChunkTokens: envRustI32('RAG_MAX_CHUNK_TOKENS', 1500),
+      hardSplitTokens: envRustI32('RAG_HARD_SPLIT_TOKENS', 2000),
+      minChunkTokens: envRustI32('RAG_MIN_CHUNK_TOKENS', 200),
+      overlapTokens: envRustI32('RAG_CHUNK_OVERLAP_TOKENS', 200),
+      maxTableRowsPerChunk: envRustUsize('RAG_MAX_TABLE_ROWS_PER_CHUNK', 50),
+      maxTableTokenPerChunk: envRustI32('RAG_MAX_TABLE_TOKEN_PER_CHUNK', 1200),
     },
   };
 

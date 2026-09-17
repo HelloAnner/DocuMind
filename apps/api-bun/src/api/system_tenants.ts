@@ -1,6 +1,7 @@
 // 移植自 apps/api-rs/src/api/system_tenants.rs
+import { Hono } from 'hono';
 import type { Context } from 'hono';
-import type { Sql } from 'postgres';
+import type { JSONValue, Sql, TransactionSql } from 'postgres';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { AppState } from '../state.ts';
@@ -20,6 +21,19 @@ export interface CreatedInvitation {
   expires_at: string; invite_url: string;
 }
 export interface CreateTenantResponse { tenant: CreatedTenant; invitation: CreatedInvitation; }
+
+/**
+ * system_tenants.rs 在 Rust 里由 system.rs 的 router() 挂载 /api/system/tenants。
+ * TS 侧按文件拆分：本 router 只注册租户写操作，读操作（GET list/detail）留在 system.ts，
+ * 避免两个 router 注册同一路径。
+ */
+export function systemTenantsRouter(): Hono<AppEnv> {
+  const router = new Hono<AppEnv>();
+  router.post('/api/system/tenants', createTenant);
+  router.patch('/api/system/tenants/:id', updateTenant);
+  router.delete('/api/system/tenants/:id', requestTenantDeletion);
+  return router;
+}
 
 export async function createTenant(c: Context<AppEnv>) {
   const state = c.get('appState');
@@ -78,7 +92,7 @@ export async function updateTenant(c: Context<AppEnv>) {
     throw AppError.badRequest('TENANT_UPDATE_EMPTY', '请至少修改一个租户字段');
   }
   const sql = requiredSql(state);
-  const tenantId = c.req.param('id');
+  const tenantId = c.req.param('id')!;
   const currents = await sql`
     SELECT name, slug, plan, status FROM tenant WHERE id = ${tenantId}
   `;
@@ -117,7 +131,7 @@ export async function requestTenantDeletion(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireSuperAdmin(actor);
-  const tenantId = c.req.param('id');
+  const tenantId = c.req.param('id')!;
   if (tenantId === actor.tenant_id) {
     throw AppError.conflictWith(
       'CURRENT_TENANT_DELETE_FORBIDDEN', '不能删除当前平台管理员的兼容登录租户');
@@ -221,11 +235,9 @@ export function clampDays(days: number): number {
   return Math.min(30, Math.max(1, Math.trunc(days)));
 }
 
-type Tx = Parameters<Parameters<Sql['begin']>[0]>[0];
-
 export async function insertSystemAudit(
-  tx: Tx, tenantId: string, actorUserId: string, action: string,
-  resourceType: string, resourceId: string, detail: unknown,
+  tx: TransactionSql, tenantId: string, actorUserId: string, action: string,
+  resourceType: string, resourceId: string, detail: JSONValue,
 ): Promise<void> {
   await tx`
     INSERT INTO audit_log
@@ -235,7 +247,7 @@ export async function insertSystemAudit(
 }
 
 export async function insertSystemAuditDirect(
-  sql: Sql, tenantId: string, actorUserId: string, action: string, detail: unknown,
+  sql: Sql, tenantId: string, actorUserId: string, action: string, detail: JSONValue,
 ): Promise<void> {
   await sql`
     INSERT INTO audit_log

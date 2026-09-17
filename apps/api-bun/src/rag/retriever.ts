@@ -126,10 +126,11 @@ export class EsRetriever implements Retriever {
     if (hypothetical !== null && hypothetical.trim().length > 0) {
       denseQueries.push(hypothetical);
     }
-    const denseResults = await Promise.all(
+    // 与 Rust join_all 一致：单条 query 失败不整体失败，分别收集成功列表与失败原因。
+    const denseResults = await Promise.allSettled(
       denseQueries.map((query) => this.denseSearch(query, input)),
     );
-    const bm25Results = await Promise.all(
+    const bm25Results = await Promise.allSettled(
       input.queries.map((query) => this.bm25Search(query, input)),
     );
 

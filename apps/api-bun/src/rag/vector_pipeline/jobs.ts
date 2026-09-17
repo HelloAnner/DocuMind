@@ -1,12 +1,12 @@
 // 移植自 apps/api-rs/src/rag/vector_pipeline.rs —— process_job / rebuild_index / verify_index_contents
 import type { Sql } from 'postgres';
 import type { EmbeddingConfig } from '../../config.ts';
-import type { VectorJob } from '../vector_jobs.ts';
+import type { JobMetadata, VectorJob } from '../vector_jobs.ts';
 import type { ElasticsearchChunkIndexer } from '../vector_index.ts';
 import { EmbeddingClient } from '../embedding.ts';
 import { indexDocument } from '../vector_document.ts';
 import * as vectorJobs from '../vector_jobs.ts';
-import { indexer } from '../vector_pipeline.ts';
+import { expectedChunkIds, indexer } from '../vector_pipeline.ts';
 
 export async function processJob(
   sql: Sql,
@@ -15,7 +15,7 @@ export async function processJob(
   embeddingClient: EmbeddingClient,
   workerId: string,
   job: VectorJob,
-): Promise<Record<string, unknown>> {
+): Promise<JobMetadata> {
   if (job.embeddingModel !== config.model || job.embeddingDim !== config.dimension) {
     throw new Error('vector job model or dimension no longer matches runtime configuration');
   }
@@ -52,7 +52,7 @@ export async function rebuildIndex(
   embeddingClient: EmbeddingClient,
   workerId: string,
   job: VectorJob,
-): Promise<Record<string, unknown>> {
+): Promise<JobMetadata> {
   const targetIndexer = indexer(esUrl, job.targetIndex, config);
   const attached = await targetIndexer.aliasTargets();
   if (attached.includes(job.targetIndex)) {
