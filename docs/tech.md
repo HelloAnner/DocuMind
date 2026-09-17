@@ -8,18 +8,18 @@
 
 | 层 | 选型 | 说明 |
 |---|---|---|
-| 后端服务 | **Rust + axum + tokio** | 高性能、单二进制、可静态编译 |
-| 前端 | **Next.js 静态导出** | 构建后嵌入 Rust 二进制，由 Rust 统一对外服务 |
-| LLM 抽象 | **rig-core + async-openai adapter** | Rust 生态 LLM 抽象；OpenAI-compatible client 兜底私有模型和流式 |
-| Agent 编排 | **自研 `documind-agent` crate** | 强类型状态机，可控、可观测、可测试 |
+| 后端服务 | **TypeScript + Bun + Hono** | 单文件二进制（`bun build --compile`），启动快、开发与 CLI 同语言 |
+| 前端 | **Next.js 静态导出** | 构建期由 `gen-web-assets` 内嵌进 Bun 二进制，由后端统一对外服务 |
+| LLM 抽象 | **自研 OpenAI-compatible client（`src/llm`）** | 统一封装 chat/JSON/流式；私有模型与 DashScope 等兼容端点共用一套 |
+| Agent 编排 | **自研 `src/agent`（Agent Kernel）** | 强类型状态机，可控、可观测、可测试 |
 | RAG 工具 | **自研 trait + adapter** | 检索、精排、引用校验、缓存都走本地接口 |
-| 关系数据库 | **PostgreSQL + SQLx** | 文档、chunk、对话、trace、权限的权威存储 |
+| 关系数据库 | **PostgreSQL（postgres.js 直连 SQL）** | 文档、chunk、对话、trace、权限的权威存储 |
 | 向量/全文检索 | **Elasticsearch** | embedding + BM25 混合检索 |
 | 缓存/状态 | **Redis** | 热点问答、请求去重、短期状态、分布式锁 |
 | 消息队列 | **RabbitMQ** | 解析、清洗、切片、embedding 异步任务编排 |
 | 对象存储 | **MinIO / 本地 blob** | 原始文件、解析快照、CSV 派生物、预览文件 |
-| 文档智能 Worker | **可选 Python Worker（Docling / PyMuPDF / OCR）** | 通过 JSON contract 与 Rust 主链路隔离，用于高质量版面/表格/扫描件解析 |
-| 部署目标 | **x86_64-unknown-linux-musl** | 单二进制 + 静态前端，通过 `ssh documind` 部署 |
+| 文档智能 Worker | **可选 Python Worker（Docling / PyMuPDF / OCR）** | 通过 JSON contract 与 Bun 主链路隔离，用于高质量版面/表格/扫描件解析 |
+| 部署目标 | **bun-linux-x64** | 单文件二进制 + 内嵌前端，通过 `ssh documind` 部署 |
 
 ### 1.1 前端组件栈
 
@@ -34,19 +34,19 @@
 | Office 原文预览 | 后端转 PDF / page preview；需要编辑时接 OnlyOffice |
 | 文本/Markdown 原文预览 | CodeMirror 6 / Monaco |
 
-## 2. 为什么选择 Rust
+## 2. 为什么选择 TypeScript + Bun
 
-- **单体二进制**：一个文件包含 API + Agent Kernel + 静态前端，部署、回滚、版本管理简单。
-- **类型安全**：复杂的状态机（文档解析流程、Agent 决策流程）在编译期就能排除大量错误。
-- **性能**：PDF/Word/PPT 解析、embedding、RAG 检索都是重 CPU/IO 任务，Rust 能控制好内存与并发。
-- **与现有栈一致**：Northline / Corevo 同样以 Rust/Go 为主，运维和基础设施可复用。
-- **无 Python 运行时依赖**：默认纯 Rust 解析即可运行；文档智能增强通过可选 Python Worker 以 JSON contract 接入，不污染主链路。
+- **单体二进制**：`bun build --compile` 产出一个文件，包含 API + Agent Kernel + 内嵌静态前端，部署、回滚、版本管理简单。
+- **类型安全**：TypeScript 严格模式（strict + noUncheckedIndexedAccess）约束文档解析流程与 Agent 决策流程的状态机。
+- **开发效率**：后端、CLI、前端同属 TypeScript 生态，接口契约与类型定义可复用，问题定位链路更短。
+- **启动与 IO 性能**：Bun 启动快，HTTP / SQL / JSON 处理性能好；重解析任务交由容器外的 pdftoppm、tesseract、soffice 完成。
+- **无重量级运行时依赖**：产物自包含 Bun 运行时；文档智能增强通过外部工具以进程与 JSON contract 接入，不污染业务主链路。
 
-> 文档智能生态（OCR、layout、table、多格式解析）在 Python 中迭代更快。DocuMind 的取舍是：**Rust 负责产品系统与强类型业务主链路，Python 负责文档智能/模型生态适配**，两者用 JSON contract 隔离。
+> 文档智能生态（OCR、layout、table、多格式解析）在 Python 中迭代更快。DocuMind 的取舍是：**TS 负责产品系统与业务主链路，外部工具负责文档智能与模型生态适配**，两者用进程边界与 JSON contract 隔离。
 
-## 3. 为什么选择 Rig
+## 3. LLM 客户端设计
 
-`rig-core` 是 Rust 生态的 LLM 应用抽象层，负责：
+`src/llm/openai.ts` 提供统一的 OpenAI-compatible 客户端，负责：
 
 - model provider 统一接入
 - completion / chat completion
@@ -77,7 +77,7 @@ Agent Kernel
 │  └───────────────────────────────────────┘  │
 │                  │                           │
 │  ┌───────────────┴───────────────────────┐  │
-│  │         Rust API Server (axum)        │  │
+│  │        Bun API Server (Hono)         │  │
 │  │  /api/conversations  /api/admin/...   │  │
 │  │  /api/files/{doc_id}/preview          │  │
 │  └───────────────────────────────────────┘  │
@@ -97,7 +97,7 @@ Agent Kernel
 
 - 对外端口统一为 `8089`。
 - 前端入口为 `/documind/`。
-- Rust 二进制同时服务 API 和静态前端。
+- Bun 单文件二进制同时服务 API 和静态前端（内嵌 `apps/web/out`）。
 - 文件预览目标态支持短期签名 URL，不直接暴露 MinIO 内网地址；当前已部署版本通过应用代理接口 `/api/files/{doc_id}/preview/*` 提供 manifest、content 和 page PDF，权限校验仍在 DocuMind API 内完成。
 
 ## 5. Ingest Pipeline 链式设计
@@ -128,7 +128,7 @@ Parser Chain ──► SourceAnchor Generator ──► Cleaner Chain ──► 
 Preview Manifest / Page PDF Cache
 ```
 
-当前实现状态：上传、解析、切块、embedding 和索引主链路已经可用；解析/OCR/embedding 任务仍主要由 Rust API 进程内异步任务执行，尚未切换到 RabbitMQ worker 消费。RabbitMQ 在服务器部署中已健康，但队列编排、重试、死信和 worker 隔离仍按 [实现差距总账](implementation-gap-analysis.md) 跟踪。
+当前实现状态：上传、解析、切块、embedding 和索引主链路已经可用；解析/OCR/embedding 任务仍主要由 Bun API 进程内的后台轮询任务执行，尚未切换到 RabbitMQ worker 消费。RabbitMQ 在服务器部署中已健康，但队列编排、重试、死信和 worker 隔离仍按 [实现差距总账](implementation-gap-analysis.md) 跟踪。
 
 ### 5.2 链式架构核心原则
 
@@ -169,15 +169,15 @@ Original File
 
 ### 6.1 统一接口
 
-```rust
-pub trait Parser: Send + Sync {
-    fn name(&self) -> &str;
-    fn supported_formats(&self) -> &[FileFormat];
-    fn parse(&self, ctx: ParseContext, file: &Blob) -> Result<ParsedDocument, ParseError>;
+```ts
+export interface Parser {
+  name(): string;
+  supportedFormats(): FileFormat[];
+  parse(ctx: ParseContext, file: Blob): Promise<ParsedDocument>;
 }
 ```
 
-所有格式解析器都实现同一 `Parser` trait，上层通过文件类型自动路由。
+所有格式解析器都实现同一 `Parser` 接口，上层通过文件类型自动路由。
 
 ### 6.2 Parser Chain 阶段
 
@@ -328,11 +328,11 @@ y1 = raw_y1 / page_height
 
 ## 7. Cleaner Chain 详细设计
 
-```rust
-pub trait Cleaner: Send + Sync {
-    fn name(&self) -> &str;
-    fn supported_formats(&self) -> &[FileFormat];
-    fn clean(&self, ctx: CleanContext, blocks: Vec<DocumentBlock>) -> Result<Vec<CleanedBlock>, CleanError>;
+```ts
+export interface Cleaner {
+  name(): string;
+  supportedFormats(): FileFormat[];
+  clean(ctx: CleanContext, blocks: DocumentBlock[]): Promise<CleanedBlock[]>;
 }
 ```
 
@@ -380,11 +380,11 @@ CommonCleaner
 
 ## 8. Chunker Chain 详细设计
 
-```rust
-pub trait Chunker: Send + Sync {
-    fn name(&self) -> &str;
-    fn supported_formats(&self) -> &[FileFormat];
-    fn chunk(&self, ctx: ChunkContext, blocks: Vec<CleanedBlock>) -> Result<Vec<Chunk>, ChunkError>;
+```ts
+export interface Chunker {
+  name(): string;
+  supportedFormats(): FileFormat[];
+  chunk(ctx: ChunkContext, blocks: CleanedBlock[]): Promise<Chunk[]>;
 }
 ```
 
