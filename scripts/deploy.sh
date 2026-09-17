@@ -308,7 +308,7 @@ copy_to_remote "$TMP_ENV" "$REMOTE_RELEASE/.env.default"
 if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
   COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | tar -xzf - -C "$REMOTE_RELEASE"
 else
-  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C "$REMOTE_RELEASE'"
+  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
 fi
 
 run_remote_bash <<REMOTE
