@@ -45,6 +45,40 @@ const DEFAULT_KB_ID = '00000000-0000-0000-0000-000000000003';
 const SUPER_ADMIN_USER_ID = '00000000-0000-0000-0000-000000000003';
 const STANDARD_USER_ID = '00000000-0000-0000-0000-000000000004';
 
+let cachedChunkingConfig: ChunkingConfig | null = null;
+
+/**
+ * 仅读取 RAG_* 切片参数（与 Rust document::ChunkConfig::default() 一致）。
+ * 结果缓存；供解析指纹等轻量场景使用，不触发全量配置校验。
+ */
+export function loadChunkingConfig(
+  env: Record<string, string | undefined> = process.env,
+): ChunkingConfig {
+  if (cachedChunkingConfig !== null) return cachedChunkingConfig;
+  const int32 = (key: string, fallback: number): number => {
+    const raw = env[key];
+    if (raw === undefined || !/^[+-]?\d+$/.test(raw)) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return parsed < -2147483648 || parsed > 2147483647 ? fallback : parsed;
+  };
+  const usize = (key: string, fallback: number): number => {
+    const raw = env[key];
+    if (raw === undefined || !/^\d+$/.test(raw)) return fallback;
+    const parsed = Number.parseInt(raw, 10);
+    return Number.isSafeInteger(parsed) ? parsed : fallback;
+  };
+  cachedChunkingConfig = {
+    targetChunkTokens: int32('RAG_TARGET_CHUNK_TOKENS', 800),
+    maxChunkTokens: int32('RAG_MAX_CHUNK_TOKENS', 1500),
+    hardSplitTokens: int32('RAG_HARD_SPLIT_TOKENS', 2000),
+    minChunkTokens: int32('RAG_MIN_CHUNK_TOKENS', 200),
+    overlapTokens: int32('RAG_CHUNK_OVERLAP_TOKENS', 200),
+    maxTableRowsPerChunk: usize('RAG_MAX_TABLE_ROWS_PER_CHUNK', 50),
+    maxTableTokenPerChunk: int32('RAG_MAX_TABLE_TOKEN_PER_CHUNK', 1200),
+  };
+  return cachedChunkingConfig;
+}
+
 export function loadConfig(env: Record<string, string | undefined> = process.env): AppConfig {
   const envStr = (...keys: string[]): string | undefined => {
     for (const key of keys) { const value = env[key]; if (value !== undefined && value !== '') return value; }
@@ -141,15 +175,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       verifyClaims: envBool('RAG_VERIFY_CLAIMS', false),
       verifyConsensus: envBool('RAG_VERIFY_CONSENSUS', false),
     },
-    chunking: {
-      targetChunkTokens: envRustI32('RAG_TARGET_CHUNK_TOKENS', 800),
-      maxChunkTokens: envRustI32('RAG_MAX_CHUNK_TOKENS', 1500),
-      hardSplitTokens: envRustI32('RAG_HARD_SPLIT_TOKENS', 2000),
-      minChunkTokens: envRustI32('RAG_MIN_CHUNK_TOKENS', 200),
-      overlapTokens: envRustI32('RAG_CHUNK_OVERLAP_TOKENS', 200),
-      maxTableRowsPerChunk: envRustUsize('RAG_MAX_TABLE_ROWS_PER_CHUNK', 50),
-      maxTableTokenPerChunk: envRustI32('RAG_MAX_TABLE_TOKEN_PER_CHUNK', 1200),
-    },
+    chunking: loadChunkingConfig(env),
   };
 
   const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));

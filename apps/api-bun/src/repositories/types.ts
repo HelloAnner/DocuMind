@@ -1,4 +1,4 @@
-// 移植自 apps/api-rs/src/repositories/trait_repo.rs + cache.rs 的端口定义
+// 移植自 apps/api-rs/src/repositories/trait_repo.rs 的端口定义
 import type { AgentTrace } from '../models/agent.ts';
 import type { Citation } from '../models/citation.ts';
 import type { ConversationFile } from '../models/conversation_file.ts';
@@ -46,8 +46,3 @@ export interface ConversationRepository {
   deleteFeedback(assistantMessageId: string, userId: string): Promise<boolean>;
 }
 
-export interface AnswerCache {
-  get(cacheKey: string): Promise<unknown | null>;
-  set(cacheKey: string, value: unknown, ttlSeconds: number): Promise<void>;
-  delete(cacheKey: string): Promise<void>;
-}

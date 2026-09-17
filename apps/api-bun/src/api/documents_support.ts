@@ -1,6 +1,7 @@
 // 移植自 apps/api-rs/src/api/documents.rs —— 纯函数助手（不含 IO）
 import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
+import { loadChunkingConfig } from '../config.ts';
 import type { AppEnv } from '../http/types.ts';
 import { PARSER_VERSION } from '../document/types.ts';
 import { CLEANER_VERSION } from '../document/cleaning.ts';
@@ -154,16 +155,9 @@ export function parseIdentityFor(fileSha256: string, parserConfig: Record<string
   return sha256Hex(`${fileSha256}:${PARSER_VERSION}:${canonicalJson(parserConfig)}`);
 }
 
-/** Rust: env_usize（documents.rs 就地读环境变量；此处与 Rust 一致，未走 config.ts） */
-function envUsize(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (raw === undefined) return fallback;
-  const parsed = Number.parseInt(raw, 10);
-  if (Number.isNaN(parsed)) return fallback;
-  return parsed;
-}
-
 export function currentParserConfig(): Record<string, unknown> {
+  // 切片参数统一经 config.ts 读取（RAG_* 环境变量，与 Rust ChunkConfig::default 对齐）
+  const chunking = loadChunkingConfig();
   return {
     parser_version: PARSER_VERSION,
     cleaner_version: CLEANER_VERSION,
@@ -175,13 +169,13 @@ export function currentParserConfig(): Record<string, unknown> {
     max_office_compression_ratio: MAX_OFFICE_COMPRESSION_RATIO,
     max_pdf_pages: MAX_PDF_PAGES,
     max_pdf_page_text_chars: MAX_PDF_PAGE_TEXT_CHARS,
-    target_chunk_tokens: envUsize('RAG_TARGET_CHUNK_TOKENS', 800),
-    max_chunk_tokens: envUsize('RAG_MAX_CHUNK_TOKENS', 1500),
-    hard_split_tokens: envUsize('RAG_HARD_SPLIT_TOKENS', 2000),
-    min_chunk_tokens: envUsize('RAG_MIN_CHUNK_TOKENS', 200),
-    chunk_overlap_tokens: envUsize('RAG_CHUNK_OVERLAP_TOKENS', 200),
-    max_table_rows_per_chunk: envUsize('RAG_MAX_TABLE_ROWS_PER_CHUNK', 50),
-    max_table_token_per_chunk: envUsize('RAG_MAX_TABLE_TOKEN_PER_CHUNK', 1200),
+    target_chunk_tokens: chunking.targetChunkTokens,
+    max_chunk_tokens: chunking.maxChunkTokens,
+    hard_split_tokens: chunking.hardSplitTokens,
+    min_chunk_tokens: chunking.minChunkTokens,
+    chunk_overlap_tokens: chunking.overlapTokens,
+    max_table_rows_per_chunk: chunking.maxTableRowsPerChunk,
+    max_table_token_per_chunk: chunking.maxTableTokenPerChunk,
   };
 }
 

@@ -4,9 +4,8 @@ import type Redis from 'ioredis';
 import postgres from 'postgres';
 import { Redis as RedisClient } from 'ioredis';
 import type { AppConfig } from './config.ts';
-import type { ConversationRepository, AnswerCache } from './repositories/types.ts';
+import type { ConversationRepository } from './repositories/types.ts';
 import { InMemoryConversationRepository, SqlxConversationRepository } from './repositories/index.ts';
-import { InMemoryAnswerCache, RedisAnswerCache } from './repositories/cache.ts';
 import type { ObjectStorage } from './storage/types.ts';
 import { buildStorage } from './storage/index.ts';
 import { seedIdentity } from './auth/seed.ts';
@@ -32,7 +31,6 @@ export interface AppState {
   redis: Redis | null;
   repository: ConversationRepository;
   agentKernel: AgentKernel;
-  cache: AnswerCache;
   storage: ObjectStorage;
   /** 健康检查用：rag/vector_pipeline.quickConsistency */
   vectorConsistency: (() => Promise<VectorConsistencySnapshot>) | null;
@@ -68,8 +66,6 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   if (config.redisUrl) {
     redis = new RedisClient(config.redisUrl, { maxRetriesPerRequest: 2 });
   }
-  const cache: AnswerCache = redis ? new RedisAnswerCache(redis) : new InMemoryAnswerCache();
-
   if (!config.rag.generation.useRealLlm) {
     throw new Error('DocuMind Agent requires USE_REAL_LLM=true; rule-based answer fallback was removed');
   }
@@ -135,10 +131,21 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   // 与 Rust 一致：有数据库时启动后台向量 worker（DB 轮询消费，无 AMQP 队列加速）
   startVectorWorker(sql, config.rag.embedding, esUrl, config.rabbitmqUrl);
 
-  return {
-    config, sql, redis, repository, agentKernel, cache, storage, vectorConsistency,
+  const state: AppState = {
+    config, sql, redis, repository, agentKernel, storage, vectorConsistency,
     llm: { generationClient, reasoningClient, agentModel, retriever, reranker, contextAssembler },
   };
+  // 与 Rust 一致：恢复上次中断遗留的待处理解析任务
+  try {
+    const { resumePendingDocumentJobs } = await import('./api/documents.ts');
+    const resumed = await resumePendingDocumentJobs(state);
+    if (resumed > 0) {
+      console.warn(`[documind][state] resumed ${resumed} pending document jobs`);
+    }
+  } catch (error) {
+    throw new Error(`failed to resume document jobs: ${(error as Error).message}`);
+  }
+  return state;
 }
 
 async function recoverInterruptedAgentRuns(sql: Sql): Promise<void> {
