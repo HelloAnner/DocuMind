@@ -44,11 +44,7 @@ if ! echo "$binary_info" | grep -qi 'ELF.*x86-64'; then
   echo "$binary_info"
   exit 1
 fi
-if echo "$binary_info" | grep -qi 'interpreter '; then
-  echo "Deploy binary must be fully static and must not require a dynamic loader:"
-  echo "$binary_info"
-  exit 1
-fi
+# bun build --compile 产物为动态链接 ELF（内嵌 JS 与 Bun 运行时），无需完全静态。
 
 sha256_file() {
   if command -v sha256sum >/dev/null 2>&1; then
@@ -310,9 +306,9 @@ copy_to_remote "$LOCAL_BINARY" "$REMOTE_RELEASE/bin/documind"
 copy_to_remote "$TMP_ENV" "$REMOTE_RELEASE/.env.default"
 
 if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
-  COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | tar -xzf - -C "$REMOTE_RELEASE"
+  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | tar -xzf - -C "$REMOTE_RELEASE"
 else
-  COPYFILE_DISABLE=1 tar -czf - apps/api-rs/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
+  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C "$REMOTE_RELEASE'"
 fi
 
 run_remote_bash <<REMOTE
@@ -562,7 +558,7 @@ printf '%s\n' \
   ');' \
   | docker exec -i "\$pg_container" psql -U "\$pg_user" -d "\$pg_database" >/dev/null
 
-for migration in "\$remote_release"/apps/api-rs/migrations/*.up.sql; do
+for migration in "\$remote_release"/apps/api-bun/migrations/*.up.sql; do
   migration_id="\$(basename "\$migration")"
   applied="\$(docker exec "\$pg_container" psql -At -U "\$pg_user" -d "\$pg_database" -c "SELECT 1 FROM documind._deploy_migrations WHERE id = '\$migration_id'" || true)"
   if [[ "\$applied" == "1" ]]; then

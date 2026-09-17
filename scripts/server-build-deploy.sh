@@ -8,17 +8,14 @@ REMOTE_BUILD_ROOT="${REMOTE_BUILD_ROOT:-$REMOTE_ROOT/build}"
 CANONICAL_SOURCE="$REMOTE_BUILD_ROOT/source"
 CACHE_ROOT="$REMOTE_BUILD_ROOT/cache"
 NPM_CACHE="$CACHE_ROOT/npm"
-CARGO_HOME_CACHE="$CACHE_ROOT/cargo-home"
-CARGO_TARGET_CACHE="$CACHE_ROOT/cargo-target"
+BUN_INSTALL_CACHE="$CACHE_ROOT/bun-install"
 BUILD_STORE="$REMOTE_BUILD_ROOT/builds"
 DEPLOY_LOCK="$REMOTE_ROOT/shared/runtime/deploy.lock"
 SOURCE_UPDATE_LOCK="$REMOTE_BUILD_ROOT/source-update.lock"
 NODE_IMAGE="${NODE_BUILD_IMAGE:-m.daocloud.io/docker.io/library/node:22-bookworm-slim}"
 NPM_REGISTRY="${NPM_REGISTRY:-https://registry.npmmirror.com}"
-RUST_IMAGE="${RUST_BUILD_IMAGE:-localhost/documind-rust-musl-build:1.91-bookworm}"
-RUST_BASE_IMAGE="${RUST_BASE_IMAGE:-m.daocloud.io/docker.io/library/rust:1.91-bookworm}"
-RUST_BUILD_JOBS="${RUST_BUILD_JOBS:-4}"
-DEPLOY_TARGET="x86_64-unknown-linux-musl"
+BUN_IMAGE="${BUN_BUILD_IMAGE:-m.daocloud.io/docker.io/oven/bun:1.3.14}"
+BUN_REGISTRY="${BUN_REGISTRY:-https://registry.npmmirror.com}"
 
 current_source="$(pwd -P)"
 expected_source="$(cd "$CANONICAL_SOURCE" 2>/dev/null && pwd -P || true)"
@@ -45,7 +42,7 @@ RELEASE_ID="${RELEASE_ID:-$BUILD_ID}"
 WORK_ROOT="$REMOTE_BUILD_ROOT/work/$BUILD_ID"
 SOURCE_ROOT="$WORK_ROOT/source"
 BUILD_METADATA="$BUILD_STORE/$BUILD_ID"
-DEPLOY_BINARY="$CARGO_TARGET_CACHE/$DEPLOY_TARGET/release/documind"
+DEPLOY_BINARY="$WORK_ROOT/bun-build/documind"
 phase="building"
 succeeded=0
 
@@ -93,12 +90,11 @@ fi
 mkdir -p \
   "$SOURCE_ROOT" \
   "$NPM_CACHE" \
-  "$CARGO_HOME_CACHE" \
-  "$CARGO_TARGET_CACHE" \
+  "$BUN_INSTALL_CACHE" \
   "$BUILD_METADATA"
 cp -a "$CANONICAL_SOURCE/." "$SOURCE_ROOT/"
 
-if [[ ! -f "$SOURCE_ROOT/Cargo.lock" || ! -f "$SOURCE_ROOT/apps/web/package-lock.json" ]]; then
+if [[ ! -f "$SOURCE_ROOT/apps/api-bun/bun.lock" || ! -f "$SOURCE_ROOT/apps/web/package-lock.json" ]]; then
   echo "Server source mirror is incomplete." >&2
   exit 1
 fi
@@ -119,63 +115,28 @@ docker run --rm \
   "$NODE_IMAGE" \
   bash -lc 'npm ci && npm run build'
 
-if ! docker image inspect "$RUST_IMAGE" >/dev/null 2>&1; then
-  if ! docker image inspect "$RUST_BASE_IMAGE" >/dev/null 2>&1; then
-    docker pull "$RUST_BASE_IMAGE"
-  fi
-
-  echo "Building reusable Rust musl image: $RUST_IMAGE"
-  docker build -t "$RUST_IMAGE" - <<DOCKERFILE
-FROM $RUST_BASE_IMAGE
-ENV RUSTUP_DIST_SERVER=https://rsproxy.cn \
-    RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup
-RUN sed -i \
-      -e 's|http://deb.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-      -e 's|http://security.debian.org/debian-security|https://mirrors.aliyun.com/debian-security|g' \
-      -e 's|http://deb.debian.org/debian|https://mirrors.aliyun.com/debian|g' \
-      /etc/apt/sources.list.d/debian.sources \
-  && apt-get -o Acquire::Retries=3 update \
-  && apt-get -o Acquire::Retries=3 install -y --no-install-recommends cmake git linux-libc-dev musl-tools pkg-config \
-  && rustup target add x86_64-unknown-linux-musl \
-  && rm -rf /var/lib/apt/lists/*
-DOCKERFILE
+if ! docker image inspect "$BUN_IMAGE" >/dev/null 2>&1; then
+  docker pull "$BUN_IMAGE"
 fi
 
-cat > "$CARGO_HOME_CACHE/config.toml" <<'CARGO_CONFIG'
-[source.crates-io]
-replace-with = "rsproxy-sparse"
+mkdir -p "$WORK_ROOT/bun-build"
 
-[source.rsproxy-sparse]
-registry = "sparse+https://rsproxy.cn/index/"
-
-[net]
-git-fetch-with-cli = true
-retry = 3
-CARGO_CONFIG
-
-echo "Building native Linux/musl binary on the server"
+echo "Building Bun single-file Linux binary on the server"
 docker run --rm \
   -v "$SOURCE_ROOT:/workspace:Z" \
-  -v "$CARGO_HOME_CACHE:/cargo-home:Z" \
-  -v "$CARGO_TARGET_CACHE:/cargo-target:Z" \
-  -w /workspace \
-  -e CARGO_HOME=/cargo-home \
-  -e CARGO_TARGET_DIR=/cargo-target \
-  -e CARGO_BUILD_JOBS="$RUST_BUILD_JOBS" \
-  -e CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc \
-  -e CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_RUSTFLAGS="-C target-feature=+crt-static -C relocation-model=static" \
-  "$RUST_IMAGE" \
-  cargo build --release -p documind --target "$DEPLOY_TARGET"
+  -v "$BUN_INSTALL_CACHE:/root/.bun/install/cache:Z" \
+  -v "$WORK_ROOT/bun-build:/out:Z" \
+  -w /workspace/apps/api-bun \
+  -e BUN_CONFIG_REGISTRY="$BUN_REGISTRY" \
+  "$BUN_IMAGE" \
+  bash -lc 'bun install --frozen-lockfile && bun run scripts/gen-web-assets.ts /workspace/apps/web/out && bun build --compile --minify --target=bun-linux-x64 --outfile /out/documind src/index.ts'
 
 binary_info="$(file "$DEPLOY_BINARY")"
 if ! grep -qi 'ELF.*x86-64' <<<"$binary_info"; then
   echo "Server build did not produce a Linux x86_64 binary: $binary_info" >&2
   exit 1
 fi
-if grep -qi 'interpreter ' <<<"$binary_info"; then
-  echo "Server build binary is not fully static: $binary_info" >&2
-  exit 1
-fi
+# bun build --compile 产物为动态链接 ELF（内嵌 JS 与 Bun 运行时），可接受。
 
 binary_sha256="$(sha256sum "$DEPLOY_BINARY" | awk '{print $1}')"
 printf '%s\n' "$SOURCE_SHA" > "$BUILD_METADATA/source.sha"

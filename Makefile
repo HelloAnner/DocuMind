@@ -6,9 +6,8 @@ BIN_NAME := documind
 DEPLOY_HOST ?= documind
 DEPLOY_PORT ?= 8089
 DEPLOY_BASE_PATH ?= /documind
-DEPLOY_TARGET ?= x86_64-unknown-linux-musl
-DEPLOY_TARGET_DIR ?= target/deploy-linux-x86_64-musl
-DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(DEPLOY_TARGET)/release/$(BIN_NAME)
+DEPLOY_TARGET_DIR ?= dist/linux-x86_64
+DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(BIN_NAME)
 
 .PHONY: install docs deploy-web-build deploy-build deploy deploy-remote sync-remote-source status health release-gate logs clean
 
@@ -22,7 +21,7 @@ deploy-web-build: install
 	cd $(WEB_DIR) && DOCUMIND_STATIC_EXPORT=1 DOCUMIND_BASE_PATH=$(DEPLOY_BASE_PATH) NEXT_PUBLIC_API_BASE=$(DEPLOY_BASE_PATH) npm run build
 
 deploy-build: deploy-web-build
-	DEPLOY_TARGET=$(DEPLOY_TARGET) DEPLOY_TARGET_DIR=$(DEPLOY_TARGET_DIR) scripts/build-linux.sh
+	DEPLOY_TARGET_DIR=$(DEPLOY_TARGET_DIR) scripts/build-linux.sh
 
 deploy:
 	DEPLOY_PORT=$(DEPLOY_PORT) DEPLOY_BASE_PATH=$(DEPLOY_BASE_PATH) REMOTE_ROOT=/opt/documind scripts/server-build-deploy.sh
@@ -51,5 +50,4 @@ logs:
 	ssh $(DEPLOY_HOST) 'bash -lc '"'"'tail -n $${LINES:-300} -f /opt/documind/shared/logs/documind-$(DEPLOY_PORT).log'"'"''
 
 clean:
-	cargo clean
-	rm -rf $(DIST_DIR) $(WEB_DIR)/out $(WEB_DIR)/.next
+	rm -rf $(DIST_DIR) $(WEB_DIR)/out $(WEB_DIR)/.next apps/api-bun/dist apps/api-bun/src/generated
