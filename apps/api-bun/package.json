@@ -1,0 +1,30 @@
+{
+  "name": "documind-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun run src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "verify": "bun run typecheck && bun test",
+    "gen-web-assets": "bun run scripts/gen-web-assets.ts",
+    "build:binary": "bun run scripts/gen-web-assets.ts && bun build --compile --minify --target=bun-linux-x64 --outfile dist/documind src/index.ts"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1134.0",
+    "bcryptjs": "^2.4.3",
+    "fast-xml-parser": "^4.5.1",
+    "hono": "^4.6.14",
+    "ioredis": "^5.4.2",
+    "jose": "^5.9.6",
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^6.3.289",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "typescript": "^5.7.2",
+    "@types/node": "^22.10.2"
+  }
+}
