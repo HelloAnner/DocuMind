@@ -120,7 +120,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     },
     citation: {
       requireCitation: envBool('RAG_REQUIRE_CITATION', true),
-      verifyClaims: envBool('RAG_VERIFY_CLAIMS', true),
+      verifyClaims: envBool('RAG_VERIFY_CLAIMS', false),
       verifyConsensus: envBool('RAG_VERIFY_CONSENSUS', false),
     },
   };

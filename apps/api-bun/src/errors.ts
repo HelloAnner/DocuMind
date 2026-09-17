@@ -3,7 +3,7 @@ import type { StatusCode } from 'hono/utils/http-status';
 
 export type ErrorKind =
   | 'not_found' | 'forbidden' | 'conflict' | 'invalid_state' | 'timeout'
-  | 'internal' | 'bad_request' | 'unauthorized';
+  | 'internal' | 'bad_request' | 'unauthorized' | 'rate_limited';
 
 export class AppError extends Error {
   readonly kind: ErrorKind;
@@ -26,6 +26,7 @@ export class AppError extends Error {
   static internal(message: string): AppError { return new AppError('internal', 500, 'INTERNAL_ERROR', message); }
   static badRequest(code: string, message: string): AppError { return new AppError('bad_request', 400, code, message); }
   static unauthorizedWith(code: string, message: string): AppError { return new AppError('unauthorized', 401, code, message); }
+  static rateLimited(code: string, message: string): AppError { return new AppError('rate_limited', 429, code, message); }
 
   static conversationNotFound(): AppError {
     return AppError.notFound('CONVERSATION_NOT_FOUND', '会话不存在或无权限');
