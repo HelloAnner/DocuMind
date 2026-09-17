@@ -7,7 +7,7 @@
       "ESNext"
     ],
     "types": [
-      "bun-types"
+      "bun"
     ],
     "strict": true,
     "noUncheckedIndexedAccess": true,

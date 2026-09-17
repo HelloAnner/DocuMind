@@ -13,9 +13,18 @@ import { seedIdentity } from './auth/seed.ts';
 import { OpenAiClient } from './llm/openai.ts';
 import { asAgentModel } from './llm/agent_adapter.ts';
 import type { AgentModel } from './agent/model.ts';
-import type { AgentKernel } from './agent/kernel.ts';
-import type { Retriever, Reranker, ContextAssembler } from './rag/types.ts';
+import {
+  AgentKernel, AgentToolRegistry, BuiltinPromptRegistry, ClarificationTool,
+  GroundedAnswerFinalizer, KnowledgeSearchTool, LlmClaimVerifier, StructuralClaimVerifier,
+} from './agent/index.ts';
+import type { ContextAssembler, Retriever, Reranker } from './rag/types.ts';
+import { EsRetriever } from './rag/retriever.ts';
+import { HttpReranker, parseRerankProvider } from './rag/reranker.ts';
+import { SimpleContextAssembler } from './rag/context.ts';
+import { embeddingClientConfigFrom } from './rag/embedding.ts';
+import { quickConsistency, startVectorWorker } from './rag/vector_pipeline.ts';
 import type { VectorConsistencySnapshot } from './http/health.ts';
+import type { ClaimVerifier } from './agent/verifier/types.ts';
 
 export interface AppState {
   config: AppConfig;
@@ -25,7 +34,7 @@ export interface AppState {
   agentKernel: AgentKernel;
   cache: AnswerCache;
   storage: ObjectStorage;
-  /** 注入的健康检查回调：rag/vector_pipeline.quick_consistency */
+  /** 健康检查用：rag/vector_pipeline.quickConsistency */
   vectorConsistency: (() => Promise<VectorConsistencySnapshot>) | null;
   llm: {
     generationClient: OpenAiClient;
@@ -57,11 +66,9 @@ export async function buildState(config: AppConfig): Promise<AppState> {
 
   let redis: Redis | null = null;
   if (config.redisUrl) {
-    redis = new RedisClient(config.redisUrl, { lazyConnect: false, maxRetriesPerRequest: 2 });
+    redis = new RedisClient(config.redisUrl, { maxRetriesPerRequest: 2 });
   }
-  const cache: AnswerCache = redis
-    ? new RedisAnswerCache(redis)
-    : new InMemoryAnswerCache();
+  const cache: AnswerCache = redis ? new RedisAnswerCache(redis) : new InMemoryAnswerCache();
 
   if (!config.rag.generation.useRealLlm) {
     throw new Error('DocuMind Agent requires USE_REAL_LLM=true; rule-based answer fallback was removed');
@@ -83,72 +90,54 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   if (!config.rag.embedding.enabled) {
     throw new Error('DocuMind Agent requires EMBED_ENABLED=true');
   }
-  if (!config.elasticsearchUrl) {
+  const esUrl = config.elasticsearchUrl;
+  if (!esUrl) {
     throw new Error('DocuMind Agent requires ELASTICSEARCH_URL');
   }
-
-  // rag 组件由 src/rag 模块提供（移植中）：按下列签名装配
-  const ragModule = await import('./rag/index.ts');
-  const embeddingConfig = ragModule.embeddingClientConfigFromAppConfig(config);
-  const retriever: Retriever = new ragModule.EsRetriever({
-    esUrl: config.elasticsearchUrl,
-    indexAlias: config.rag.embedding.indexAlias,
-    embedding: embeddingConfig,
-    embeddingModel: config.rag.embedding.model,
-  });
-  const contextAssembler: ContextAssembler = new ragModule.SimpleContextAssembler();
+  if (!sql) {
+    throw new Error('DocuMind Agent requires DATABASE_URL');
+  }
+  const embeddingConfig = embeddingClientConfigFrom(config.rag.embedding);
+  const retriever: Retriever = new EsRetriever(
+    esUrl, config.rag.embedding.indexAlias, embeddingConfig,
+    config.rag.embedding.model, sql,
+  );
 
   if (!config.rag.rerank.enabled) {
     throw new Error('DocuMind Agent requires RAG_RERANK_ENABLED=true; rule-based reranking was removed');
   }
-  if (!config.rag.rerank.apiUrl) {
+  const rerankUrl = config.rag.rerank.apiUrl;
+  if (!rerankUrl) {
     throw new Error('RAG_RERANK_API_URL is required');
   }
-  const rerankerAdapter = new ragModule.HttpReranker({
-    apiUrl: config.rag.rerank.apiUrl,
-    apiKey: config.rag.rerank.apiKey,
-    model: config.rag.rerank.model,
-    provider: ragModule.parseRerankProvider(config.rag.rerank.provider),
-  });
+  const rerankerAdapter = new HttpReranker(
+    rerankUrl, config.rag.rerank.apiKey, config.rag.rerank.model,
+    parseRerankProvider(config.rag.rerank.provider),
+  );
   await rerankerAdapter.probe();
   const reranker: Reranker = rerankerAdapter;
+  const contextAssembler: ContextAssembler = new SimpleContextAssembler();
 
-  // agent 组件由 src/agent 模块提供（移植中）
-  const agentModule = await import('./agent/index.ts');
-  const verifier = config.rag.citation.verifyClaims
-    ? new agentModule.LlmClaimVerifier({
-      client: reasoningClient,
-      model: config.agent.reasoningModel,
-      useConsensus: config.rag.citation.verifyConsensus,
-    })
-    : new agentModule.StructuralClaimVerifier();
-  const tools = new agentModule.AgentToolRegistry([
-    new ragModule.KnowledgeSearchTool(retriever, reranker),
-    new agentModule.ClarificationTool(),
+  const verifier: ClaimVerifier = config.rag.citation.verifyClaims
+    ? new LlmClaimVerifier(reasoningClient, config.agent.reasoningModel, config.rag.citation.verifyConsensus)
+    : new StructuralClaimVerifier();
+  const tools = new AgentToolRegistry([
+    new KnowledgeSearchTool(retriever, reranker),
+    new ClarificationTool(),
   ]);
-  const agentKernel: AgentKernel = new agentModule.AgentKernel({
-    model: agentModel,
-    tools,
-    contextAssembler,
-    promptRegistry: new agentModule.BuiltinPromptRegistry(),
-    finalizer: new agentModule.GroundedAnswerFinalizer(verifier),
-  });
+  const agentKernel = new AgentKernel(
+    agentModel, tools, contextAssembler,
+    new BuiltinPromptRegistry(), new GroundedAnswerFinalizer(verifier),
+  );
 
   const storage = buildStorage(config);
-
-  let vectorConsistency: AppState['vectorConsistency'] = null;
-  if (sql && config.elasticsearchUrl) {
-    vectorConsistency = () => ragModule.quickConsistency(sql!, config);
-    // 后台向量 worker：只定义启动，不在构建时自动执行
-    void ragModule.startVectorWorker;
-  }
+  const vectorConsistency = () => quickConsistency(sql, config.rag.embedding, esUrl);
+  // 后台向量 worker：构建时不自动运行（由入口按需启动）
+  void startVectorWorker;
 
   return {
     config, sql, redis, repository, agentKernel, cache, storage, vectorConsistency,
-    llm: {
-      generationClient, reasoningClient, agentModel,
-      retriever, reranker, contextAssembler,
-    },
+    llm: { generationClient, reasoningClient, agentModel, retriever, reranker, contextAssembler },
   };
 }
 

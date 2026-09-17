@@ -22,7 +22,7 @@ export async function recordAuditEvent(
         resource_id, detail
       )
       VALUES (${tenantId}, ${actorUserId}, ${actorRole}, ${action}, ${resourceType},
-        ${resourceId}, ${sql.json(detail ?? {})})
+        ${resourceId}, ${sql.json((detail ?? {}) as import('postgres').JSONValue)})
     `;
   } catch (error) {
     throw AppError.internal((error as Error).message);

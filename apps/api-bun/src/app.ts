@@ -13,7 +13,7 @@ import type { AppEnv } from './http/types.ts';
 import { getAsset, fallbackHtml } from './web_assets.ts';
 import {
   accountRouter, adminApiClientsRouter, adminMembersRouter, adminRouter, authRouter,
-  conversationsRouter, documentsRouter, historyRouter, knowledgeRouter, runtimeEventsRouter,
+  conversationsRouter, documentsRouter, historyRouter, knowledgeRouter,
   systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
@@ -47,7 +47,6 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', knowledgeRouter());
   api.route('/', historyRouter());
   api.route('/', conversationsRouter());
-  api.route('/', runtimeEventsRouter());
 
   const app = new Hono<AppEnv>();
   app.use(logger());
@@ -82,7 +81,7 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
       return c.json({ detail: 'not found' }, 404);
     }
     const asset = getAsset(path) ?? getAsset('/index.html') ?? fallbackHtml();
-    return c.body(asset.bytes as unknown as BodyInit, 200, { 'Content-Type': asset.contentType });
+    return new Response(asset.bytes as unknown as ArrayBuffer, { status: 200, headers: { 'Content-Type': asset.contentType } });
   });
 
   app.onError((error, c) => {

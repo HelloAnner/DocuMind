@@ -34,6 +34,7 @@ const MIME_TYPES: Record<string, string> = {
 // 未生成（开发期）时该 import 不存在，走磁盘回退。
 let embedded: Record<string, () => Uint8Array> | null = null;
 try {
+  // @ts-ignore 生成文件由 scripts/gen-web-assets.ts 在构建期产出
   const generated = await import('./generated/web_assets.ts');
   embedded = generated.default;
 } catch {

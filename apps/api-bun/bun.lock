@@ -17,6 +17,7 @@
       },
       "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
+        "@types/bun": "^1.4.2",
         "@types/node": "^22.10.2",
         "typescript": "^5.7.2",
       },
@@ -99,11 +100,15 @@
 
     "@types/bcryptjs": ["@types/bcryptjs@2.4.6", "https://mirrors.cloud.tencent.com/npm/@types/bcryptjs/-/bcryptjs-2.4.6.tgz", {}, "sha512-9xlo6R2qDs5uixm0bcIqCeMCE6HiQsIyel9KQySStiyqNl2tnj2mP3DX1Nf56MD6KMenNNlBBsy3LJ7gUEQPXQ=="],
 
+    "@types/bun": ["@types/bun@1.4.2", "https://mirrors.cloud.tencent.com/npm/@types/bun/-/bun-1.4.2.tgz", { "dependencies": { "bun-types": "1.4.2" } }, "sha512-GimotNn7+ZV0uVArItBbriZsR1oNf0+WTzPkdcFrzShI7k2norL0uzEaJT8T33dWr7O/c9ZDuAFQrctKCi72oQ=="],
+
     "@types/node": ["@types/node@22.20.3", "https://mirrors.cloud.tencent.com/npm/@types/node/-/node-22.20.3.tgz", { "dependencies": { "undici-types": "~6.21.0" } }, "sha512-DZmzkmwHzXrLPAXPyKNDzlIwMMUZCVacoD25ywdy5YTKGbOx/2ld+Q38Im2zJ0vBuZP5Prd3VZutKZyXwkOS8A=="],
 
     "bcryptjs": ["bcryptjs@2.4.3", "https://mirrors.cloud.tencent.com/npm/bcryptjs/-/bcryptjs-2.4.3.tgz", {}, "sha512-V/Hy/X9Vt7f3BbPJEi8BdVFMByHi+jNXrYkW3huaybV/kQ0KJg0Y6PkEMbn+zeT+i+SiKZ/HMqJGIIt4LZDqNQ=="],
 
     "bowser": ["bowser@2.14.1", "https://mirrors.cloud.tencent.com/npm/bowser/-/bowser-2.14.1.tgz", {}, "sha512-tzPjzCxygAKWFOJP011oxFHs57HzIhOEracIgAePE4pqB3LikALKnSzUyU4MGs9/iCEUuHlAJTjTc5M+u7YEGg=="],
+
+    "bun-types": ["bun-types@1.4.2", "https://mirrors.cloud.tencent.com/npm/bun-types/-/bun-types-1.4.2.tgz", { "dependencies": { "@types/node": "*" } }, "sha512-bxV1FgK7yBIzjRe5zBozIM4Bem11ZJcCXSrjWRG3YWLt8yFDePu4cLjpebO8OvPeIE9trbyPF4fuj3Cia4Fj3w=="],
 
     "cluster-key-slot": ["cluster-key-slot@1.1.1", "https://mirrors.cloud.tencent.com/npm/cluster-key-slot/-/cluster-key-slot-1.1.1.tgz", {}, "sha512-rwHwUfXL40Chm1r08yrhU3qpUvdVlgkKNeyeGPOxnW8/SyVDvgRaed/Uz54AqWNaTCAThlj6QAs3TZcKI0xDEw=="],
 

@@ -21,20 +21,16 @@ mkdirSync(dirname(outFile), { recursive: true });
 
 const relToGenerated = (absPath: string): string => {
   const rel = relative(join(import.meta.dir, '..', 'src', 'generated'), absPath);
-  return rel.split('\').join('/');
+  return rel.split('\\').join('/');
 };
 
-let body = '// 自动生成，勿手改。来源: scripts/gen-web-assets.ts
-';
-body += 'const assets: Record<string, () => Uint8Array> = {
-';
-for (const file of files) {
-  const webPath = relative(webOut, file).split('\').join('/');
-  body += `  '${webPath}': () => new Uint8Array(require('${relToGenerated(file)}')),
-`;
-}
-body += '};
-export default assets;
-';
+let body = '// 自动生成，勿手改。来源: scripts/gen-web-assets.ts\n';
+body += 'const loaders: Record<string, () => Uint8Array> = {};\n';
+files.forEach((file, index) => {
+  const webPath = relative(webOut, file).split('\\').join('/');
+  body += `import asset${index} from '${relToGenerated(file)}' with { type: 'file' };\n`;
+  body += `loaders[${JSON.stringify(webPath)}] = () => new Uint8Array(asset${index});\n`;
+});
+body += 'export default loaders;\n';
 writeFileSync(outFile, body);
 console.log(`generated ${files.length} web assets -> ${relative(root, outFile)}`);

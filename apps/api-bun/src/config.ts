@@ -94,8 +94,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       enabled: envBool('RAG_RERANK_ENABLED', true),
       provider: envStr('RAG_RERANK_PROVIDER') ?? 'dashscope',
       model: envStr('RAG_RERANK_MODEL') ?? 'gte-rerank-v2',
-      apiUrl: envStr('RAG_RERANK_API_URL'),
-      apiKey: envStr('RAG_RERANK_API_KEY'),
+      apiUrl: envStr('RAG_RERANK_API_URL') ?? null,
+      apiKey: envStr('RAG_RERANK_API_KEY') ?? null,
     },
     embedding: {
       model: envStr('EMBED_MODEL', 'EMBEDDING_MODEL') ?? 'text-embedding-v3',

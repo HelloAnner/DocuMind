@@ -78,12 +78,12 @@ export async function checkElasticsearch(
 ): Promise<DependencyCheck> {
   const base = present(url);
   if (!base) return checkFailed('ELASTICSEARCH_URL is not configured');
-  const cluster = await checkHttpGet(`${base.trimEnd('/')}/_cluster/health`, 'elasticsearch cluster');
+  const cluster = await checkHttpGet(`${base.replace(/\/+$/, '')}/_cluster/health`, 'elasticsearch cluster');
   if (!cluster.ok) return withField(cluster, 'index', indexName);
   const index = present(indexName);
   if (!index) return checkFailed('ES_INDEX_CHUNKS is not configured');
   return withField(
-    await checkHttpGet(`${base.trimEnd('/')}/${index}/_mapping`, 'elasticsearch retrieval index'),
+    await checkHttpGet(`${base.replace(/\/+$/, '')}/${index}/_mapping`, 'elasticsearch retrieval index'),
     'index', index);
 }
 
@@ -93,7 +93,7 @@ export async function checkObjectStorage(
   const ep = present(endpoint);
   if (!ep) return checkFailed('OBJECT_STORAGE_ENDPOINT is not configured');
   const url = provider.toLowerCase() === 'minio'
-    ? `${ep.trimEnd('/')}/minio/health/live` : ep;
+    ? `${ep.replace(/\/+$/, '')}/minio/health/live` : ep;
   const check = await checkHttpGet(url, 'object storage');
   withField(check, 'provider', provider);
   withField(check, 'bucket', bucket);
@@ -101,7 +101,7 @@ export async function checkObjectStorage(
 }
 
 export function openaiModelsUrl(baseUrl: string): string {
-  const base = baseUrl.trimEnd('/');
+  const base = baseUrl.replace(/\/+$/, '');
   if (base.endsWith('/embeddings')) return `${base.slice(0, -'/embeddings'.length)}/models`;
   if (base.endsWith('/chat/completions')) return `${base.slice(0, -'/chat/completions'.length)}/models`;
   return `${base}/models`;

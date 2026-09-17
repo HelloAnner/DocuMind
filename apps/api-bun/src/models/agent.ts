@@ -80,7 +80,8 @@ export interface AgentRun {
   assistant_message_id: string; mode: AgentMode;
   rewritten_query: string | null; retrieval_plan: RetrievalPlan;
   retrieval_traces: RetrievalTrace[];
-  answerStream: ReadableStream<AnswerStreamItem>;
+  /** 移植自 Rust AnswerStream（tokio mpsc::UnboundedReceiver） */
+  answerStream: AsyncGenerator<AnswerStreamItem>;
   trace: AgentTrace;
   no_answer_reason: import('./index.ts').NoAnswerReason | null;
 }

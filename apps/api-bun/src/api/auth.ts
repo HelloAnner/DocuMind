@@ -100,7 +100,7 @@ async function portalCallbackInner(state: AppState, query: PortalCallbackQuery):
 }
 
 async function exchangePortalTicket(state: AppState, code: string): Promise<PortalContext> {
-  const base = state.config.portalBaseUrl.trimEnd('/');
+  const base = state.config.portalBaseUrl.replace(/\/+$/, '');
   const endpoint = state.config.portalExchangeEndpoint.startsWith('/')
     ? `${base}${state.config.portalExchangeEndpoint}`
     : `${base}/${state.config.portalExchangeEndpoint}`;

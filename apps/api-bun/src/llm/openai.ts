@@ -149,7 +149,7 @@ export class OpenAiClient {
   }
 
   chatUrl(): string {
-    return `${this.config.baseUrl.trimEnd('/')}/chat/completions`;
+    return `${this.config.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   }
   authHeader(): string { return `Bearer ${this.config.apiKey}`; }
 

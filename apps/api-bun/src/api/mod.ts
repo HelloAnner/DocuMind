@@ -3,7 +3,6 @@ export { documentsRouter } from './documents.ts';
 export { knowledgeRouter } from './knowledge.ts';
 export { conversationsRouter } from './conversations.ts';
 export { historyRouter } from './history.ts';
-export { runtimeEventsRouter } from './runtime_events.ts';
 export { systemRouter } from './system.ts';
 export { systemTenantsRouter } from './system_tenants.ts';
 export { systemTenantInvitationsRouter } from './system_tenant_invitations.ts';
