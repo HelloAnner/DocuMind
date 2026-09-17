@@ -1,0 +1,73 @@
+DocuMind 后端迁移说明：Rust -> TypeScript + Bun
+================================================
+
+一、结论
+--------
+后端从 Rust(Axum + SQLx) 全量改为 TypeScript + Bun(Hono)。
+对外契约不变：路由、JSON 字段、错误码、SSE 事件序列与 Rust 版一一对应，
+前端(apps/web 静态导出)与官方 CLI(cli/) 无需改动。
+
+二、目录映射
+------------
+  apps/api-rs/src/*.rs        ->  apps/api-bun/src/*.ts
+  apps/api-rs/migrations/     ->  apps/api-bun/migrations/
+  crates/web_embed            ->  apps/api-bun/src/web_assets.ts
+                                  (构建期由 scripts/gen-web-assets.ts 生成内嵌表)
+
+  src/api/          HTTP 路由（每文件一个 router 工厂）
+  src/agent/        Agent Kernel（ReAct、提示词、verifier、finalizer）
+  src/rag/          检索：ES 召回 + RRF 融合 + rerank + 向量索引流水线
+  src/document/     解析：pdf/docx/pptx/md/txt + 清洗 + 切片
+  src/repositories/ PostgreSQL 持久化 + AnswerCache
+  src/storage/      对象存储（S3/MinIO 与本地文件）
+  src/auth/         JWT、会话、权限、身份种子
+
+三、部署形态
+------------
+  前端:      node 容器 npm ci && npm run build   -> apps/web/out
+  后端:      bun 容器
+               bun install --frozen-lockfile
+               bun run scripts/gen-web-assets.ts /workspace/apps/web/out
+               bun build --compile --minify --target=bun-linux-x64
+  产物:      单个 ELF 可执行文件（内嵌前端 + 全部 JS + Bun 运行时）
+  启动:      服务器 nohup current/bin/documind（读取 shared/.env）
+
+                        build 时
+   apps/web/out  ──gen-web-assets──> src/generated/web_assets.ts
+                                             │ bun build --compile
+                                             ▼
+                                    dist/documind (单文件)
+                                             │ scp/安装
+                                             ▼
+                                 /opt/documind/releases/<ts>/bin/documind
+
+  与 Rust 版本的差别：bun 产物是动态链接 ELF，不再是全静态；
+  scripts/deploy.sh 因此只校验 "ELF x86-64"，不再要求无解释器。
+
+四、运行环境变量
+----------------
+与 Rust 版完全同名，沿用服务器 shared/.env，无需改动。
+  DATABASE_URL / REDIS_URL / ELASTICSEARCH_URL / RABBITMQ_URL
+  OBJECT_STORAGE_* / BLOB_STORAGE_DIR
+  LLM_* / EMBED_* / RAG_* / AGENT_* / JWT_SECRET / AUTH_LOGIN_MODE
+DOCUMIND_WEB_DIR 或 WEB_OUT_DIR 可指定静态资源目录（未内嵌时的开发期回退）。
+
+五、与 Rust 版的已知差异
+------------------------
+1. RabbitMQ 向量队列未移植（无 amqplib 依赖）。
+   Rust 的 vector_queue.rs 只是"新任务唤醒"加速；作业消费本身走
+   PostgreSQL 轮询（claimNext），因此 Bun 版行为等价，只是唤醒延迟
+   受 EMBED_WORKER_POLL_MS(默认 1000ms) 影响。
+   如需真接队列：bun add amqplib 后按 rust/rag/vector_queue.rs 补 src/rag/vector_queue.ts。
+2. 日志：Rust 用 tracing + RUST_LOG 过滤；Bun 版用 console + [documind][模块] 前缀。
+   RUST_LOG 变量保留在 .env 中但不生效。
+3. PDF 解析：Rust 用 lopdf/pdf-extract；Bun 用 pdfjs-dist（纯 JS）。
+   段落/页码/bbox 语义按 Rust 逻辑对齐，OCR 仍依赖服务器 pdftoppm + tesseract。
+4. 单测：Rust #[cfg(test)] 已按文件一一翻译为 bun:test（bun test）。
+
+六、开发自检
+------------
+  cd apps/api-bun
+  bun run typecheck     # tsc --noEmit
+  bun test              # 单元测试，不启动服务
+本地不启动任何服务；真实环境验证统一在 ssh documind 上用 cli/ 完成。
