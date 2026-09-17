@@ -12,7 +12,7 @@
 | 前端 | **Next.js 静态导出** | 构建期由 `gen-web-assets` 内嵌进 Bun 二进制，由后端统一对外服务 |
 | LLM 抽象 | **自研 OpenAI-compatible client（`src/llm`）** | 统一封装 chat/JSON/流式；私有模型与 DashScope 等兼容端点共用一套 |
 | Agent 编排 | **自研 `src/agent`（Agent Kernel）** | 强类型状态机，可控、可观测、可测试 |
-| RAG 工具 | **自研 trait + adapter** | 检索、精排、引用校验、缓存都走本地接口 |
+| RAG 工具 | **自研接口 + adapter** | 检索、精排、引用校验、缓存都走本地接口 |
 | 关系数据库 | **PostgreSQL（postgres.js 直连 SQL）** | 文档、chunk、对话、trace、权限的权威存储 |
 | 向量/全文检索 | **Elasticsearch** | embedding + BM25 混合检索 |
 | 缓存/状态 | **Redis** | 热点问答、请求去重、短期状态、分布式锁 |
@@ -58,7 +58,7 @@
 ```text
 Agent Kernel
   │
-  └── LlmClient trait
+  └── LlmClient 接口
         ├── RigLlmClient
         └── OpenAiCompatClient
 ```
