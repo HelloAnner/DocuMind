@@ -18,6 +18,27 @@ import {
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
 
+/** 与 Rust 保持一致：这些端点不使用 ActorExtractor（自行鉴权或完全公开）。 */
+const PUBLIC_API_PATHS = new Set([
+  '/api/health', '/api/metrics', '/api/config',
+  '/api/auth/login', '/api/auth/refresh', '/api/auth/logout', '/api/invitations/accept',
+  '/api/auth/tenant-context',
+  '/api/v1/auth/login', '/api/v1/auth/refresh', '/api/v1/auth/logout',
+  '/api/v1/invitations/accept', '/api/v1/auth/tenant-context',
+  '/api/v1/permission/matrix',
+]);
+const PUBLIC_API_PATTERNS = [
+  /^\/api\/files\/[^/]+\/preview\/(manifest|content|pages\/\d+\/pdf)$/,
+];
+
+function isPublicApiPath(rawPath: string): boolean {
+  const path = rawPath.startsWith('/documind/') || rawPath === '/documind'
+    ? rawPath.slice('/documind'.length)
+    : rawPath;
+  if (PUBLIC_API_PATHS.has(path)) return true;
+  return PUBLIC_API_PATTERNS.some((pattern) => pattern.test(path));
+}
+
 export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>; state: import('./state.ts').AppState }> {
   const state = await buildState(config);
 
@@ -64,20 +85,22 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
     c.set('appState', state);
     await next();
   });
-  app.use('/api/*', extractActorMiddleware((c) => ({
+  const actorMiddleware = extractActorMiddleware((c) => ({
     state: c.get('appState'),
     config: c.get('appState').config,
     sql: c.get('appState').sql,
     redis: c.get('appState').redis,
     dbPoolPresent: c.get('appState').sql !== null,
-  })));
-  app.use('/documind/api/*', extractActorMiddleware((c) => ({
-    state: c.get('appState'),
-    config: c.get('appState').config,
-    sql: c.get('appState').sql,
-    redis: c.get('appState').redis,
-    dbPoolPresent: c.get('appState').sql !== null,
-  })));
+  }));
+  // Rust 里仅显式使用 ActorExtractor 的 handler 需要身份；下列端点自行鉴权或不鉴权
+  app.use('/api/*', async (c, next) => {
+    if (isPublicApiPath(c.req.path)) return next();
+    return actorMiddleware(c, next);
+  });
+  app.use('/documind/api/*', async (c, next) => {
+    if (isPublicApiPath(c.req.path)) return next();
+    return actorMiddleware(c, next);
+  });
 
   app.route('/', api);
   app.route('/documind', api);
