@@ -2,7 +2,11 @@
 
 // PDF：pdfjs-dist 逐页取文本层 -> 按空行切段 -> 启发式标题（短行、无句末标点、数字占比低）
 // 无文本层的页写入 warnings；整篇无文本时标记 scanned_pdf_no_text_layer（由上层决定是否转 OCR）
-// 说明：Rust 用 pdf_extract 抽文本，TS 用 pdfjs-dist，抽取细节不同但结果契约一致
+//
+// Rust 用 pdf_extract、TS 用 pdfjs-dist，两者都只在行末写单个 '\n'（不写空行），
+// 因此 split_paragraphs 的「空行分段」在 PDF 上同样折叠为“每页一段”，block/chunk 结构一致。
+// 已知差异：1) pdfjs 会丢弃落在页面 MediaBox 之外的字形，pdf_extract 不会；
+//          2) pdfjs 的 item.str 只保留内容流里的真实空格，不按几何间距合成空格。
 
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 

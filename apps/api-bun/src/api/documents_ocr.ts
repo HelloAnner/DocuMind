@@ -1,6 +1,5 @@
 // 移植自 apps/api-rs/src/api/documents.rs 的 build_ocr_bundle / build_ocr_bundle_in_dir
-// + apps/api-rs/src/document/ocr.rs 的 parse_tesseract_tsv（document/ocr.rs 尚未移植，这里内联，
-//   行为逐字对齐 Rust：TSV 列位、置信度过滤、段落 bbox 归一化、mean_confidence 计算）。
+// Tesseract TSV 解析复用 src/document/ocr.ts（与 Rust document::ocr::parse_tesseract_tsv 对齐）。
 import { mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -10,128 +9,12 @@ import type { CleanedBlock, CleanStats } from '../document/cleaning.ts';
 import { chunkBlocks } from '../document/chunking/mod.ts';
 import type { ChunkConfig } from '../document/chunking/mod.ts';
 import type { ParsedBlock, ParsedBundle, ParsedDocument } from '../document/types.ts';
-import { normalizedBBox } from '../models/source_anchor.ts';
-import type { NormalizedBBox, SourceAnchor } from '../models/source_anchor.ts';
+import type { SourceAnchor } from '../models/source_anchor.ts';
 import { sourceAnchorForPdfParagraph } from '../models/source_anchor.ts';
 import { OCR_RENDER_DPI } from './documents_types.ts';
 import type { ParseJobTask } from './documents_types.ts';
 import { currentParserConfig, sha256Hex } from './documents_support.ts';
-
-export interface OcrTextBlock {
-  text: string;
-  bbox: NormalizedBBox;
-  confidence: number;
-}
-
-export interface OcrPage {
-  blocks: OcrTextBlock[];
-  mean_confidence: number;
-}
-
-interface BlockAccumulator {
-  words: string[];
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  confidences: number[];
-}
-
-/** Rust: document::ocr::parse_tesseract_tsv */
-export function parseTesseractTsv(tsv: string): OcrPage {
-  let pageWidth = 0;
-  let pageHeight = 0;
-  const groups = new Map<string, BlockAccumulator>();
-
-  const lines = tsv.split(/\r?\n/);
-  for (const line of lines.slice(1)) {
-    const columns = splitn(line, 12, '\t');
-    if (columns.length !== 12) continue;
-    const level = parseI32(columns[0]!);
-    const blockNum = parseI32(columns[2]!);
-    const paragraphNum = parseI32(columns[3]!);
-    const left = parseI32(columns[6]!);
-    const top = parseI32(columns[7]!);
-    const width = parseI32(columns[8]!);
-    const height = parseI32(columns[9]!);
-    if (level === 1) {
-      pageWidth = width;
-      pageHeight = height;
-      continue;
-    }
-    if (level !== 5) continue;
-    const text = columns[11]!.trim();
-    const confidence = Number.parseFloat(columns[10]!);
-    const confidenceValue = Number.isNaN(confidence) ? -1.0 : confidence;
-    if (text === '' || confidenceValue < 0.0 || width <= 0 || height <= 0) continue;
-    const key = `${blockNum}:${paragraphNum}`;
-    let group = groups.get(key);
-    if (group === undefined) {
-      group = {
-        words: [], left, top, right: left + width, bottom: top + height, confidences: [],
-      };
-      groups.set(key, group);
-    }
-    group.words.push(text);
-    group.left = Math.min(group.left, left);
-    group.top = Math.min(group.top, top);
-    group.right = Math.max(group.right, left + width);
-    group.bottom = Math.max(group.bottom, top + height);
-    group.confidences.push(confidenceValue);
-  }
-
-  if (pageWidth <= 0 || pageHeight <= 0) {
-    throw AppError.badRequest('OCR_OUTPUT_INVALID', 'Tesseract OCR 输出无效: tesseract_tsv_page_dimensions_missing');
-  }
-
-  const sorted = [...groups.entries()].sort(([a], [b]) => {
-    const [aBlock, aPara] = a.split(':').map(Number) as [number, number];
-    const [bBlock, bPara] = b.split(':').map(Number) as [number, number];
-    return aBlock - bBlock || aPara - bPara;
-  });
-  const blocks: OcrTextBlock[] = [];
-  for (const [, group] of sorted) {
-    if (group.words.length === 0) continue;
-    const confidence = group.confidences.reduce((sum, value) => sum + value, 0) / group.confidences.length;
-    const x0 = group.left / pageWidth;
-    const x1 = group.right / pageWidth;
-    const y0 = 1.0 - group.bottom / pageHeight;
-    const y1 = 1.0 - group.top / pageHeight;
-    blocks.push({
-      text: group.words.join(' '),
-      bbox: normalizedBBox(clamp01(x0), clamp01(y0), clamp01(x1), clamp01(y1)),
-      confidence,
-    });
-  }
-  const mean = blocks.length === 0
-    ? 0.0
-    : blocks.reduce((sum, block) => sum + block.confidence, 0) / blocks.length;
-  return { blocks, mean_confidence: mean };
-}
-
-function clamp01(value: number): number { return Math.min(1, Math.max(0, value)); }
-
-function parseI32(value: string): number {
-  const parsed = Number.parseInt(value, 10);
-  if (Number.isNaN(parsed) || !/^[+-]?\d+$/.test(value.trim())) {
-    throw AppError.badRequest('OCR_OUTPUT_INVALID', `Tesseract OCR 输出无效: invalid_tesseract_tsv_integer:${value}`);
-  }
-  return parsed;
-}
-
-/** Rust: str::splitn */
-function splitn(value: string, limit: number, separator: string): string[] {
-  const parts: string[] = [];
-  let rest = value;
-  while (parts.length < limit - 1) {
-    const index = rest.indexOf(separator);
-    if (index < 0) break;
-    parts.push(rest.slice(0, index));
-    rest = rest.slice(index + separator.length);
-  }
-  parts.push(rest);
-  return parts;
-}
+import { parseTesseractTsv } from '../document/ocr.ts';
 
 interface SpawnOutput {
   success: boolean;
@@ -218,7 +101,13 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     if (!output.success) {
       throw AppError.badRequest('OCR_ENGINE_FAILED', `Tesseract OCR 失败: ${output.stderr}`);
     }
-    const ocrPage = parseTesseractTsv(output.stdout);
+    let ocrPage: import('../document/ocr.ts').OcrPage;
+    try {
+      ocrPage = parseTesseractTsv(output.stdout);
+    } catch (error) {
+      throw AppError.badRequest(
+        'OCR_OUTPUT_INVALID', `Tesseract OCR 输出无效: ${(error as Error).message}`);
+    }
     if (ocrPage.blocks.length === 0) {
       emptyPages += 1;
       warnings.push(`ocr_page_${page}_empty`);

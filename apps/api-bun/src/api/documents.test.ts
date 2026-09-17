@@ -50,21 +50,19 @@ function encode(text: string): Uint8Array { return new TextEncoder().encode(text
 
 /** Rust 测试 helper: blank_pdf_with_pages（无文本层 PDF） */
 function blankPdfWithPages(pageCount: number): Uint8Array {
-  const objs: string[] = [];
   const pageNums: number[] = [];
-  let next = 3;
-  for (let i = 0; i < pageCount; i += 1) { pageNums.push(next); next += 2; }
-  const contentNum = next;
+  for (let i = 0; i < pageCount; i += 1) pageNums.push(3 + i * 2);
+  const objs: string[] = [];
   objs[0] = '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n';
   objs[1] = `2 0 obj\n<< /Type /Pages /Kids [${pageNums.map((n) => `${n} 0 R`).join(' ')}] /Count ${pageCount} >>\nendobj\n`;
   for (const pageNum of pageNums) {
+    const contentNum = pageNum + 1;
     objs[pageNum - 1] = `${pageNum} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << >> /Contents ${contentNum} 0 R >>\nendobj\n`;
+    objs[contentNum - 1] = `${contentNum} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`;
   }
-  objs[contentNum - 1] = `${contentNum} 0 obj\n<< /Length 0 >>\nstream\n\nendstream\nendobj\n`;
   return assemblePdf(objs);
 }
 
-/** Rust 测试 helper: single_page_pdf_with_text */
 function singlePagePdfWithText(text: string): Uint8Array {
   const escaped = text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
   const stream = `BT\n/F1 12 Tf\n72 720 Td\n(${escaped}) Tj\nET`;
@@ -82,6 +80,7 @@ function assemblePdf(objects: string[]): Uint8Array {
   let offset = parts[0]!.length;
   const offsets: number[] = [];
   for (const object of objects) {
+    if (typeof object !== 'string') throw new Error('test pdf has a hole in object numbering');
     offsets.push(offset);
     const bytes = encode(object);
     parts.push(bytes);

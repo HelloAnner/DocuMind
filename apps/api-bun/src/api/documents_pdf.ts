@@ -147,6 +147,7 @@ export class PdfDocument {
     const num = intOf(reader.parseValue());
     const gen = intOf(reader.parseValue());
     if (num === null || gen === null) throw new Error(`invalid pdf object header at ${offset}`);
+    reader.skipWs();
     if (!reader.matchKeyword('obj')) throw new Error(`missing obj keyword at ${offset}`);
     const value = reader.parseValue();
     if (value.kind === 'dict') {

@@ -1,6 +1,6 @@
 // 移植自 apps/api-rs/src/api/documents.rs —— 文件内容/按页预览（含 Office 转 PDF、Range、预览缓存）
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppError } from '../errors.ts';
 import type { AppState } from '../state.ts';
@@ -80,6 +80,7 @@ async function convertOfficeToPdf(inputPath: string, outputDir: string): Promise
   const dot = stem.lastIndexOf('.');
   const name = dot > 0 ? stem.slice(0, dot) : stem;
   const outputPdf = join(outputDir, `${name === '' ? 'source' : name}.pdf`);
+  if (existsSync(outputPdf)) await rm(outputPdf, { force: true });
 
   let lastError: string | null = null;
   for (const commandName of ['soffice', 'libreoffice']) {
