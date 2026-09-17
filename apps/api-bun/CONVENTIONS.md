@@ -4,7 +4,10 @@
 
 ## 源码对照
 
-Rust 源码在 `apps/api-rs/src/`，按同样领域目录移植到 `apps/api-bun/src/`：
+TypeScript 实现已是唯一后端（Rust 版已从仓库删除，历史见 git）。
+各文件头部保留 `移植自 apps/api-rs/...` 出处注释用于追溯语义；需要对照原文时用
+`git show <删除 Rust 前的 commit>:apps/api-rs/src/<文件>` 取回。
+原始对照关系如下（Rust → TS）：
 
 | Rust | TS |
 |---|---|

@@ -1,5 +1,4 @@
 # ── Rust ──
-/target/
 **/*.rs.bk
 *.pdb
 
@@ -37,7 +36,6 @@ Thumbs.db
 
 # ── Build ──
 /dist/
-/target-release/
 
 # ── Data ──
 /data/uploads/*

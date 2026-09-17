@@ -29,13 +29,15 @@ async function listVectorIndexes(c: Context<AppEnv>) {
   const physicalIndex = snapshot ? snapshot.physical_index : null;
   const embedding = state.config.rag.embedding;
 
-  const rows = await sql`
+  // 用 unsafe 显式复用 $1/$2：postgres.js 的模板插值会为同一值生成不同占位符，
+  // 导致 GROUP BY 里的 COALESCE(e.embedding_model, $n) 与 SELECT 中不匹配。
+  const rows = await sql.unsafe(`
     SELECT t.id AS tenant_id,
            t.name AS tenant_name,
            kb.id AS kb_id,
            kb.name AS kb_name,
-           COALESCE(e.embedding_model, ${embedding.model}) AS embedding_model,
-           COALESCE(MAX(e.embedding_dim), ${embedding.dimension})::int AS embedding_dim,
+           COALESCE(e.embedding_model, $1) AS embedding_model,
+           COALESCE(MAX(e.embedding_dim), $2)::int AS embedding_dim,
            COUNT(DISTINCT d.id) FILTER (WHERE d.parse_status = 'indexed')::bigint AS indexed_documents,
            COUNT(DISTINCT d.id) FILTER (
                WHERE d.parse_status IN ('uploaded', 'parsing', 'chunked', 'embedding')
@@ -64,10 +66,10 @@ async function listVectorIndexes(c: Context<AppEnv>) {
           AND c.parse_job_id = d.latest_parse_job_id
     LEFT JOIN chunk_embeddings e
            ON e.chunk_id = c.id
-          AND e.embedding_model = ${embedding.model}
-    GROUP BY t.id, t.name, kb.id, kb.name, COALESCE(e.embedding_model, ${embedding.model})
-    ORDER BY t.name ASC, kb.name ASC
-  `;
+          AND e.embedding_model = $1
+    GROUP BY t.id, t.name, kb.id, kb.name, COALESCE(e.embedding_model, $1)
+    ORDER BY t.name ASC, kb.name ASC`,
+    [embedding.model, embedding.dimension]);
 
   return c.json(rows.map((row) => {
     const chunks = Number(row.chunks ?? 0);

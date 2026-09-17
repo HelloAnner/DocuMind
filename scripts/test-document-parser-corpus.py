@@ -35,14 +35,9 @@ def inspect(paths):
     inspections = []
     for path in paths:
         command = [
-            "cargo",
+            "bun",
             "run",
-            "-q",
-            "-p",
-            "documind",
-            "--example",
-            "inspect_document",
-            "--",
+            str(ROOT / "apps" / "api-bun" / "scripts" / "inspect-document.ts"),
             str(path),
         ]
         result = subprocess.run(command, cwd=ROOT, text=True, capture_output=True)
