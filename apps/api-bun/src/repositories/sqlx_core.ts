@@ -273,7 +273,7 @@ export class SqlxConversationCore {
         ${message.confidence},
         ${message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason)},
         ${message.error_code}, ${message.error_message},
-        ${message.agent_mode}, ${message.prompt_versions}, ${message.created_at}, ${message.completed_at})
+        ${message.agent_mode}, ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb, ${message.created_at}, ${message.completed_at})
     `;
   }
 
@@ -306,7 +306,7 @@ export class SqlxConversationCore {
           client_request_id = ${message.client_request_id}, confidence = ${message.confidence},
           no_answer_reason = ${message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason)},
           error_code = ${message.error_code}, error_message = ${message.error_message},
-          agent_mode = ${message.agent_mode}, prompt_versions = ${message.prompt_versions},
+          agent_mode = ${message.agent_mode}, prompt_versions = ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb,
           created_at = ${message.created_at}, completed_at = ${message.completed_at}
       WHERE id = ${message.id} AND tenant_id = ${message.tenant_id}
     `;

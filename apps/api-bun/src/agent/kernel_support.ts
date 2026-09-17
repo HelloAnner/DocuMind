@@ -129,7 +129,8 @@ export function mergeEvidenceStable(
   for (const item of incoming) {
     const existingIndex = byId.get(item.chunk.chunk_id);
     if (existingIndex !== undefined) {
-      if (item.score > existing[existingIndex].score) existing[existingIndex] = item;
+      const current = existing[existingIndex];
+      if (current !== undefined && item.score > current.score) existing[existingIndex] = item;
       ids.push(existingIndex + 1);
       continue;
     }
@@ -138,7 +139,8 @@ export function mergeEvidenceStable(
     usedChars += chars;
     existing.push(item);
     const index = existing.length - 1;
-    byId.set(existing[index].chunk.chunk_id, index);
+    const inserted = existing[index];
+    if (inserted !== undefined) byId.set(inserted.chunk.chunk_id, index);
     ids.push(index + 1);
   }
   const unique = [...new Set(ids)];

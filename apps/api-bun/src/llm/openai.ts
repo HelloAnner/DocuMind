@@ -172,9 +172,11 @@ export class OpenAiClient {
       throw new Error(providerErrorMessage(response.status, await response.text()));
     }
     const payloadJson = (await response.json()) as Record<string, unknown>;
-    const content = (payloadJson.choices as Array<Record<string, unknown>>)?.[0]
-      ? ((payloadJson.choices as Array<Record<string, unknown>>)[0].message as Record<string, unknown>)?.content
-      : undefined;
+    const choices = (payloadJson.choices ?? []) as Array<Record<string, unknown>>;
+    const firstChoice = choices[0];
+    const content = firstChoice === undefined
+      ? undefined
+      : (firstChoice.message as Record<string, unknown> | undefined)?.content;
     if (typeof content !== 'string') throw new Error('missing content in completion response');
     return parseJsonCompletion<T>(content);
   }

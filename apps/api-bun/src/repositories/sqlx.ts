@@ -138,7 +138,7 @@ export class SqlxConversationRepository
         hypothetical_answer, resolved_refs, effective_kb_ids, rewrite_model, created_at
       ) VALUES (${trace.id}, ${trace.message_id}, ${trace.original_query},
         ${trace.rewritten_query}, ${trace.keywords}, ${trace.hypothetical_answer},
-        ${trace.resolved_refs}, ${trace.effective_kb_ids}, ${trace.rewrite_model},
+        ${JSON.stringify(trace.resolved_refs)}::jsonb, ${trace.effective_kb_ids}, ${trace.rewrite_model},
         ${trace.created_at})
     `;
   }

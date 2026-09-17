@@ -165,7 +165,7 @@ describe('agent kernel', () => {
     expect(retriever.calls).toHaveLength(0);
     expect(model.requests).toHaveLength(1);
     expect(run.trace.stop_reason).toBe('direct_response');
-    expect(run.trace.react_steps![0].action).toBe('respond');
+    expect(run.trace.react_steps![0]!.action).toBe('respond');
   });
 
   test('answer_tokens_stream_without_a_duplicate_response_step', async () => {
@@ -209,9 +209,9 @@ describe('agent kernel', () => {
       'knowledge_search',
       'respond',
     ]);
-    expect(run.trace.react_steps![0].queries).toEqual(['合同付款条件']);
-    expect(run.trace.react_steps![0].retrieved_chunk_ids).toHaveLength(1);
-    expect(run.trace.react_steps![0].accepted_chunk_ids).toHaveLength(1);
+    expect(run.trace.react_steps![0]!.queries).toEqual(['合同付款条件']);
+    expect(run.trace.react_steps![0]!.retrieved_chunk_ids).toHaveLength(1);
+    expect(run.trace.react_steps![0]!.accepted_chunk_ids).toHaveLength(1);
     expect(run.trace.keywords).toEqual(['合同']);
   });
 
@@ -301,7 +301,7 @@ describe('agent kernel', () => {
     const run = await kernel(model, retriever).run(req);
     await collectAnswer(run);
 
-    const last = model.requests[0].messages[model.requests[0].messages.length - 1];
+    const last = model.requests[0]!.messages[model.requests[0]!.messages.length - 1]!;
     expect(last.content).toBe('你好');
   });
 
@@ -327,7 +327,7 @@ describe('agent kernel', () => {
     expect(confidence).toBe('high');
     expect(model.requests).toHaveLength(3);
     expect(
-      (run.trace.react_steps![0].warnings ?? []).some((warning) =>
+      (run.trace.react_steps![0]!.warnings ?? []).some((warning) =>
         warning.includes('no document evidence'),
       ),
     ).toBe(true);
