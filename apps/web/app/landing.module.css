@@ -34,6 +34,7 @@
 }
 
 .brand { width: fit-content; }
+.page :global(.dm-brand-mark) { color: var(--ink); }
 .nav { display: flex; gap: 32px; }
 .nav a, .login { color: #615f59; font-size: 13px; font-weight: 600; transition: color .2s ease; }
 .nav a:hover, .login:hover { color: var(--ink); }
