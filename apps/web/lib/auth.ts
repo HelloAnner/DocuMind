@@ -64,9 +64,8 @@ const AUTH_KEY = "documind-auth";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
-export function authenticatedHomePath(scope: AuthScope, roles: UserRole[] | string[]): string {
+export function authenticatedHomePath(scope: AuthScope, _roles: UserRole[] | string[]): string {
   if (scope === "platform") return "/system";
-  if (isTenantAdminRole(roles)) return "/admin";
   return AUTHENTICATED_HOME_PATH;
 }
 
