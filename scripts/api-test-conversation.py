@@ -747,6 +747,28 @@ def main():
         "system user Anner",
     )
 
+    platform_kb_ids = platform_login.get("allowed_kb_ids") or []
+    if not platform_kb_ids:
+        fail("platform admin has no knowledge base scope", platform_login)
+    platform_conversation = http_json(
+        "POST",
+        "/api/conversations",
+        {"title": "API Test Platform Admin Chat", "kb_ids": [platform_kb_ids[0]]},
+        token=platform_token,
+    )
+    run_question(
+        platform_token,
+        platform_conversation["conversation_id"],
+        "请简短回答：DocuMind 是什么？",
+        require_pipeline_events=False,
+    )
+    http_json(
+        "DELETE",
+        f"/api/conversations/{platform_conversation['conversation_id']}",
+        token=platform_token,
+    )
+    ok("platform admin completes a real streamed conversation")
+
     http_json("POST", "/api/v1/auth/logout", {}, token=platform_token)
     ok("platform admin logout succeeds")
 
