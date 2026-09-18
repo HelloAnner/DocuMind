@@ -97,6 +97,87 @@
 .footer p { margin: 0; }
 .footer > span:last-child { justify-self: end; }
 
+:global([data-theme="dark"]) .page {
+  --ink: #fafafa;
+  --muted: #a1a1aa;
+  --line: rgba(255, 255, 255, 0.08);
+  --paper: #0a0a0f;
+  background:
+    radial-gradient(circle at 16% 15%, rgba(139, 92, 246, 0.12), transparent 26rem),
+    radial-gradient(circle at 88% 28%, rgba(245, 158, 11, 0.08), transparent 24rem),
+    var(--paper);
+}
+
+:global([data-theme="dark"]) .header,
+:global([data-theme="dark"]) .badge,
+:global([data-theme="dark"]) .secondary,
+:global([data-theme="dark"]) .product,
+:global([data-theme="dark"]) .composer,
+:global([data-theme="dark"]) .feature {
+  background: rgba(24, 24, 30, 0.76);
+  border-color: var(--line);
+}
+
+:global([data-theme="dark"]) .nav a,
+:global([data-theme="dark"]) .login,
+:global([data-theme="dark"]) .badge,
+:global([data-theme="dark"]) .secondary {
+  color: #a1a1aa;
+}
+
+:global([data-theme="dark"]) .nav a:hover,
+:global([data-theme="dark"]) .login:hover,
+:global([data-theme="dark"]) .secondary:hover {
+  color: var(--ink);
+}
+
+:global([data-theme="dark"]) .signup,
+:global([data-theme="dark"]) .primary,
+:global([data-theme="dark"]) .composer button {
+  background: #fafafa;
+  color: #18181b;
+}
+
+:global([data-theme="dark"]) .product {
+  box-shadow: 0 42px 90px rgba(0, 0, 0, 0.35), 0 0 0 10px rgba(255, 255, 255, 0.03);
+}
+
+:global([data-theme="dark"]) .productBar,
+:global([data-theme="dark"]) .sidebar {
+  background: rgba(18, 18, 24, 0.76);
+}
+
+:global([data-theme="dark"]) .workspace,
+:global([data-theme="dark"]) .questions span {
+  background: #1a1a20;
+  color: #a1a1aa;
+}
+
+:global([data-theme="dark"]) .sidebar span {
+  color: #71717a;
+}
+
+:global([data-theme="dark"]) .sidebar .sideActive {
+  background: #27272a;
+  color: #fafafa;
+  box-shadow: none;
+}
+
+:global([data-theme="dark"]) .composer {
+  color: #71717a;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.2);
+}
+
+:global([data-theme="dark"]) .feature:hover {
+  background: #1a1a20;
+  box-shadow: 0 24px 55px rgba(0, 0, 0, 0.22);
+}
+
+:global([data-theme="dark"]) .security {
+  background: #121218;
+  border: 1px solid var(--line);
+}
+
 @keyframes morph { 0%, 100% { border-radius: 62% 38% 46% 54% / 44% 58% 42% 56%; transform: rotate(0deg); } 50% { border-radius: 39% 61% 58% 42% / 61% 39% 61% 39%; transform: rotate(8deg); } }
 @keyframes float { 0%, 100% { transform: translateY(0) rotate(0); } 50% { transform: translateY(-18px) rotate(7deg); } }
 

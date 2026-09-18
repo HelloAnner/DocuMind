@@ -20,6 +20,16 @@ export default function RootLayout({
   return (
     <html data-theme="light" lang="zh-CN" suppressHydrationWarning>
       <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => {
+              const media = matchMedia("(prefers-color-scheme: dark)");
+              const apply = () => document.documentElement.dataset.theme = media.matches ? "dark" : "light";
+              apply();
+              media.addEventListener("change", apply);
+            })();`,
+          }}
+        />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
