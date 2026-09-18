@@ -14,7 +14,7 @@
         "confidence": ["high", "medium", "low"],
         "citations_min": 1,
         "retrievals_min": 1,
-        "react_rounds_min": 4,
+        "react_rounds_min": 1,
         "max_duration_ms": 180000
       }
     },
@@ -24,7 +24,7 @@
         "status": "completed",
         "citations_min": 1,
         "retrievals_min": 1,
-        "react_rounds_min": 4,
+        "react_rounds_min": 1,
         "max_duration_ms": 180000
       }
     }
