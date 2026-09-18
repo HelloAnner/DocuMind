@@ -52,7 +52,7 @@ function buildActorFromFallback(
     scope: includeSuperAdmin ? 'platform' : 'tenant',
     roles,
     permissions: derivePermissionsCached(roles),
-    allowed_kb_ids: includeSuperAdmin ? [] : defaultKbIds,
+    allowed_kb_ids: defaultKbIds,
     is_super_admin: includeSuperAdmin,
     api_client_id: null, api_token_id: null, api_scopes: [], api_token_expires_at: null,
   };
@@ -92,7 +92,7 @@ export async function resolveActorFromDb(
   const attributes = membership.attributes ?? {};
   if (roles.length === 0) throw AppError.unauthorized();
 
-  const kbIds = isSuperAdmin ? [] : await allowedKbIds(sql, tenantId, userId, roles);
+  const kbIds = await allowedKbIds(sql, tenantId, userId, roles);
   const permissions = effectivePermissionsForMembership(roles, attributes);
   const loginId = String(user.login_id);
   return {
@@ -182,7 +182,7 @@ export async function authenticateFromDb(
     }
     throw AppError.unauthorized();
   }
-  const kbIds = isSuperAdmin ? [] : await allowedKbIds(sql, tenantId, userId, roles);
+  const kbIds = await allowedKbIds(sql, tenantId, userId, roles);
   const permissions = effectivePermissionsForMembership(roles, attributes);
   const loginId = String(user.login_id);
   const email = (user.email as string | null) ?? '';

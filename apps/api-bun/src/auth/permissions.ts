@@ -6,6 +6,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: [
     'tenant.read', 'tenant.write', 'tenant.delete', 'user.read', 'user.write', 'user.delete',
     'model.read', 'model.write', 'model.delete', 'job.read', 'job.write', 'audit.read',
+    'kb.read', 'chat.ask', 'answer.feedback',
   ],
   tenant_admin: [
     'tenant.read', 'tenant.write', 'user.read', 'user.write', 'kb.read', 'kb.create', 'kb.write',
@@ -66,7 +67,8 @@ export function roleMatrix(): Record<string, string[]> {
 
 export function isDocumindAdmin(roles: string[]): boolean {
   return roles.some((role) =>
-    ['enterprise_admin', 'tenant_owner', 'tenant_admin', 'team_admin', 'data_admin'].includes(role));
+    ['super_admin', 'enterprise_admin', 'tenant_owner', 'tenant_admin', 'team_admin', 'data_admin']
+      .includes(role));
 }
 
 export function requireSuperAdmin(actor: CurrentActor): void {

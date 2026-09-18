@@ -652,14 +652,14 @@ def assert_platform_login_identity(login):
         fail("login returned unexpected user", login)
     if "super_admin" not in roles:
         fail("Anner must be a super_admin", login)
-    required = {"tenant.read", "user.read"}
+    required = {"tenant.read", "user.read", "kb.read", "chat.ask"}
     missing = sorted(required - permissions)
     if missing:
         fail("super_admin permissions missing", {"missing": missing, "login": login})
-    forbidden = {"kb.manage", "document.upload", "chat.ask"} & permissions
+    forbidden = {"kb.manage", "document.upload"} & permissions
     if forbidden:
-        fail("platform admin unexpectedly has tenant content permissions", sorted(forbidden))
-    ok("Anner login returns platform-only super_admin permissions")
+        fail("platform admin unexpectedly has tenant management permissions", sorted(forbidden))
+    ok("Anner login returns platform admin permissions with tenant chat access")
 
 
 def assert_content_login_identity(login):

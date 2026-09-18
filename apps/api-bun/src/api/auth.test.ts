@@ -3,6 +3,7 @@ import {
   intersectPermissions, mapDocumindRoles, mapPortalPermissions,
   normalizeInvitationAccount, slugify,
 } from './auth.ts';
+import { derivePermissions } from '../auth/permissions.ts';
 
 describe('api/auth', () => {
   test('validates invitation account', () => {
@@ -10,6 +11,11 @@ describe('api/auth', () => {
     expect(normalizeInvitationAccount('Anner')).toBe('anner');
     expect(() => normalizeInvitationAccount('')).toThrow();
     expect(() => normalizeInvitationAccount('bad id')).toThrow();
+  });
+  test('platform administrators can use tenant chat', () => {
+    expect(derivePermissions(['super_admin'])).toEqual(expect.arrayContaining([
+      'kb.read', 'chat.ask', 'answer.feedback',
+    ]));
   });
   test('maps portal permissions to local names', () => {
     expect(mapPortalPermissions([
