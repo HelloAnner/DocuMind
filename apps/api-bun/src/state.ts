@@ -22,6 +22,7 @@ import { embeddingClientConfigFrom } from './rag/embedding.ts';
 import { quickConsistency, startVectorWorker } from './rag/vector_pipeline.ts';
 import type { VectorConsistencySnapshot } from './http/health.ts';
 import type { ClaimVerifier } from './agent/verifier/types.ts';
+import { loadSystemSettings } from './system_settings.ts';
 
 export interface AppState {
   config: AppConfig;
@@ -47,6 +48,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   if (config.databaseUrl) {
     sql = postgres(config.databaseUrl, { max: 10 });
     await seedIdentity(sql, config);
+    await loadSystemSettings(sql, config);
     await recoverInterruptedAgentRuns(sql);
     try {
       const { recoverInterruptedDocumentJobs } = await import('./api/documents.ts');

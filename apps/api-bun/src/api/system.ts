@@ -14,6 +14,10 @@ import { systemVectorIndexesRouter } from './system_vector_indexes.ts';
 import {
   checkFailed, checkOpenAiCompatibleEndpoint, type DependencyCheck,
 } from '../http/health.ts';
+import { recordAuditEvent } from '../auth/audit.ts';
+import {
+  editableSystemSettings, saveSystemSettings, systemSettingLimits,
+} from '../system_settings.ts';
 
 // system_tenants.rs / system_tenant_invitations.rs / 向量索引部分的实现拆到独立文件，
 // 这里转发导出并在 systemRouter 中挂载；各 router 只注册互不冲突的路径。
@@ -30,6 +34,7 @@ export function systemRouter(): Hono<AppEnv> {
   router.get('/api/system/jobs', listJobs);
   router.get('/api/system/audit', listAudit);
   router.get('/api/system/settings', settings);
+  router.put('/api/system/settings', updateSettings);
   router.get('/api/system/tenant-integrity', tenantIntegrity);
   router.route('/', systemVectorIndexesRouter());
   return router;
@@ -345,9 +350,42 @@ async function listJobs(c: Context<AppEnv>) {
 async function settings(c: Context<AppEnv>) {
   const state = c.get('appState');
   requireSuperAdmin(c.get('actor'));
+  const updatedAt = state.sql
+    ? await state.sql`SELECT MAX(updated_at) AS updated_at FROM system_setting`
+    : [];
+  return c.json(settingsPayload(
+    state,
+    updatedAt[0]?.updated_at
+      ? toRfc3339(new Date(updatedAt[0].updated_at as Date | string))
+      : null,
+  ));
+}
+
+async function updateSettings(c: Context<AppEnv>) {
+  const state = c.get('appState');
+  const actor = c.get('actor');
+  requireSuperAdmin(actor);
+  if (!state.sql) throw AppError.badRequest('DATABASE_REQUIRED', '保存系统设置需要 PostgreSQL');
+  const before = editableSystemSettings(state.config);
+  const saved = await saveSystemSettings(state.sql, state.config, actor.user_id, await c.req.json());
+  await recordAuditEvent(state.sql, actor, 'system.settings.update', 'system_setting', null, {
+    before,
+    after: saved,
+  });
+  return c.json(settingsPayload(state, toRfc3339(new Date())));
+}
+
+function settingsPayload(state: AppState, updatedAt: string | null) {
   const cfg = state.config;
-  return c.json({
-    read_only: true,
+  return {
+    read_only: false,
+    updated_at: updatedAt,
+    editable: {
+      values: editableSystemSettings(cfg),
+      constraints: systemSettingLimits,
+      applies: 'immediately',
+      persistence: 'postgresql',
+    },
     environment: cfg.environment,
     service: {
       host: cfg.serverHost, port: cfg.serverPort,
@@ -355,7 +393,6 @@ async function settings(c: Context<AppEnv>) {
     },
     auth: {
       login_mode: cfg.authLoginMode,
-      token_expire_hours: cfg.authTokenExpireHours,
       portal_base_url: cfg.portalBaseUrl,
       portal_exchange_endpoint: cfg.portalExchangeEndpoint,
       local_login_enabled: cfg.authLoginMode === 'local',
@@ -372,9 +409,9 @@ async function settings(c: Context<AppEnv>) {
       object_storage_bucket: cfg.objectStorageBucket,
       object_storage_force_path_style: cfg.objectStorageForcePathStyle,
       object_storage_tls_verify: cfg.objectStorageTlsVerify,
-      object_storage_presign_expire_seconds: cfg.objectStoragePresignExpireSeconds,
     },
     deployment: {
+      restart_required: true,
       host_alias: 'documind', root: '/opt/documind', current: '/opt/documind/current',
       releases: '/opt/documind/releases/<timestamp>', shared: '/opt/documind/shared',
       env_file: '/opt/documind/shared/.env',
@@ -384,7 +421,7 @@ async function settings(c: Context<AppEnv>) {
         'documind-elasticsearch', 'documind-minio',
       ],
     },
-  });
+  };
 }
 
 async function listAudit(c: Context<AppEnv>) {

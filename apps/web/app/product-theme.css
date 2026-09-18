@@ -5573,3 +5573,224 @@ body > .hiddenCanvasElement {
     display: none;
   }
 }
+
+/* System settings */
+.dm-settings-page {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.dm-settings-hero {
+  align-items: center;
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--agent-violet) 10%, var(--surface-panel)), var(--surface-panel) 58%);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  display: flex;
+  justify-content: space-between;
+  padding: 18px 20px;
+}
+
+.dm-settings-hero > div,
+.dm-settings-save-state,
+.dm-settings-actions,
+.dm-settings-actions > div {
+  align-items: center;
+  display: flex;
+}
+
+.dm-settings-hero > div:first-child {
+  gap: 12px;
+}
+
+.dm-settings-hero-icon {
+  align-items: center;
+  background: color-mix(in srgb, var(--agent-violet) 12%, var(--surface-raised));
+  border-radius: 12px;
+  color: var(--agent-violet);
+  display: flex;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.dm-settings-hero strong {
+  color: var(--text-primary);
+  display: block;
+  font-size: 14px;
+}
+
+.dm-settings-hero p,
+.dm-settings-readonly-note {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 4px 0 0;
+}
+
+.dm-settings-save-state {
+  gap: 10px;
+}
+
+.dm-settings-save-state > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dm-settings-field-grid {
+  display: grid;
+  gap: 0;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-settings-field {
+  border-right: 1px solid var(--border-faint);
+  display: block;
+  padding: 22px;
+}
+
+.dm-settings-field:last-child {
+  border-right: 0;
+}
+
+.dm-settings-field > span {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.dm-settings-field p {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+  margin: 7px 0 14px;
+  min-height: 36px;
+}
+
+.dm-settings-field > div {
+  align-items: center;
+  background: var(--input-bg);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  display: flex;
+  height: 42px;
+  max-width: 260px;
+  overflow: hidden;
+}
+
+.dm-settings-field input {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  flex: 1;
+  font: inherit;
+  height: 100%;
+  min-width: 0;
+  outline: 0;
+  padding: 0 12px;
+}
+
+.dm-settings-field input:focus {
+  box-shadow: inset 0 0 0 1px var(--agent-violet);
+}
+
+.dm-settings-field > div > span {
+  border-left: 1px solid var(--border-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 0 12px;
+}
+
+.dm-settings-field small {
+  color: var(--text-muted);
+  display: block;
+  font-size: 10px;
+  margin-top: 7px;
+}
+
+.dm-settings-actions {
+  border-top: 1px solid var(--border-faint);
+  justify-content: space-between;
+  padding: 14px 18px;
+}
+
+.dm-settings-actions > span {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.dm-settings-actions > div {
+  gap: 8px;
+}
+
+.dm-settings-columns {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-settings-service-list > div {
+  align-items: center;
+  border-top: 1px solid var(--border-faint);
+  color: var(--text-muted);
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 20px 1fr auto;
+  min-height: 48px;
+  padding: 8px 14px;
+}
+
+.dm-settings-service-list > div > span:nth-child(2) {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.dm-settings-readonly-note {
+  border-bottom: 1px solid var(--border-faint);
+  margin: 0;
+  padding: 14px 16px;
+}
+
+.dm-settings-path-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-settings-path-grid > * {
+  border-right: 1px solid var(--border-faint);
+}
+
+.dm-settings-path-grid > :nth-child(even) {
+  border-right: 0;
+}
+
+@media (max-width: 900px) {
+  .dm-settings-field-grid,
+  .dm-settings-columns,
+  .dm-settings-path-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dm-settings-field,
+  .dm-settings-path-grid > * {
+    border-right: 0;
+  }
+
+  .dm-settings-field + .dm-settings-field {
+    border-top: 1px solid var(--border-faint);
+  }
+}
+
+@media (max-width: 640px) {
+  .dm-settings-hero,
+  .dm-settings-actions {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .dm-settings-save-state,
+  .dm-settings-actions > div {
+    justify-content: space-between;
+  }
+}

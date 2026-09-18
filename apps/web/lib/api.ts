@@ -514,18 +514,27 @@ export async function listSystemVectorIndexes(): Promise<SystemVectorSnapshot> {
   return fetchJson("/api/system/vector-indexes");
 }
 
+export interface EditableSystemSettings {
+  auth_token_expire_hours: number;
+  object_storage_presign_expire_seconds: number;
+}
+
 export interface SystemSettingsSnapshot {
-  read_only: boolean;
-  environment: string;
-  service: {
-    host: string;
-    port: number;
-    base_path: string;
-    health_path: string;
+  read_only: false;
+  updated_at: string | null;
+  editable: {
+    values: EditableSystemSettings;
+    constraints: {
+      auth_token_expire_hours: { min: number; max: number; unit: string };
+      object_storage_presign_expire_seconds: { min: number; max: number; unit: string };
+    };
+    applies: "immediately";
+    persistence: "postgresql";
   };
+  environment: string;
+  service: { host: string; port: number; base_path: string; health_path: string };
   auth: {
     login_mode: string;
-    token_expire_hours: number;
     portal_base_url: string;
     portal_exchange_endpoint: string;
     local_login_enabled: boolean;
@@ -542,9 +551,9 @@ export interface SystemSettingsSnapshot {
     object_storage_bucket: string;
     object_storage_force_path_style: boolean;
     object_storage_tls_verify: boolean;
-    object_storage_presign_expire_seconds: number;
   };
   deployment: {
+    restart_required: true;
     host_alias: string;
     root: string;
     current: string;
@@ -558,6 +567,15 @@ export interface SystemSettingsSnapshot {
 
 export async function getSystemSettings(): Promise<SystemSettingsSnapshot> {
   return fetchJson("/api/system/settings");
+}
+
+export async function updateSystemSettings(
+  settings: EditableSystemSettings
+): Promise<SystemSettingsSnapshot> {
+  return fetchJson("/api/system/settings", {
+    method: "PUT",
+    body: JSON.stringify(settings),
+  });
 }
 
 export interface AdminDocument {
