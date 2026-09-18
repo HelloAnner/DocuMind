@@ -69,6 +69,7 @@ export function ChatWorkspace() {
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const previousMessageCountRef = useRef(0);
+  const followStreamRef = useRef(true);
   const [previewTarget, setPreviewTarget] = useState<DocumentPreviewTarget | null>(null);
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
@@ -84,6 +85,7 @@ export function ChatWorkspace() {
 
   useEffect(() => {
     if (loading || messages.length === 0) return;
+    followStreamRef.current = true;
     const frame = requestAnimationFrame(() => {
       streamEndRef.current?.scrollIntoView({ block: "end" });
       setShowScrollToBottom(false);
@@ -100,21 +102,28 @@ export function ChatWorkspace() {
     }
     if (messages.length <= previousCount || previousCount === 0) return;
 
-    const latestUser = [...messages].reverse().find((message) => message.role === "user");
-    if (!latestUser) return;
+    followStreamRef.current = true;
     const frame = requestAnimationFrame(() => {
       const container = streamRef.current;
-      const entry = container?.querySelector<HTMLElement>(
-        `[data-message-id="${CSS.escape(latestUser.message_id)}"]`
-      );
-      if (container && entry) {
-        container.scrollTo({ top: Math.max(0, entry.offsetTop - 24), behavior: "smooth" });
+      if (container) {
+        container.scrollTop = container.scrollHeight;
+        setShowScrollToBottom(false);
       }
     });
     return () => cancelAnimationFrame(frame);
-  }, [messages, messages.length]);
+  }, [messages.length]);
+
+  useEffect(() => {
+    if (!streamingId || !followStreamRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const container = streamRef.current;
+      if (container) container.scrollTop = container.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages, streamingId]);
 
   const scrollToBottom = () => {
+    followStreamRef.current = true;
     streamEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   };
 
@@ -122,6 +131,7 @@ export function ChatWorkspace() {
     const container = streamRef.current;
     if (!container) return;
     const distance = container.scrollHeight - container.scrollTop - container.clientHeight;
+    followStreamRef.current = distance <= 100;
     setShowScrollToBottom(distance > 100);
   };
 
