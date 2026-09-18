@@ -1457,7 +1457,8 @@ select:focus-visible {
 }
 
 .dm-chat-stream-end {
-  flex: 0 0 64px;
+  height: 64px;
+  min-height: 64px;
   width: 100%;
 }
 
