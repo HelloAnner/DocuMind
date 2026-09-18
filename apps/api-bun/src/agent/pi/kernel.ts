@@ -36,6 +36,7 @@ import {
   isAssistantMessage,
   lastAssistantMessage,
   toolCallNames,
+  toolCallsOf,
   toolResultText,
 } from './events.ts';
 import {
@@ -343,7 +344,10 @@ export class PiAgentKernel {
       throw new Error(lastAssistant.errorMessage ?? 'pi agent model call failed');
     }
 
-    const finalText = lastAssistantText(agent.state.messages);
+    // 只有"没有工具调用"的助手消息才是最终答案；带 tool_calls 的正文只是检索前言。
+    const finalText = lastAssistant !== null && toolCallsOf(lastAssistant).length === 0
+      ? assistantText(lastAssistant)
+      : null;
     let mode = state.mode;
     let noAnswerReason: NoAnswerReason | null = null;
     let answerStream: AnswerStream;
@@ -407,16 +411,6 @@ interface ToolCallInfo {
   startedAt: string;
   args: unknown;
   name: string;
-}
-
-function lastAssistantText(messages: AgentMessage[]): string | null {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const message = messages[index];
-    if (message === undefined) continue;
-    const text = assistantText(message);
-    if (text !== null) return text;
-  }
-  return null;
 }
 
 function historyMessages(
