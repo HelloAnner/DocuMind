@@ -4,6 +4,7 @@ import type { Sql } from 'postgres';
 import type { AppConfig } from '../config.ts';
 import { AppError } from '../errors.ts';
 import type { CurrentActor } from '../models/identity.ts';
+import type { Claims } from './jwt.ts';
 import {
   effectivePermissionsForMembership, isDocumindAdmin, normalizedActorRoles,
 } from './permissions.ts';
@@ -232,8 +233,11 @@ export async function authenticate(
 }
 
 export async function actorFromClaims(
-  deps: ActorDeps, claims: import('./jwt.ts').Claims,
+  deps: ActorDeps, claims: Claims,
 ): Promise<CurrentActor> {
+  if (!claims.tenant_id) {
+    throw AppError.conflictWith('TENANT_SELECTION_REQUIRED', '请先选择或创建租户');
+  }
   if (deps.sql) {
     return resolveActorFromDb(deps.sql, claims.tenant_id, claims.sub, claims.role, claims.scope);
   }

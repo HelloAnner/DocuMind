@@ -506,8 +506,11 @@ POST   /api/admin/invitations/{id}/revoke
 ```text
 GET   /api/account/profile
 PATCH /api/account/profile
-GET   /api/account/tenants
-POST  /api/account/switch-tenant
+POST  /api/v1/auth/register
+GET   /api/v1/auth/me
+GET   /api/v1/auth/tenants
+POST  /api/v1/auth/switch-tenant
+POST  /api/v1/tenants
 ```
 
 ## 10. 领域规则与错误

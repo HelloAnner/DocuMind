@@ -7,7 +7,7 @@ import type { CurrentActor } from '../models/identity.ts';
 import type { Claims } from './jwt.ts';
 
 interface AuthSession {
-  user_id: string; tenant_id: string; role: string; scope: string;
+  user_id: string; tenant_id: string | null; role: string; scope: string;
   created_at: number; last_seen_at: number;
 }
 
@@ -31,6 +31,41 @@ export async function createAuthSession(
     Math.max(1, config.authTokenExpireHours) * 3600,
   );
   return sessionId;
+}
+
+export async function createIdentitySession(
+  redis: Redis | null, config: AppConfig, userId: string,
+): Promise<string> {
+  const sessionId = crypto.randomUUID();
+  if (!redis) return sessionId;
+  const now = nowSeconds();
+  const session: AuthSession = {
+    user_id: userId, tenant_id: null, role: '', scope: 'tenant',
+    created_at: now, last_seen_at: now,
+  };
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
+  return sessionId;
+}
+
+export async function setAuthSessionTenant(
+  redis: Redis | null, config: AppConfig, sessionId: string,
+  userId: string, tenantId: string, role: string,
+): Promise<void> {
+  if (!redis) return;
+  const raw = await redis.get(authSessionKey(sessionId));
+  const now = nowSeconds();
+  const prior = raw ? JSON.parse(raw) as AuthSession : null;
+  const session: AuthSession = {
+    user_id: userId, tenant_id: tenantId, role, scope: 'tenant',
+    created_at: prior?.created_at ?? now, last_seen_at: now,
+  };
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
 }
 
 export async function validateAndRenewAuthSession(

@@ -7,7 +7,7 @@ import type { CurrentActor } from '../models/identity.ts';
 
 export interface Claims {
   sub: string; email: string; role: string; scope: string;
-  tenant_id: string; sid: string | null; exp: number;
+  tenant_id: string | null; sid: string | null; exp: number;
 }
 
 export async function issueToken(
@@ -26,6 +26,19 @@ export async function issueToken(
     .sign(key);
 }
 
+export async function issueIdentityToken(
+  config: AppConfig,
+  identity: { user_id: string; email: string },
+  sessionId: string,
+): Promise<string> {
+  const exp = nowSeconds() + Math.max(1, config.authTokenExpireHours) * 3600;
+  const key = new TextEncoder().encode(config.jwtSecret);
+  return new SignJWT({
+    sub: identity.user_id, email: identity.email, role: '', scope: 'tenant',
+    tenant_id: null, sid: sessionId, exp,
+  }).setProtectedHeader({ alg: 'HS256', typ: 'JWT' }).sign(key);
+}
+
 export async function claimsFromAuthorizationHeader(
   config: AppConfig, authorization: string | null,
 ): Promise<Claims> {
@@ -37,7 +50,8 @@ export async function claimsFromAuthorizationHeader(
     return {
       sub: String(payload.sub), email: String(payload.email ?? ''),
       role: String(payload.role ?? ''), scope: String(payload.scope ?? ''),
-      tenant_id: String(payload.tenant_id), sid: (payload.sid as string | undefined) ?? null,
+      tenant_id: payload.tenant_id == null ? null : String(payload.tenant_id),
+      sid: (payload.sid as string | undefined) ?? null,
       exp: Number(payload.exp ?? 0),
     };
   } catch {

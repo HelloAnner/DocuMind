@@ -30,6 +30,10 @@ export default function AccountPage() {
       router.replace("/login");
       return;
     }
+    if (!me.tenant) {
+      router.replace("/onboarding/tenant");
+      return;
+    }
     setName(me.user.name || "");
     setAvatarUrl(me.user.avatar_url || "");
     listAccountTenants().then(setTenants).catch(() => setTenants([]));

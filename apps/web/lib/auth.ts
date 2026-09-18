@@ -32,7 +32,8 @@ export type AuthScope = "platform" | "tenant";
 export interface MeResponse {
   scope: AuthScope;
   user: User;
-  tenant: Tenant;
+  tenant: Tenant | null;
+  tenants: Tenant[];
   roles: UserRole[];
   permissions: string[];
   allowed_kb_ids: string[];
@@ -72,7 +73,7 @@ export function authenticatedHomePath(scope: AuthScope, _roles: UserRole[] | str
 export interface StoredAuth {
   token: string;
   userId: string;
-  tenantId: string;
+  tenantId: string | null;
   loginId: string;
   email: string;
   scope: AuthScope;
@@ -146,11 +147,16 @@ export async function updateAccountProfile(name: string, avatarUrl?: string): Pr
 }
 
 export async function listAccountTenants(): Promise<AccountTenant[]> {
-  return authJson("/api/account/tenants");
+  const data = await authJson<{ tenants: Tenant[]; active_tenant_id: string | null }>(
+    "/api/v1/auth/tenants"
+  );
+  return data.tenants.map((tenant) => ({
+    ...tenant, roles: [], current: tenant.id === data.active_tenant_id,
+  }));
 }
 
 export async function switchAccountTenant(tenantId: string): Promise<LoginResponse> {
-  const data = await authJson<LoginResponse>("/api/account/switch-tenant", {
+  const data = await authJson<LoginResponse>("/api/v1/auth/switch-tenant", {
     method: "POST",
     body: JSON.stringify({ tenant_id: tenantId }),
   });
@@ -162,7 +168,7 @@ function storeLoginResponse(data: LoginResponse) {
   setStoredAuth({
     token: data.access_token,
     userId: data.user.id,
-    tenantId: data.tenant.id,
+    tenantId: data.tenant?.id ?? null,
     loginId: data.user.login_id,
     email: data.user.email,
     scope: data.scope,
@@ -184,23 +190,33 @@ export async function getTenantLoginContext(tenantSlug: string): Promise<TenantL
 
 export async function loginWithPassword(
   username: string,
-  password: string,
-  tenantSlug?: string
-): Promise<MeResponse> {
-  const body: Record<string, string> = { username, password };
-  if (tenantSlug?.trim()) {
-    body.tenant_slug = tenantSlug.trim();
-  }
-  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+  password: string
+): Promise<LoginResponse> {
+  return authenticate("/api/v1/auth/login", { username, password });
+}
+
+export async function register(
+  username: string,
+  password: string
+): Promise<LoginResponse> {
+  return authenticate("/api/v1/auth/register", { username, password });
+}
+
+async function authenticate(path: string, body: Record<string, string>): Promise<LoginResponse> {
+  const data = await authJson<LoginResponse>(path, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  if (!res.ok) {
-    const error = await res.json().catch(() => null) as { message?: string } | null;
-    throw new Error(error?.message || "用户 ID 或密码错误");
-  }
-  const data: LoginResponse = await res.json();
+  storeLoginResponse(data);
+  return data;
+}
+
+export async function createTenant(name: string): Promise<LoginResponse> {
+  const data = await authJson<LoginResponse>("/api/v1/tenants", {
+    method: "POST",
+    headers: { "Idempotency-Key": crypto.randomUUID() },
+    body: JSON.stringify({ name }),
+  });
   storeLoginResponse(data);
   return data;
 }

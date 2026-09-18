@@ -23,7 +23,10 @@ const PUBLIC_API_PATHS = new Set([
   '/api/health', '/api/metrics', '/api/config',
   '/api/auth/login', '/api/auth/refresh', '/api/auth/logout', '/api/invitations/accept',
   '/api/auth/tenant-context',
-  '/api/v1/auth/login', '/api/v1/auth/refresh', '/api/v1/auth/logout',
+  '/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/refresh',
+  '/api/v1/auth/logout', '/api/v1/auth/me', '/api/v1/me', '/api/me',
+  '/api/v1/auth/tenants',
+  '/api/v1/auth/switch-tenant', '/api/v1/tenants',
   '/api/v1/invitations/accept', '/api/v1/auth/tenant-context',
   '/api/v1/permission/matrix',
 ]);

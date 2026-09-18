@@ -29,12 +29,14 @@ export default function ChatLayout({ children }: { children: React.ReactNode }) 
     if (loading) return;
     if (!me) {
       router.replace("/login");
+    } else if (!me.tenant) {
+      router.replace("/onboarding/tenant");
     } else if (me.scope !== "tenant") {
       router.replace("/system");
     }
   }, [me, loading, router]);
 
-  if (loading || !me || me.scope !== "tenant") {
+  if (loading || !me?.tenant || me.scope !== "tenant") {
     return (
       <main className="dm-chat-shell dm-chat-shell-loading">
         <span>加载中…</span>

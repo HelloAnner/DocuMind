@@ -8,14 +8,15 @@ import {
   getStoredAuth,
   loginWithPassword,
   logoutRequest,
+  register as registerAccount,
   type MeResponse,
-  type UserRole,
 } from "@/lib/auth";
 
 interface AuthContextValue {
   me: MeResponse | null;
   loading: boolean;
-  login: (username: string, password: string, tenantSlug?: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => void;
   refresh: () => Promise<void>;
 }
@@ -48,13 +49,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [refresh]);
 
+  const finishAuthentication = useCallback((data: MeResponse) => {
+    setMe(data);
+    router.replace(
+      data.tenant ? authenticatedHomePath(data.scope, data.roles) : "/onboarding/tenant"
+    );
+  }, [router]);
+
   const login = useCallback(
-    async (username: string, password: string, tenantSlug?: string) => {
-      const data = await loginWithPassword(username, password, tenantSlug);
-      setMe(data);
-      router.replace(authenticatedHomePath(data.scope, data.roles));
+    async (username: string, password: string) => {
+      finishAuthentication(await loginWithPassword(username, password));
     },
-    [router]
+    [finishAuthentication]
+  );
+
+  const register = useCallback(
+    async (username: string, password: string) => {
+      finishAuthentication(await registerAccount(username, password));
+    },
+    [finishAuthentication]
   );
 
   const logout = useCallback(() => {
@@ -65,7 +78,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   return (
-    <AuthContext.Provider value={{ me, loading, login, logout, refresh }}>
+    <AuthContext.Provider value={{ me, loading, login, register, logout, refresh }}>
       {children}
     </AuthContext.Provider>
   );

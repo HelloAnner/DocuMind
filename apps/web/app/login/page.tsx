@@ -36,7 +36,7 @@ function LoginForm({
     setBusy(true);
     setError("");
     try {
-      await login(email, password, tenantSlug);
+      await login(email, password);
     } catch (err) {
       setError(err instanceof Error ? err.message : "登录失败");
       setBusy(false);
@@ -109,7 +109,9 @@ function LoginForm({
         {busy ? "登录中…" : profile.isTenant ? `进入 ${profile.tenantName}` : "登录"}
       </button>
 
-      <p className="dm-login-footnote">安全访问企业文档、可信引用与知识工作流</p>
+      <p className="dm-login-footnote">
+        还没有账号？<Link href="/register">立即注册</Link>
+      </p>
     </form>
   );
 }

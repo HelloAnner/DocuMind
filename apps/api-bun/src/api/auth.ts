@@ -6,11 +6,16 @@ import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { AppState } from '../state.ts';
 import { authenticate, actorFromClaims } from '../auth/actor.ts';
-import { claimsFromAuthorizationHeader, issueToken, type Claims } from '../auth/jwt.ts';
-import { createAuthSession, deleteAuthSession, validateAndRenewAuthSession } from '../auth/session.ts';
-import { derivePermissions, roleMatrix } from '../auth/permissions.ts';
+import {
+  claimsFromAuthorizationHeader, issueIdentityToken, issueToken, type Claims,
+} from '../auth/jwt.ts';
+import {
+  createAuthSession, createIdentitySession, deleteAuthSession, setAuthSessionTenant,
+  validateAndRenewAuthSession,
+} from '../auth/session.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
-import type { MeResponse, TenantProfile } from '../models/identity.ts';
+import { derivePermissions, roleMatrix } from '../auth/permissions.ts';
+import type { CurrentActor, MeResponse, TenantProfile, UserProfile } from '../models/identity.ts';
 import type { LoginResponse } from './auth_types.ts';
 import { newUuid } from '../infra/uuid.ts';
 
@@ -20,6 +25,7 @@ interface LoginRequest {
   username?: string | null; email?: string | null; password: string;
   tenant_id?: string | null; tenant_slug?: string | null;
 }
+interface RegisterRequest { username: string; password: string; }
 interface AcceptInvitationRequest {
   token: string; login_id?: string | null; name?: string | null; password?: string | null;
 }
@@ -35,7 +41,11 @@ export function authRouter(): Hono<AppEnv> {
   router.post('/api/invitations/accept', acceptInvitationHandler);
   router.get('/api/v1/me', getMeHandler);
   router.get('/api/v1/auth/me', getMeHandler);
+  router.post('/api/v1/auth/register', registerHandler);
   router.post('/api/v1/auth/login', loginHandler);
+  router.get('/api/v1/auth/tenants', authTenantsHandler);
+  router.post('/api/v1/auth/switch-tenant', switchTenantHandler);
+  router.post('/api/v1/tenants', createTenantHandler);
   router.post('/api/v1/auth/refresh', refreshHandler);
   router.post('/api/v1/auth/logout', logoutHandler);
   router.post('/api/v1/invitations/accept', acceptInvitationHandler);
@@ -348,12 +358,227 @@ async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, 10);
 }
 
+async function identityProfile(sql: Sql, userId: string): Promise<UserProfile> {
+  const rows = await sql`
+    SELECT id, login_id, email, name, avatar_url, status
+    FROM app_user WHERE id = ${userId} AND status = 'active' LIMIT 1
+  `;
+  const user = rows[0];
+  if (!user) throw AppError.unauthorized();
+  return {
+    id: String(user.id), login_id: String(user.login_id),
+    email: String(user.email ?? ''), name: (user.name as string | null) ?? null,
+    avatar_url: (user.avatar_url as string | null) ?? null, status: String(user.status),
+  };
+}
+
+async function identityTenants(sql: Sql, userId: string): Promise<TenantProfile[]> {
+  const rows = await sql`
+    SELECT t.id, t.name, t.slug, t.plan, t.status
+    FROM tenant_member tm
+    JOIN tenant t ON t.id = tm.tenant_id
+    WHERE tm.user_id = ${userId} AND tm.status = 'active' AND t.status = 'active'
+      AND NOT ('super_admin' = ANY(tm.roles))
+    ORDER BY t.name ASC
+  `;
+  return rows.map((tenant) => ({
+    id: String(tenant.id), name: String(tenant.name), slug: String(tenant.slug),
+    plan: String(tenant.plan), status: String(tenant.status),
+  }));
+}
+
+async function identityLoginResponse(
+  state: AppState, userId: string, sessionId: string,
+): Promise<LoginResponse> {
+  const sql = state.sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '账号功能需要数据库');
+  const user = await identityProfile(sql, userId);
+  return {
+    access_token: await issueIdentityToken(state.config, {
+      user_id: user.id, email: user.email,
+    }, sessionId),
+    token_type: 'bearer', scope: 'tenant', user, tenant: null,
+    roles: [], permissions: [], allowed_kb_ids: [],
+    tenants: await identityTenants(sql, userId),
+  };
+}
+
+async function registerHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  const sql = state.sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '注册功能需要数据库');
+  const req = await c.req.json() as RegisterRequest;
+  const username = (req.username ?? '').trim().toLowerCase();
+  const password = req.password ?? '';
+  if (!username || !password) {
+    throw AppError.badRequest('CREDENTIALS_REQUIRED', '请输入用户名和密码');
+  }
+  if (new TextEncoder().encode(password).length > 72) {
+    throw AppError.badRequest('PASSWORD_TOO_LONG', '密码不能超过 72 字节');
+  }
+  const passwordHash = await bcrypt.hash(password, 10);
+  let userId: string;
+  try {
+    const rows = await sql`
+      INSERT INTO app_user (login_id, email, name, password_hash, auth_provider, status)
+      VALUES (${username}, NULL, ${username}, ${passwordHash}, 'password', 'active')
+      RETURNING id
+    `;
+    userId = String(rows[0]!.id);
+  } catch (error) {
+    if (error !== null && typeof error === 'object' && 'code' in error && error.code === '23505') {
+      throw AppError.conflictWith('USERNAME_TAKEN', '用户名已被使用');
+    }
+    throw error;
+  }
+  const sessionId = await createIdentitySession(state.redis, state.config, userId);
+  return c.json(await identityLoginResponse(state, userId, sessionId), 201);
+}
+
+async function tenantLoginResponse(
+  state: AppState, actor: CurrentActor, sessionId: string,
+): Promise<LoginResponse> {
+  const me = await meResponse(state, actor);
+  return {
+    access_token: await issueToken(state.config, actor, sessionId),
+    token_type: 'bearer', scope: me.scope, user: me.user, tenant: me.tenant,
+    roles: me.roles, permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    tenants: state.sql ? await identityTenants(state.sql, actor.user_id) : [me.tenant],
+  };
+}
+
+async function authTenantsHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  const sql = state.sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '租户功能需要数据库');
+  const claims = await claimsFromAuthorizationHeader(
+    state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  return c.json({
+    tenants: await identityTenants(sql, claims.sub),
+    active_tenant_id: claims.tenant_id,
+  });
+}
+
+async function switchTenantHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  const sql = state.sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '租户功能需要数据库');
+  const claims = await claimsFromAuthorizationHeader(
+    state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  const req = await c.req.json() as { tenant_id?: string };
+  const tenantId = (req.tenant_id ?? '').trim();
+  const rows = await sql`
+    SELECT EXISTS(
+      SELECT 1 FROM tenant_member tm
+      JOIN tenant t ON t.id = tm.tenant_id
+      WHERE tm.user_id = ${claims.sub} AND tm.tenant_id = ${tenantId}
+        AND tm.status = 'active' AND t.status = 'active'
+        AND NOT ('super_admin' = ANY(tm.roles))
+    ) AS active
+  `;
+  if (!rows[0]?.active) {
+    throw AppError.forbiddenWith(
+      'TENANT_MEMBERSHIP_NOT_FOUND', '当前账号不属于该租户或租户不可用');
+  }
+  await sql`
+    UPDATE app_user SET last_active_tenant = ${tenantId}, updated_at = NOW()
+    WHERE id = ${claims.sub}
+  `;
+  const actor = await actorFromClaims({ sql, config: state.config }, {
+    ...claims, tenant_id: tenantId, role: 'end_user', scope: 'tenant',
+  });
+  const sessionId = claims.sid ?? await createAuthSession(state.redis, state.config, actor);
+  await setAuthSessionTenant(
+    state.redis, state.config, sessionId, actor.user_id, tenantId, actor.roles[0] ?? 'end_user');
+  return c.json(await tenantLoginResponse(state, actor, sessionId));
+}
+
+async function createTenantHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  const sql = state.sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '租户功能需要数据库');
+  const claims = await claimsFromAuthorizationHeader(
+    state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  const idempotencyKey = (c.req.header('idempotency-key') ?? '').trim();
+  if (!idempotencyKey) {
+    throw AppError.badRequest('IDEMPOTENCY_KEY_REQUIRED', '缺少 Idempotency-Key');
+  }
+  const req = await c.req.json() as { name?: string };
+  const name = (req.name ?? '').trim();
+  if (!name || [...name].length > 128) {
+    throw AppError.badRequest('TENANT_NAME_INVALID', '租户名称不能为空且不能超过 128 个字符');
+  }
+  const existing = await sql`
+    SELECT tenant_id FROM tenant_creation_request
+    WHERE user_id = ${claims.sub} AND idempotency_key = ${idempotencyKey}
+  `;
+  let tenantId = existing[0] ? String(existing[0].tenant_id) : '';
+  if (!tenantId) {
+    tenantId = newUuid();
+    const slug = `tenant-${tenantId.slice(0, 8)}`;
+    await sql.begin(async (tx) => {
+      await tx`
+        INSERT INTO tenant (id, name, slug, plan, status)
+        VALUES (${tenantId}, ${name}, ${slug}, 'enterprise', 'active')
+      `;
+      await tx`
+        INSERT INTO tenant_member (tenant_id, user_id, roles, status, joined_at)
+        VALUES (${tenantId}, ${claims.sub}, ${['tenant_owner']}, 'active', NOW())
+      `;
+      const kbRows = await tx`
+        INSERT INTO knowledge_base (tenant_id, name, description, status, created_by)
+        VALUES (${tenantId}, '默认知识库', '新租户默认知识库', 'active', ${claims.sub})
+        RETURNING id
+      `;
+      await tx`
+        INSERT INTO knowledge_base_acl
+          (tenant_id, kb_id, subject_type, subject_id, permission, created_by)
+        VALUES
+          (${tenantId}, ${kbRows[0]!.id}, 'role', 'tenant_admin', 'manage', ${claims.sub})
+      `;
+      await tx`
+        INSERT INTO tenant_creation_request (user_id, idempotency_key, tenant_id)
+        VALUES (${claims.sub}, ${idempotencyKey}, ${tenantId})
+      `;
+      await tx`
+        UPDATE app_user SET last_active_tenant = ${tenantId}, updated_at = NOW()
+        WHERE id = ${claims.sub}
+      `;
+    });
+  }
+  const actor = await actorFromClaims({ sql, config: state.config }, {
+    ...claims, tenant_id: tenantId, role: 'tenant_admin', scope: 'tenant',
+  });
+  const sessionId = claims.sid ?? await createAuthSession(state.redis, state.config, actor);
+  await setAuthSessionTenant(
+    state.redis, state.config, sessionId, actor.user_id, tenantId, actor.roles[0] ?? 'tenant_admin');
+  return c.json(await tenantLoginResponse(state, actor, sessionId), 201);
+}
+
 // ---------- handlers ----------
 
 async function getMeHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
-  const actor = c.get('actor');
-  return c.json(await meResponse(state, actor));
+  const claims = await claimsFromAuthorizationHeader(
+    state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (!claims.tenant_id) {
+    if (!state.sql) throw AppError.badRequest('DB_REQUIRED', '账号功能需要数据库');
+    return c.json({
+      scope: 'tenant', user: await identityProfile(state.sql, claims.sub), tenant: null,
+      roles: [], permissions: [], allowed_kb_ids: [],
+      tenants: await identityTenants(state.sql, claims.sub),
+    });
+  }
+  const actor = await actorFromClaims({ sql: state.sql, config: state.config }, claims);
+  const me = await meResponse(state, actor);
+  return c.json({
+    ...me,
+    tenants: state.sql ? await identityTenants(state.sql, actor.user_id) : [me.tenant],
+  });
 }
 
 async function permissionMeHandler(c: import('hono').Context<AppEnv>) {
@@ -373,15 +598,57 @@ function permissionMatrixHandler(c: import('hono').Context<AppEnv>) {
 async function loginHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   const req = await c.req.json() as LoginRequest;
-  const username = req.username ?? req.email ?? '';
-  const tenantKey = req.tenant_id ?? req.tenant_slug ?? null;
+  const username = (req.username ?? req.email ?? '').trim();
+  const password = req.password ?? '';
+  let tenantKey: string | null = null;
+
+  if (state.sql) {
+    const users = await state.sql`
+      SELECT id, password_hash, last_active_tenant, status
+      FROM app_user WHERE lower(login_id) = lower(${username}) LIMIT 1
+    `;
+    const user = users[0];
+    const passwordHash = user?.password_hash == null ? '' : String(user.password_hash);
+    if (!user || user.status !== 'active' || !passwordHash
+      || !await bcrypt.compare(password, passwordHash)) {
+      throw AppError.unauthorized();
+    }
+    const userId = String(user.id);
+    const memberships = await state.sql`
+      SELECT tm.tenant_id
+      FROM tenant_member tm
+      JOIN tenant t ON t.id = tm.tenant_id
+      WHERE tm.user_id = ${userId}
+        AND tm.status = 'active' AND t.status = 'active'
+        AND NOT ('super_admin' = ANY(tm.roles))
+    `;
+    const platformRows = await state.sql`
+      SELECT EXISTS(
+        SELECT 1 FROM platform_admin WHERE user_id = ${userId} AND status = 'active'
+      ) AS active
+    `;
+    if (!platformRows[0]?.active) {
+      const lastActive = user.last_active_tenant == null ? null : String(user.last_active_tenant);
+      const selected = memberships.length === 1
+        ? String(memberships[0]!.tenant_id)
+        : memberships.some((membership) => String(membership.tenant_id) === lastActive)
+          ? lastActive
+          : null;
+      if (!selected) {
+        const sessionId = await createIdentitySession(state.redis, state.config, userId);
+        return c.json(await identityLoginResponse(state, userId, sessionId));
+      }
+      tenantKey = selected;
+    }
+  }
+
   let actor;
   try {
     actor = await authenticate(
-      { sql: state.sql, config: state.config }, username, req.password ?? '', tenantKey);
+      { sql: state.sql, config: state.config }, username, password, tenantKey);
   } catch (error) {
     await recordAuditEvent(state.sql, null, 'auth.login_failed', 'auth_session', null, {
-      username, tenant: tenantKey,
+      username,
     }).catch(() => undefined);
     throw error;
   }
@@ -390,11 +657,11 @@ async function loginHandler(c: import('hono').Context<AppEnv>) {
   });
   const me = await meResponse(state, actor);
   const sessionId = await createAuthSession(state.redis, state.config, actor);
-  const accessToken = await issueToken(state.config, actor, sessionId);
   const body: LoginResponse = {
-    access_token: accessToken, token_type: 'bearer', scope: me.scope,
-    user: me.user, tenant: me.tenant, roles: me.roles,
-    permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    access_token: await issueToken(state.config, actor, sessionId),
+    token_type: 'bearer', scope: me.scope, user: me.user, tenant: me.tenant,
+    roles: me.roles, permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    tenants: state.sql ? await identityTenants(state.sql, actor.user_id) : [me.tenant],
   };
   return c.json(body);
 }
@@ -403,13 +670,17 @@ async function refreshHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (!claims.tenant_id) {
+    if (!claims.sid) throw AppError.unauthorized();
+    return c.json(await identityLoginResponse(state, claims.sub, claims.sid));
+  }
   const actor = await actorFromClaims({ sql: state.sql, config: state.config }, claims);
-  const accessToken = await issueToken(state.config, actor, claims.sid);
   const me = await meResponse(state, actor);
   const body: LoginResponse = {
-    access_token: accessToken, token_type: 'bearer', scope: me.scope,
-    user: me.user, tenant: me.tenant, roles: me.roles,
-    permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    access_token: await issueToken(state.config, actor, claims.sid),
+    token_type: 'bearer', scope: me.scope, user: me.user, tenant: me.tenant,
+    roles: me.roles, permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    tenants: state.sql ? await identityTenants(state.sql, actor.user_id) : [me.tenant],
   };
   return c.json(body);
 }
@@ -418,8 +689,6 @@ async function logoutHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   try {
     const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
-    const actor = await actorFromClaims({ sql: state.sql, config: state.config }, claims);
-    await recordAuditEvent(state.sql, actor, 'auth.logout', 'auth_session', claims.sid, {}).catch(() => undefined);
     if (claims.sid !== null) {
       await deleteAuthSession(state.redis, claims.sid).catch(() => undefined);
     }

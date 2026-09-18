@@ -12,7 +12,7 @@ export default function HomePage() {
   useEffect(() => {
     if (loading) return;
     if (me) {
-      router.replace(authenticatedHomePath(me.scope, me.roles));
+      router.replace(me.tenant ? authenticatedHomePath(me.scope, me.roles) : "/onboarding/tenant");
     } else {
       router.replace("/login");
     }

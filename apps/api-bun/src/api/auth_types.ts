@@ -3,6 +3,7 @@ import type { TenantProfile, UserProfile } from '../models/identity.ts';
 
 export interface LoginResponse {
   access_token: string; token_type: 'bearer'; scope: string;
-  user: UserProfile; tenant: TenantProfile;
+  user: UserProfile; tenant: TenantProfile | null;
   roles: string[]; permissions: string[]; allowed_kb_ids: string[];
+  tenants?: TenantProfile[];
 }

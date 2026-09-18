@@ -104,8 +104,8 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const isPlatform = pathname.startsWith("/system");
   const sections = isPlatform ? platformSections : tenantSections;
   const homeHref = isPlatform ? "/system" : "/admin";
-  const tenantName = me?.tenant.name;
-  const tenantSlug = me?.tenant.slug;
+  const tenantName = me?.tenant?.name;
+  const tenantSlug = me?.tenant?.slug;
   const showTenantContext = !isPlatform && Boolean(tenantName);
 
   return (

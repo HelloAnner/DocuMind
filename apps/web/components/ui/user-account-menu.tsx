@@ -60,7 +60,7 @@ export function UserAccountMenu() {
         </span>
         <span className={`${styles.identity} dm-user-menu-identity`}>
           <strong>{me.user.name || me.user.login_id}</strong>
-          <span>{isSuperAdmin ? "超级管理员" : isTenantAdmin ? "租户管理员" : me.tenant.name}</span>
+          <span>{isSuperAdmin ? "超级管理员" : isTenantAdmin ? "租户管理员" : me.tenant?.name ?? "未选择租户"}</span>
         </span>
         <ChevronUp size={14} />
       </button>
