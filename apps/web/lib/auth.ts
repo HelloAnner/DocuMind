@@ -65,10 +65,6 @@ const AUTH_KEY = "documind-auth";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
-export function authenticatedHomePath(scope: AuthScope, _roles: UserRole[] | string[]): string {
-  if (scope === "platform") return "/system";
-  return AUTHENTICATED_HOME_PATH;
-}
 
 export interface StoredAuth {
   token: string;

@@ -3,7 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  authenticatedHomePath,
+  AUTHENTICATED_HOME_PATH,
   getMe,
   getStoredAuth,
   loginWithPassword,
@@ -51,9 +51,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishAuthentication = useCallback((data: MeResponse) => {
     setMe(data);
-    router.replace(
-      data.tenant ? authenticatedHomePath(data.scope, data.roles) : "/onboarding/tenant"
-    );
+    router.replace(data.tenant ? AUTHENTICATED_HOME_PATH : "/onboarding/tenant");
   }, [router]);
 
   const login = useCallback(

@@ -6,7 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
-  authenticatedHomePath,
+  AUTHENTICATED_HOME_PATH,
   listAccountTenants,
   switchAccountTenant,
   updateAccountProfile,
@@ -60,9 +60,9 @@ export default function AccountPage() {
     setBusy(true);
     setMessage("");
     try {
-      const session = await switchAccountTenant(tenant.id);
+      await switchAccountTenant(tenant.id);
       await refresh();
-      router.replace(authenticatedHomePath(session.scope, session.roles));
+      router.replace(AUTHENTICATED_HOME_PATH);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "切换失败");
     } finally {
@@ -76,7 +76,7 @@ export default function AccountPage() {
         <BrandMark />
       </div>
       <div className={styles.container}>
-        <Link className={styles.back} href={authenticatedHomePath(me.scope, me.roles)}>
+        <Link className={styles.back} href={AUTHENTICATED_HOME_PATH}>
           <ArrowLeft size={15} /> 返回
         </Link>
         <header className={styles.header}>

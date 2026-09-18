@@ -143,14 +143,7 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <Link
-        className="dm-return-row"
-        href="/chat"
-        onClick={(event) => {
-          event.preventDefault();
-          window.location.assign(event.currentTarget.href);
-        }}
-      >
+      <Link className="dm-return-row" href="/chat" onClick={onNavigate}>
         <ArrowLeft size={15} />
         <span>返回知识问答</span>
       </Link>

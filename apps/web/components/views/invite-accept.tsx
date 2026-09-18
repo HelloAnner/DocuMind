@@ -4,7 +4,7 @@ import { LockKeyhole, UserRound } from "lucide-react";
 import { useSearchParams } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { acceptInvitation, authenticatedHomePath } from "@/lib/auth";
+import { acceptInvitation, AUTHENTICATED_HOME_PATH } from "@/lib/auth";
 
 export function InviteAcceptView() {
   const params = useSearchParams();
@@ -19,9 +19,9 @@ export function InviteAcceptView() {
     setSubmitting(true);
     setError(null);
     try {
-      const me = await acceptInvitation(token, email, password);
+      await acceptInvitation(token, email, password);
       const basePath = window.location.pathname.startsWith("/documind") ? "/documind" : "";
-      window.location.replace(`${basePath}${authenticatedHomePath(me.scope, me.roles)}`);
+      window.location.replace(`${basePath}${AUTHENTICATED_HOME_PATH}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "接受邀请失败");
     } finally {
