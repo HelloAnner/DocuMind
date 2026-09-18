@@ -3,17 +3,6 @@ import "./globals.css";
 import "./product-theme.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
 
-const themeBootstrapScript = `
-(() => {
-  const media = window.matchMedia("(prefers-color-scheme: dark)");
-  const applyTheme = () => {
-    const theme = media.matches ? "dark" : "light";
-    document.documentElement.dataset.theme = theme;
-    document.documentElement.style.colorScheme = theme;
-  };
-  applyTheme();
-  media.addEventListener("change", applyTheme);
-})();`;
 
 export const metadata: Metadata = {
   title: "DocuMind",
@@ -29,9 +18,14 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html data-theme="dark" lang="zh-CN" suppressHydrationWarning>
+    <html data-theme="light" lang="zh-CN" suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeBootstrapScript }} />
+        <link rel="preconnect" href="https://fonts.googleapis.com" />
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+        <link
+          href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,300;0,400;0,500;0,600;0,700;1,300;1,400;1,500;1,600;1,700&display=swap"
+          rel="stylesheet"
+        />
       </head>
       <body>
         <AuthProvider>{children}</AuthProvider>

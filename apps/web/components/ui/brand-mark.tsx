@@ -1,10 +1,11 @@
+import { BookOpenText } from "lucide-react";
 import { clsx } from "clsx";
 
 export function BrandMark({ compact = false, className }: { compact?: boolean; className?: string }) {
   return (
     <span className={clsx("dm-brand-mark", compact && "compact", className)} aria-label="DocuMind">
       <span className="dm-brand-glyph" aria-hidden="true">
-        <span />
+        <BookOpenText size={compact ? 13 : 16} strokeWidth={2.2} />
       </span>
       {!compact ? <span className="dm-brand-wordmark">DocuMind</span> : null}
     </span>
