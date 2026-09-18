@@ -1,7 +1,5 @@
 // 移植自 apps/api-rs/src/conversation_title.rs
-import {
-  agentSystemMessage, agentUserMessage, type AgentModel,
-} from './agent/model.ts';
+import { completePiText, type PiModelSettings } from './agent/pi/model.ts';
 import type { ConversationRepository } from './repositories/types.ts';
 import type { ConversationMessage } from './models/message.ts';
 
@@ -22,12 +20,12 @@ const TITLE_SYSTEM_PROMPT = `你是专业的会话标题生成器。请为对话
 
 export function spawnTitleUpdate(
   repository: ConversationRepository,
-  model: AgentModel,
+  settings: PiModelSettings,
   tenantId: string,
   userId: string,
   conversationId: string,
 ): Promise<string | null> {
-  return generateAndUpdateTitle(repository, model, tenantId, userId, conversationId)
+  return generateAndUpdateTitle(repository, settings, tenantId, userId, conversationId)
     .catch((error: unknown) => {
       console.warn(`[documind][title] conversation ${conversationId} title generation failed: ${(error as Error).message}`);
       return null;
@@ -36,7 +34,7 @@ export function spawnTitleUpdate(
 
 async function generateAndUpdateTitle(
   repository: ConversationRepository,
-  model: AgentModel,
+  settings: PiModelSettings,
   tenantId: string,
   userId: string,
   conversationId: string,
@@ -59,11 +57,15 @@ async function generateAndUpdateTitle(
 
   const timeout = new Promise<never>((_, reject) =>
     setTimeout(() => reject(new Error('title generation timed out')), TITLE_TIMEOUT_MS));
-  const response = await Promise.race([model.complete({
-    messages: [agentSystemMessage(TITLE_SYSTEM_PROMPT), agentUserMessage(prompt)],
-    tools: [], temperature: 0.2, max_tokens: 32,
-  }), timeout]);
-  const title = response.content !== null ? normalizeTitle(response.content) : null;
+  const response = await Promise.race([
+    completePiText(
+      { ...settings, temperature: 0.2, maxTokens: 32 },
+      TITLE_SYSTEM_PROMPT,
+      prompt,
+    ),
+    timeout,
+  ]);
+  const title = response.trim().length > 0 ? normalizeTitle(response) : null;
   if (title === null) return null;
   const updated = await repository.updateSessionTitle(tenantId, userId, conversationId, title, false);
   return updated ? title : null;

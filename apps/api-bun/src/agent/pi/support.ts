@@ -1,18 +1,11 @@
-// 移植自 apps/api-rs/src/agent/kernel_support.rs
-import type { AnswerStream } from './stream.ts';
-import type { AgentKernel, PreparedAgentRequest } from './kernel.ts';
-import type { AgentToolCall } from './model.ts';
+// pi core 内核的领域支撑：证据合并、工具效果、React 步骤 Trace
+import type { AnswerStream } from '../stream.ts';
+import type { PreparedAgentRequest } from './kernel.ts';
 import type {
   KnowledgeSearchEffect,
   TerminalToolEffect,
   ToolEffect,
-} from './tools/types.ts';
-import {
-  agentAssistantMessage,
-  agentSystemMessage,
-  agentUserMessage,
-  type AgentMessage,
-} from './model.ts';
+} from './tools.ts';
 import type {
   AgentMode,
   AgentRun,
@@ -23,15 +16,24 @@ import type {
   ReactStepTrace,
   ReactToolCallTrace,
   RuntimeComponents,
-} from '../models/agent.ts';
-import type { RerankedChunk } from '../models/rag.ts';
-import type { PlanMode, ResolvedRef, RetrievalPlan, RetrievalTrace } from '../models/trace.ts';
-import { defaultRetrievalPlan } from '../models/trace.ts';
-import type { Confidence, NoAnswerReason, Usage } from '../models/index.ts';
-import { nowRfc3339 } from '../infra/time.ts';
+} from '../../models/agent.ts';
+import type { RerankedChunk } from '../../models/rag.ts';
+import type { PlanMode, ResolvedRef, RetrievalPlan, RetrievalTrace } from '../../models/trace.ts';
+import { defaultRetrievalPlan } from '../../models/trace.ts';
+import type { Confidence, NoAnswerReason, Usage } from '../../models/index.ts';
+import { nowRfc3339 } from '../../infra/time.ts';
 
-export function baseTrace(prepared: PreparedAgentRequest, kernel: AgentKernel): AgentTrace {
-  const searchComponent = kernel.knowledge_search_component;
+/** 本轮 runtime 组件标识；用于 Agent Trace 回放与灰度。 */
+export interface KernelComponents {
+  reasoner: string;
+  search: string;
+  verifier: string;
+}
+
+export function baseTrace(
+  prepared: PreparedAgentRequest,
+  components: KernelComponents,
+): AgentTrace {
   const promptVersions: PromptVersions = {
     persona: prepared.prompt.persona_version,
     guardrail: prepared.prompt.guardrail_version,
@@ -39,14 +41,14 @@ export function baseTrace(prepared: PreparedAgentRequest, kernel: AgentKernel): 
     task: prepared.prompt.task_version,
   };
   const runtimeComponents: RuntimeComponents = {
-    reasoner: kernel.model.componentName(),
-    retriever: searchComponent,
-    reranker: searchComponent,
-    verifier: kernel.answer_finalizer.componentName(),
+    reasoner: components.reasoner,
+    retriever: components.search,
+    reranker: components.search,
+    verifier: components.verifier,
   };
   return {
     mode: prepared.mode,
-    mode_reason: 'model-native semantic tool selection',
+    mode_reason: 'pi-core native tool selection',
     rewritten_query: prepared.request.original_query,
     keywords: [],
     resolved_refs: [],
@@ -107,16 +109,7 @@ export function boundedHistory(
   return selected;
 }
 
-export function buildMessages(prepared: PreparedAgentRequest): AgentMessage[] {
-  const messages: AgentMessage[] = [agentSystemMessage(prepared.prompt.system_text)];
-  for (const turn of prepared.bounded_history) {
-    messages.push(agentUserMessage(turn.user_message));
-    messages.push(agentAssistantMessage(turn.assistant_answer));
-  }
-  messages.push(agentUserMessage(prepared.request.original_query));
-  return messages;
-}
-
+/** 稳定证据编号：已有证据不重排，新证据只追加。 */
 export function mergeEvidenceStable(
   existing: RerankedChunk[],
   incoming: RerankedChunk[],
@@ -166,14 +159,6 @@ export function modelEvidencePayload(
     });
   }
   return payload;
-}
-
-export function toolArgumentsValue(argumentsJson: string): unknown {
-  try {
-    return JSON.parse(argumentsJson) as unknown;
-  } catch {
-    return { raw_arguments: argumentsJson };
-  }
 }
 
 export function singleTextStream(
@@ -317,14 +302,19 @@ function mergeResolvedRefs(existing: ResolvedRef[], incoming: ResolvedRef[]): vo
   }
 }
 
-export function toolStepSummary(calls: AgentToolCall[]): string {
-  return 'model selected tools: ' + calls.map((call) => call.name).join(', ');
+export function toolStepSummary(names: string[]): string {
+  return 'model selected tools: ' + names.join(', ');
+}
+
+export interface ToolCallDescriptor {
+  id: string;
+  name: string;
+  argumentsValue: unknown;
 }
 
 export function successfulToolStep(
   step: number,
-  call: AgentToolCall,
-  argumentsValue: unknown,
+  call: ToolCallDescriptor,
   result: unknown,
   output: string | null,
   details: AppliedToolTrace,
@@ -334,7 +324,7 @@ export function successfulToolStep(
   const toolCall: ReactToolCallTrace = {
     id: call.id,
     name: call.name,
-    arguments: argumentsValue,
+    arguments: call.argumentsValue,
     status: 'succeeded',
     result: result,
     error: undefined,
@@ -361,8 +351,7 @@ export function successfulToolStep(
 
 export function failedToolStep(
   step: number,
-  call: AgentToolCall,
-  argumentsValue: unknown,
+  call: ToolCallDescriptor,
   error: unknown,
   output: string | null,
   message: string,
@@ -372,7 +361,7 @@ export function failedToolStep(
   const toolCall: ReactToolCallTrace = {
     id: call.id,
     name: call.name,
-    arguments: argumentsValue,
+    arguments: call.argumentsValue,
     status: 'failed',
     result: undefined,
     error: error,
@@ -439,6 +428,6 @@ export function failedResponseStep(
   };
 }
 
-function charCount(text: string): number {
+export function charCount(text: string): number {
   return [...text].length;
 }

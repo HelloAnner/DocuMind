@@ -1,0 +1,210 @@
+DocuMind 对话内核替换为 pi core 方案
+=====================================
+状态: 已实施 (2026-09-18)。当前实现见 docs/11-agent/technical-framework.md。
+调查日期: 2026-09-18
+结论依据: 本地 Bun 真实运行 + 单二进制编译 + 假 OpenAI 端点全链路
+
+0. 结论
+--------
+可以做, 而且比 DSH 干净得多。pi core 是一个进程内的 TS 库, 不是外挂运行时。
+
+三个已验证的关键事实:
+  1. pi core 在 Bun 1.3.14 下跑通完整工具循环
+  2. bun build --compile 单二进制打包通过 (980 模块, 62MB, 可运行)
+  3. 自定义 baseUrl 的 OpenAI 兼容端点全链路跑通 (DashScope/Ollama 那种)
+
+所以: 不需要装 Node, 不需要子进程, 不需要协议翻译。
+代码内置一个 pi core 模块完全没问题。
+
+1. pi 是什么
+------------
+@earendil-works/pi   (作者 Mario Zechner, MIT, npm 已发布 0.85.1)
+
+  pi-coding-agent   CLI (本机 pi 命令), 含完整 SDK
+  pi-agent-core     <- pi core: 通用 Agent + 工具执行 + 事件流
+  pi-ai             统一 LLM API (多 provider) + 流式事件
+  pi-protocol / pi-client / pi-tui
+
+本机实测版本: pi-agent-core 0.84.2 / pi-ai 0.84.2; npm 最新 0.85.1
+
+pi core 的核心 API:
+
+  const agent = new Agent({
+    streamFn,                 // LLM 传输, 可插拔
+    convertToLlm,             // AgentMessage[] -> LLM Message[]
+    transformContext,         // 每轮前裁剪/注入上下文
+    beforeToolCall,           // 工具执行前拦截
+    afterToolCall,            // 工具执行后改写/终止
+    shouldStopAfterTurn,      // 每轮后决定是否继续
+    initialState: { systemPrompt, model, thinkingLevel, tools, messages },
+  });
+  agent.subscribe((event) => { ... });   // 生命周期事件
+  await agent.prompt(userText);
+  await agent.waitForIdle();
+
+  AgentTool = { name, label, description, parameters(typebox),
+                execute(id, params, signal, onUpdate) }
+
+  AgentEvent = agent_start | turn_start | message_start | message_update
+             | message_end | tool_execution_start | tool_execution_update
+             | tool_execution_end | turn_end | agent_end
+
+2. 实测结果
+------------
+测试 1  Bun 下 faux provider 跑通工具循环
+  [tool executed] tool:1789701843558 {"query":"付款期限"}
+  events: agent_start, message_update(toolcall_*), tool_execution_start,
+          tool_execution_end, turn_end, message_update(text_delta), agent_end
+  final: user -> assistant(toolCall) -> toolResult -> assistant(答案)
+
+测试 2  本地假 OpenAI 兼容端点 (/v1/chat/completions SSE) 全链路
+  [fake-llm] call#1 model=qwen-plus tools=1 msgs=2
+  [fake-llm] call#2 model=qwen-plus tools=1 msgs=4
+  答案: 根据合同第 3 条，付款期为 30 天 [1]。
+
+测试 3  单二进制
+  bun build --compile -> 980 modules -> 62M -> 运行结果与测试 2 一致
+
+测试 4  自定义 baseUrl
+  pi-ai 的 api/openai-completions 的 streamSimple(model, ctx, opts)
+  model.baseUrl 可任意指定, 例如:
+    baseUrl: https://dashscope.aliyuncs.com/compatible-mode/v1
+  这就是 DocuMind 现在的 LLM_BASE_URL。
+
+3. 接口对照: 现在 -> 替换后
+----------------------------
+  DocuMind 现在                    pi core
+  ------------------------------  ------------------------------------
+  kernel.ts ReAct 循环 (398 行)    Agent + agent.prompt()             [删]
+  AgentModel (agent/model.ts)      streamFn + pi-ai openai-completions[换]
+  llm/agent_adapter.ts             streamSimple(model, ctx, {apiKey}) [换]
+  AgentToolRegistry                AgentTool[] 挂 state.tools        [换]
+  tools/knowledge_search.ts        包成 AgentTool.execute            [改]
+  tools/clarification.ts           包成 AgentTool + afterToolCall    [改]
+  agent/events.ts AgentProgress    AgentEvent + 一层映射函数          [改]
+  kernel_support.boundedHistory    transformContext / convertToLlm   [改]
+  重复工具调用拒绝                  beforeToolCall -> {block:true}     [改]
+  空响应重试                        Agent 内置处理                     [删]
+  max_react_steps 预算             shouldStopAfterTurn               [改]
+  prompt_registry.compose()        state.systemPrompt (每轮可设)      [保留]
+  finalizer / verifier / citation  保留, 在 agent_end 之后收口        [保留]
+  conversations_pipeline.ts        基本不动                           [保留]
+  Postgres 落库 / SSE / 多租户      基本不动                           [保留]
+
+结论: 删掉的是循环 + 模型适配, 保留的是 Prompt + 检索 + 收口 + 持久化。
+      这也是 DocuMind 真正的价值所在。
+
+4. 替换后的架构
+---------------
+  AgentRequest (不变)
+    |
+    +-- prompt_registry.compose() -> systemPrompt
+    +-- boundedHistory()          -> 初始 messages
+    v
+  pi core Agent                          [新]
+    |  streamFn = pi-ai openai-completions (LLM_BASE_URL/KEY/MODEL)
+    |  tools    = [knowledge_search, ask_clarification]
+    |
+    |  AgentEvent 流
+    |    message_update(text_delta)     -> response_delta
+    |    message_update(thinking_delta) -> thinking_delta
+    |    tool_execution_start           -> tool_call_started
+    |    tool_execution_end             -> tool_call_completed/failed
+    |    turn_end                       -> react_step
+    |    message_end(usage)             -> usage 累加
+    v
+  agent_end
+    |
+    +-- 取最后一条 assistant 文本
+    +-- citation_resolver (不变)
+    +-- GroundedAnswerFinalizer + ClaimVerifier (不变)
+    v
+  AnswerStream -> conversations_pipeline.ts -> SSE + Postgres (不变)
+
+5. 内置方式 (二选一)
+--------------------
+方式 A  npm 依赖 + 薄适配层   [推荐]
+  在 apps/api-bun/package.json 加:
+    "@earendil-works/pi-agent-core": "0.85.1"
+    "@earendil-works/pi-ai": "0.85.1"
+  在 src/agent/pi/ 写适配模块 (kernel.ts / tools.ts / events.ts)
+  Bun 打包时内联进单二进制, 部署产物不变。
+  + 升级只需改版本号; 上游修复可直接拿到
+  - 依赖树变大 (pi-ai 带 openai / anthropic / google / aws sdk,
+    但只 import api/openai-completions 时 Bun 会 tree-shake,
+    实测 980 模块 62MB, 其中大部分是 Bun 运行时基线)
+
+方式 B  vendor 进仓库
+  把 pi-agent-core/dist + pi-ai/dist 复制到 src/vendor/pi-core/
+  MIT 允许。适合要求零外部依赖的场景。
+  + 完全可控, 不会被动升级
+  - 上游更新要手工同步, 容易腐化
+
+建议 A。所谓内置一个模块用 A 的薄适配层即可满足:
+对 DocuMind 其他代码来说, 它就是一个内部模块 src/agent/pi/。
+
+6. 六个改造点 (按顺序)
+----------------------
+C1 模型接入
+   new Model({ id, api:'openai-completions', baseUrl: LLM_BASE_URL,
+               contextWindow, maxTokens, ... })
+   streamFn = (m, ctx, opts) => streamSimple(m, ctx, {...opts, apiKey: LLM_API_KEY})
+   注意: qwen/DashScope 的 thinking 参数要关掉, 避免发送不认的字段。
+
+C2 工具改造
+   knowledge_search / ask_clarification 按 AgentTool 接口重写 execute 签名。
+   参数用 typebox (Type.Object) 代替现在的 JSON Schema 对象。
+   证据累积与编号稳定逻辑原样搬进 execute 闭包。
+
+C3 事件映射
+   写一个 mapAgentEvent(event, progress) 把 AgentEvent 翻译成现有 AgentProgress。
+   CLI 与 SSE 完全不用改。
+
+C4 历史与预算
+   transformContext 里做 boundedHistory (max_history_turns/chars)。
+   shouldStopAfterTurn 里做 max_react_steps 预算 + 空响应保护。
+
+C5 grounding 护栏
+   现在 kernel 里有 无证据却带 [n] 引用就打回重问。
+   用 shouldStopAfterTurn 返回 false + 注入纠正 user 消息实现同样效果。
+   重复调用拒绝用 beforeToolCall -> { block: true, reason }。
+
+C6 收口
+   agent_end 后取最后 assistant 文本, 走现有 finalizer/verifier/citation。
+   澄清终止用 afterToolCall -> { terminate: true }。
+
+7. 分阶段实施
+-------------
+Phase 0  适配层打样 (1~2 天)
+  只加依赖 + src/agent/pi/ 适配模块, 不动现有 kernel。
+  用 faux provider 写单测, 断言事件序列与工具调用与旧内核一致。
+  通过标准: 旧 kernel 的 439 行 kernel.test.ts 场景在 pi core 上全部复现。
+
+Phase 1  双内核切换 (2~3 天)
+  加开关 AGENT_KERNEL=legacy|pi (默认 legacy)。
+  CLI 加 --kernel 参数, 同一批问题跑两条内核做对比。
+
+Phase 2  默认切换 + 清理 (2~3 天)
+  默认切 pi, 观察一段时间后删除 legacy kernel 与 agent_adapter。
+  更新 docs/11-agent/technical-framework.md。
+
+Phase 3  文档
+  更新 technical-framework.md / prompt-architecture.md 的架构描述。
+
+8. 风险
+-------
+R1 pi core 是 0.x, API 可能变    -> 锁版本, 适配层隔离
+R2 qwen/DashScope 与 pi-ai 的真实兼容性 -> Phase 0 用真 key 跑一次
+R3 typebox 依赖新增              -> pi-ai 已依赖 typebox, 无新增风险
+R4 62MB 二进制                    -> 需对比现有二进制大小, 确认可接受
+R5 engines 写 node>=22.19         -> 实测 Bun 1.3.14 可用, engines 只是声明
+
+9. 实施结果
+-----------
+内置方式: A (npm 依赖 + src/agent/pi 薄适配层)
+范围: 对话循环、工具、事件流、会话标题全部走 pi core
+删除: agent/kernel.ts, agent/model.ts, agent/kernel_support.ts,
+      agent/tools/, llm/agent_adapter.ts, llm/agent_stream.ts
+保留: PromptRegistry, RAG, GroundedAnswerFinalizer, Verifier,
+      CitationResolver, Trace, PostgreSQL 持久化, SSE 契约
+验证: bun run verify 通过 (115 tests, 0 fail)

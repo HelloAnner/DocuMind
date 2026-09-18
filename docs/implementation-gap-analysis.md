@@ -96,7 +96,7 @@
 | 模块 | 文档目标 | 当前代码/部署 | 实现差距 |
 |---|---|---|---|
 | Query Rewrite | 指代消解、HyDE、multi-query、术语规范化 | 查询规划已并入原生 `knowledge_search` tool call，支持自包含多查询、HyDE、keywords 和 resolved refs | 租户术语表与离线 rewrite drift 评估仍需完善 |
-| Retrieval Planner | 按语义规划检索策略 | AgentModel 通过原生 tool call 自主选择直答、单/多查询检索或澄清，Kernel 强制预算和去重 | 复杂模式仍需通过 golden set 持续调优 |
+| Retrieval Planner | 按语义规划检索策略 | pi core Agent 通过原生 tool call 自主选择直答、单/多查询检索或澄清，内核强制预算和去重 | 复杂模式仍需通过 golden set 持续调优 |
 | Hybrid Search | dense + BM25 + RRF + metadata filter | `rag/retriever.rs` 已对 ES 执行 dense kNN、BM25，并融合 | 同义词、短语邻近、复杂 metadata prefilter、查询级参数调优未完整实现 |
 | Reranking | HTTP reranker 或本地/mock 兜底 | `rag/reranker.rs` 支持 HTTP reranker；未配置时使用 lexical mock | 真实 reranker 未必已配置；阈值校准和评估闭环仍需补齐 |
 
@@ -104,7 +104,7 @@
 
 | 模块 | 文档目标 | 当前代码/部署 | 实现差距 |
 |---|---|---|---|
-| Agent Kernel | 模型原生 ReAct + 强类型工具执行 | `agent/kernel.rs` 使用 `content + tool_calls`，支持直答、多轮检索、澄清、重复调用保护、Trace 和 no-evidence 分类 | 需持续扩充真实对话回归集 |
+| Agent Kernel | 模型原生 ReAct + 强类型工具执行 | `agent/pi/kernel.ts` 基于 pi core，支持直答、多轮检索、澄清、重复调用保护、Trace 和 no-evidence 分类 | 需持续扩充真实对话回归集 |
 | Prompt 架构 | identity/conversation/tool/grounding/response/security 分层 | `agent/prompt/` 已模块化组合并保存四层版本 | 租户级 prompt 配置和版本管理后台未完整实现 |
 | Claim Verifier | 答案 claim 校验、无依据拒答 | 文档答案只执行一次 verifier，可接受一次结构有效 correction，不再循环修复 | Claim extractor、数值/日期/金额强校验仍不完整 |
 | Citation Resolver | claim-resolved citation、去重、anchor 优先 | `agent/citation_resolver.rs` 已返回 anchor、location_status、char_range/bbox，并非前端 quote 搜索 | 引用仍主要基于候选 evidence；claim 粒度选择、实体数值强校验、复杂合并待加强 |

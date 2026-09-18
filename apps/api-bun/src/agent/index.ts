@@ -1,12 +1,19 @@
-// 移植自 apps/api-rs/src/agent/mod.rs 的 pub use
+// Agent 域公开出口：pi core 内核 + Prompt + 可信收口
 export type { AgentProgress } from './events.ts';
 export { GroundedAnswerFinalizer } from './finalizer.ts';
-export { AgentKernel, PreparedAgentRequest } from './kernel.ts';
-export type { AgentModel } from './model.ts';
+export {
+  PiAgentKernel,
+  PreparedAgentRequest,
+  type PiKernelOptions,
+} from './pi/kernel.ts';
+export {
+  buildPiModel,
+  buildPiStreamFn,
+  completePiText,
+  piComponentName,
+  type PiModelSettings,
+} from './pi/model.ts';
 export { BuiltinPromptRegistry } from './prompt.ts';
 export type { Prompt, PromptRegistry } from './prompt.ts';
-export { AgentToolRegistry } from './tools/registry.ts';
-export { ClarificationTool } from './tools/clarification.ts';
-export { KnowledgeSearchTool } from './tools/knowledge_search.ts';
 export type { ClaimVerifier, VerificationReport } from './verifier/types.ts';
 export { LlmClaimVerifier, StructuralClaimVerifier } from './verifier/index.ts';

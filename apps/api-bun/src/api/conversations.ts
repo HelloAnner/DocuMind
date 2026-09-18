@@ -245,7 +245,7 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
   const protocol = sseProtocolFromHeaders(c.req.raw.headers);
   // Rust 在返回 SSE 之前就 spawn 标题任务，管线跑完后再推 conversation.title.updated
   const titleUpdate = spawnTitleUpdate(
-    state.repository, state.agentKernel.model,
+    state.repository, state.agentKernel.options.settings,
     actor.tenant_id, actor.user_id, session.id);
 
   return streamSSE(c, async (stream) => {

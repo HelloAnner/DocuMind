@@ -16,7 +16,7 @@ tenant/user/conversation
 
 ## Prompt 组合
 
-会话把结构化消息交给 `AgentModel`：
+会话把结构化消息交给 pi core Agent：
 
 ```text
 system: identity + conversation + tool + grounding + response + security
@@ -59,9 +59,9 @@ assistant(tool_calls)
 
 调用次数按实际任务决定：
 
-- 普通问候：1 次 AgentModel；
-- 文档问答：1 次 AgentModel tool selection + 1 次/多次工具观察后的 AgentModel + 1 次 verifier；
-- 澄清：1 次 AgentModel + 终止型 clarification tool；
+- 普通问候：1 次模型调用；
+- 文档问答：1 次模型 tool selection + 1 次/多次工具观察后的模型调用 + 1 次 verifier；
+- 澄清：1 次模型调用 + 终止型 clarification tool；
 - verifier 修正：不再触发新的 answer generation，只接受一次结构有效的 verifier correction。
 
 因此简单请求不会为固定阶段付费，复杂请求仍可根据证据多步执行。
@@ -71,7 +71,7 @@ assistant(tool_calls)
 每个 assistant message 保存：
 
 - Prompt 四层版本；
-- AgentModel、search/rerank、verifier 组件；
+- pi core 模型传输、search/rerank、verifier 组件；
 - mode、stop reason 和 usage；
 - ReAct steps；
 - retrieval/query traces；

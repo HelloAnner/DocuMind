@@ -8,7 +8,10 @@ export interface EmbeddingConfig {
   model: string; baseUrl: string; apiKey: string | null; batchSize: number; dimension: number;
   retryMax: number; workerPollMs: number; indexSchemaVersion: number; indexName: string; indexAlias: string; enabled: boolean;
 }
-export interface GenerationConfig { model: string; baseUrl: string; apiKey: string; useRealLlm: boolean; temperature: number; maxOutputTokens: number; }
+export interface GenerationConfig {
+  model: string; baseUrl: string; apiKey: string; useRealLlm: boolean;
+  temperature: number; maxOutputTokens: number; contextWindow: number;
+}
 export interface CitationConfig { requireCitation: boolean; verifyClaims: boolean; verifyConsensus: boolean; }
 /** 对齐 Rust document::ChunkConfig::default()（RAG_* 环境变量，见 apps/api-rs/src/document/chunking.rs） */
 export interface ChunkingConfig {
@@ -169,6 +172,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       useRealLlm: (() => { const raw = envStr('USE_REAL_LLM'); if (raw === undefined) return false; return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase()) || raw === 'true'; })(),
       temperature: envNum(['LLM_TEMPERATURE'], 0.2),
       maxOutputTokens: envNum(['LLM_MAX_OUTPUT_TOKENS'], 1200),
+      contextWindow: envNum(['LLM_CONTEXT_WINDOW'], 128_000),
     },
     citation: {
       requireCitation: envBool('RAG_REQUIRE_CITATION', true),

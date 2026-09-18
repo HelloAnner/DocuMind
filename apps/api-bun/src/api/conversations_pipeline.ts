@@ -1,7 +1,7 @@
 // 移植自 apps/api-rs/src/api/conversations.rs 的 Agent 执行管线
 import type { Sql } from 'postgres';
 import type { ProgressSender } from '../agent/events.ts';
-import type { AgentKernel } from '../agent/kernel.ts';
+import type { PiAgentKernel } from '../agent/pi/kernel.ts';
 import type { AppConfig } from '../config.ts';
 import { AppError } from '../errors.ts';
 import { nowRfc3339 } from '../infra/time.ts';
@@ -23,7 +23,7 @@ import {
 
 export interface AgentPipelineOptions {
   repo: ConversationRepository;
-  kernel: AgentKernel;
+  kernel: PiAgentKernel;
   config: AppConfig;
   /** 对应 Rust 的 state.db_pool: Option<PgPool> */
   sql: Sql | null;

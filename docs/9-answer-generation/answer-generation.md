@@ -6,7 +6,7 @@
 
 ### 直接回答
 
-当 AgentModel 返回 `content` 且本轮没有积累文档 evidence：
+当 pi core Agent 返回 `content` 且本轮没有积累文档 evidence：
 
 - 直接输出普通 Markdown；
 - 不创建 citation；
@@ -23,7 +23,7 @@
 ```text
 accumulated stable evidence
   -> ContextAssembler
-  -> candidate content from AgentModel
+  -> candidate content from pi core Agent
   -> ClaimVerifier（一次）
   -> CitationResolver
   -> answer + citations + confidence
@@ -76,7 +76,7 @@ citation.delta × N
 answer.completed
 ```
 
-当前 OpenAI-compatible AgentModel 返回的是完整 assistant turn，Kernel 再通过现有 SSE 契约输出正文和引用。接口保持兼容，后续可在 provider 支持稳定的 streaming tool protocol 后扩展 token 级直出。
+pi core 通过 `streamFn` 逐 token 推送 assistant 正文（`message_update.text_delta`），内核再通过现有 SSE 契约输出正文和引用。
 
 ## 缓存
 

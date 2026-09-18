@@ -10,11 +10,9 @@ import type { ObjectStorage } from './storage/types.ts';
 import { buildStorage } from './storage/index.ts';
 import { seedIdentity } from './auth/seed.ts';
 import { OpenAiClient } from './llm/openai.ts';
-import { asAgentModel } from './llm/agent_adapter.ts';
-import type { AgentModel } from './agent/model.ts';
 import {
-  AgentKernel, AgentToolRegistry, BuiltinPromptRegistry, ClarificationTool,
-  GroundedAnswerFinalizer, KnowledgeSearchTool, LlmClaimVerifier, StructuralClaimVerifier,
+  BuiltinPromptRegistry, GroundedAnswerFinalizer, LlmClaimVerifier, PiAgentKernel,
+  StructuralClaimVerifier, buildPiStreamFn, type PiModelSettings,
 } from './agent/index.ts';
 import type { ContextAssembler, Retriever, Reranker } from './rag/types.ts';
 import { EsRetriever } from './rag/retriever.ts';
@@ -30,14 +28,13 @@ export interface AppState {
   sql: Sql | null;
   redis: Redis | null;
   repository: ConversationRepository;
-  agentKernel: AgentKernel;
+  agentKernel: PiAgentKernel;
   storage: ObjectStorage;
   /** 健康检查用：rag/vector_pipeline.quickConsistency */
   vectorConsistency: (() => Promise<VectorConsistencySnapshot>) | null;
   llm: {
     generationClient: OpenAiClient;
     reasoningClient: OpenAiClient;
-    agentModel: AgentModel;
     retriever: Retriever;
     reranker: Reranker;
     contextAssembler: ContextAssembler;
@@ -81,8 +78,6 @@ export async function buildState(config: AppConfig): Promise<AppState> {
     model: config.agent.reasoningModel,
     timeoutSeconds: 120,
   });
-  const agentModel: AgentModel = asAgentModel(generationClient);
-
   if (!config.rag.embedding.enabled) {
     throw new Error('DocuMind Agent requires EMBED_ENABLED=true');
   }
@@ -117,14 +112,23 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   const verifier: ClaimVerifier = config.rag.citation.verifyClaims
     ? new LlmClaimVerifier(reasoningClient, config.agent.reasoningModel, config.rag.citation.verifyConsensus)
     : new StructuralClaimVerifier();
-  const tools = new AgentToolRegistry([
-    new KnowledgeSearchTool(retriever, reranker),
-    new ClarificationTool(),
-  ]);
-  const agentKernel = new AgentKernel(
-    agentModel, tools, contextAssembler,
-    new BuiltinPromptRegistry(), new GroundedAnswerFinalizer(verifier),
-  );
+  const modelSettings: PiModelSettings = {
+    model: config.rag.generation.model,
+    baseUrl: config.rag.generation.baseUrl,
+    apiKey: config.rag.generation.apiKey,
+    contextWindow: config.rag.generation.contextWindow,
+    maxTokens: config.rag.generation.maxOutputTokens,
+    temperature: config.rag.generation.temperature,
+  };
+  const agentKernel = new PiAgentKernel({
+    settings: modelSettings,
+    streamFn: buildPiStreamFn(modelSettings),
+    retriever: retriever,
+    reranker: reranker,
+    contextAssembler: contextAssembler,
+    promptRegistry: new BuiltinPromptRegistry(),
+    answerFinalizer: new GroundedAnswerFinalizer(verifier),
+  });
 
   const storage = buildStorage(config);
   const vectorConsistency = () => quickConsistency(sql, config.rag.embedding, esUrl);
@@ -133,7 +137,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
 
   const state: AppState = {
     config, sql, redis, repository, agentKernel, storage, vectorConsistency,
-    llm: { generationClient, reasoningClient, agentModel, retriever, reranker, contextAssembler },
+    llm: { generationClient, reasoningClient, retriever, reranker, contextAssembler },
   };
   // 与 Rust 一致：恢复上次中断遗留的待处理解析任务
   try {
