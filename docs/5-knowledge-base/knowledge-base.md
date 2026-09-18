@@ -175,26 +175,23 @@
 
 ### `GET /api/admin/documents`
 
-已有接口继续使用，知识库下钻时传入 `kb_id`：
+文档列表使用服务端分页；知识库下钻时传入 `kb_id`：
 
 ```text
-GET /api/admin/documents?kb_id={kb_id}&status=parsed
+GET /api/admin/documents?kb_id={kb_id}&status=done&page=1&page_size=25
 ```
 
-第一版参数：
+参数：
 
 | 参数 | 说明 |
 |---|---|
 | `kb_id` | 可选。传入后只返回该知识库文档 |
-| `status` | 可选。`all` / `parsed` / `parsing` / `parse_failed` |
+| `status` | 可选。`all` / `done` / `parsing` / `failed` 或具体解析状态 |
 | `q` | 可选。文件名 / 标题模糊搜索 |
-| `limit` | 可选。默认 200，上限 200 |
+| `page` | 页码，从 1 开始，默认 1 |
+| `page_size` | 每页数量，默认 25，上限 100 |
 
-后续扩展：
-
-| 参数 | 说明 |
-|---|---|
-| `cursor` | 游标分页 |
+响应为 `{ items, total, page, page_size }`。`items` 只包含当前页，`total` 是相同筛选条件下的真实文档总数。
 
 ### `GET /api/admin/documents/:doc_id`
 
