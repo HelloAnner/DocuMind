@@ -12,9 +12,11 @@ describe('api/auth', () => {
     expect(() => normalizeInvitationAccount('')).toThrow();
     expect(() => normalizeInvitationAccount('bad id')).toThrow();
   });
-  test('platform administrators can use tenant chat', () => {
+  test('platform administrators can manage tenant content', () => {
     expect(derivePermissions(['super_admin'])).toEqual(expect.arrayContaining([
-      'kb.read', 'chat.ask', 'answer.feedback',
+      'kb.read', 'kb.create', 'kb.write', 'kb.manage',
+      'document.upload', 'document.delete', 'document.reprocess',
+      'chat.ask', 'answer.feedback',
     ]));
   });
   test('maps portal permissions to local names', () => {

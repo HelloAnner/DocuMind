@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { ProductAdminShell } from "@/components/ui/product-admin-shell";
 import { useAuth } from "@/components/providers/auth-provider";
-import { canAccessAdmin } from "@/lib/auth";
+import { canAccessAdmin, isSuperAdminRole } from "@/lib/auth";
 
 export default function AdminLayout({
   children,
@@ -16,7 +16,10 @@ export default function AdminLayout({
 
   useEffect(() => {
     if (loading) return;
-    const canAccess = me && me.scope === "tenant" && canAccessAdmin(me.roles);
+    const canAccess = me && (
+      (me.scope === "tenant" && canAccessAdmin(me.roles))
+      || (me.scope === "platform" && isSuperAdminRole(me.roles))
+    );
     if (!canAccess) {
       router.replace("/");
     }

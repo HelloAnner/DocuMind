@@ -64,17 +64,14 @@ export function AdminDocuments() {
 
   const refresh = useCallback(
     async (showLoading = false) => {
-      if (!paramsReady || !kbId) {
-        if (paramsReady) setLoading(false);
-        return;
-      }
+      if (!paramsReady) return;
       const currentRequest = ++requestId.current;
       if (showLoading) setLoading(true);
       try {
         const [kbRows, docRows] = await Promise.all([
           listAdminKnowledgeBases(),
           listAdminDocuments({
-            kb_id: kbId,
+            kb_id: kbId || undefined,
             status: statusParam(filter),
             q: query.trim() || undefined,
             limit: 200,
@@ -255,7 +252,7 @@ export function AdminDocuments() {
             知识库
           </Link>
           <span aria-hidden="true">/</span>
-          <h1>{knowledgeBase?.name ?? "知识库文档"}</h1>
+          <h1>{knowledgeBase?.name ?? "文档管理"}</h1>
         </div>
         <div className="dm-topbar-actions">
           <Button
@@ -275,15 +272,6 @@ export function AdminDocuments() {
       </header>
 
       <div className="dm-admin-content">
-        {!kbId && paramsReady ? (
-          <Panel className="dm-route-empty-state">
-            <strong>请先选择一个知识库</strong>
-            <p>文档不再提供独立管理入口，请从知识库列表进入对应的文档空间。</p>
-            <Link href="/admin/knowledge">
-              <Button>返回知识库</Button>
-            </Link>
-          </Panel>
-        ) : (
           <Panel
             className="dm-kb-document-panel"
             title={`文档列表 · ${visibleDocuments.length}`}
@@ -343,8 +331,8 @@ export function AdminDocuments() {
             {loading ? <div className="dm-empty-state">加载文档中...</div> : null}
             {!loading && visibleDocuments.length === 0 ? (
               <div className="dm-document-empty-state">
-                <strong>{query ? "没有匹配的文档" : "这个知识库还没有文档"}</strong>
-                <p>{query ? "请尝试其他关键词。" : "上传第一个文档后，解析状态会显示在这里。"}</p>
+                <strong>{query ? "没有匹配的文档" : kbId ? "这个知识库还没有文档" : "暂无文档"}</strong>
+                <p>{query ? "请尝试其他关键词。" : kbId ? "上传第一个文档后，解析状态会显示在这里。" : "各知识库中的文档会统一显示在这里。"}</p>
                 {!query && kbId ? (
                   <Button icon={<Upload size={14} />} onClick={() => setShowUploadModal(true)}>
                     上传文档
@@ -365,7 +353,7 @@ export function AdminDocuments() {
                     quality={doc.quality_score}
                     status={statusLabel(doc.parse_status)}
                     updated={new Date(doc.updated_at).toLocaleDateString()}
-                    meta={`v${doc.parse_version} · ${doc.latest_parse_job_id?.slice(0, 8) ?? "no job"}`}
+                    meta={`${kbId ? "" : `${doc.kb_name} · `}v${doc.parse_version} · ${doc.latest_parse_job_id?.slice(0, 8) ?? "no job"}`}
                     onClick={() => setSelectedDocId(doc.doc_id)}
                     selected={selectedDocIds.has(doc.doc_id)}
                     onSelect={(checked) => toggleSelectDoc(doc.doc_id, checked)}
@@ -397,7 +385,6 @@ export function AdminDocuments() {
                 ))
               : null}
           </Panel>
-        )}
       </div>
 
       {selectedDocId ? (

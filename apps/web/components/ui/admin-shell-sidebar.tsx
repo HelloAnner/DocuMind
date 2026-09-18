@@ -49,6 +49,13 @@ const platformSections: NavSection[] = [
     ],
   },
   {
+    title: "内容管理",
+    items: [
+      { label: "知识库管理", href: "/admin/knowledge", icon: FolderOpen },
+      { label: "文档管理", href: "/admin/documents", icon: FileClock },
+    ],
+  },
+  {
     title: "基础设施",
     items: [
       { label: "模型服务", href: "/system/models", icon: Cpu },
@@ -101,7 +108,7 @@ function isActive(pathname: string, item: NavEntry) {
 export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname();
   const { me } = useAuth();
-  const isPlatform = pathname.startsWith("/system");
+  const isPlatform = me?.scope === "platform" || pathname.startsWith("/system");
   const sections = isPlatform ? platformSections : tenantSections;
   const homeHref = isPlatform ? "/system" : "/admin";
   const tenantName = me?.tenant?.name;

@@ -6,7 +6,9 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   super_admin: [
     'tenant.read', 'tenant.write', 'tenant.delete', 'user.read', 'user.write', 'user.delete',
     'model.read', 'model.write', 'model.delete', 'job.read', 'job.write', 'audit.read',
-    'kb.read', 'chat.ask', 'answer.feedback',
+    'kb.read', 'kb.create', 'kb.write', 'kb.manage',
+    'document.upload', 'document.delete', 'document.reprocess',
+    'chat.ask', 'answer.feedback',
   ],
   tenant_admin: [
     'tenant.read', 'tenant.write', 'user.read', 'user.write', 'kb.read', 'kb.create', 'kb.write',
@@ -75,7 +77,7 @@ export function requireSuperAdmin(actor: CurrentActor): void {
   if (!actor.is_super_admin) throw AppError.forbidden();
 }
 export function requireTenantAdmin(actor: CurrentActor): void {
-  if (actor.is_super_admin || !isDocumindAdmin(actor.roles)) throw AppError.forbidden();
+  if (!actor.is_super_admin && !isDocumindAdmin(actor.roles)) throw AppError.forbidden();
 }
 export function requirePermission(actor: CurrentActor, permission: string): void {
   if (!actor.permissions.includes(permission)) throw AppError.forbidden();
