@@ -48,7 +48,7 @@ documind doctor
 - SSH：`documind`
 - Elasticsearch：服务器内部 `http://127.0.0.1:8104/chunks`
 
-密码优先从 `auth.password_env` 指向的环境变量读取；也可以写入权限为 `0600` 的 TOML。JWT 缓存在同目录的 `session.json`，同样使用 `0600` 权限。`config show` 始终脱敏密码。
+密码优先从 `auth.password_env` 指向的环境变量读取；也可以写入权限为 `0600` 的 TOML。JWT 缓存在同目录的 `<配置文件名>.session.json`，同样使用 `0600` 权限；多个 `--config` 配置不会互相覆盖登录态。`config show` 始终脱敏密码。
 
 ## 后台管理全覆盖
 

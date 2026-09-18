@@ -4,6 +4,7 @@ import {
   DEFAULT_CONFIG,
   parseConfig,
   serializeConfig,
+  sessionPath,
 } from "../src/config.ts";
 
 describe("configuration", () => {
@@ -15,6 +16,11 @@ describe("configuration", () => {
     const parsed = parseConfig(serializeConfig(DEFAULT_CONFIG));
     expect(parsed).toEqual(DEFAULT_CONFIG);
     expect(parsed.diagnostics.elasticsearch_index).toBe("chunks_search");
+  });
+
+  test("isolates sessions for multiple config files in one directory", () => {
+    expect(sessionPath("/tmp/platform.toml")).toBe("/tmp/platform.session.json");
+    expect(sessionPath("/tmp/tenant.toml")).toBe("/tmp/tenant.session.json");
   });
 
   test("uses password environment variable before plaintext config", () => {

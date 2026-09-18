@@ -1,5 +1,5 @@
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, extname, join, resolve } from "node:path";
 import { homedir } from "node:os";
 import { CliError } from "./errors.ts";
 import type { CliConfig, SessionState } from "./types.ts";
@@ -40,7 +40,7 @@ export function configPath(override?: string): string {
 }
 
 export function sessionPath(path: string): string {
-  return join(dirname(path), "session.json");
+  return join(dirname(path), `${basename(path, extname(path))}.session.json`);
 }
 
 export function parseConfig(text: string): CliConfig {
