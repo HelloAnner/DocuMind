@@ -3,7 +3,6 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
-import type { AppState } from '../state.ts';
 import { requireSuperAdmin } from '../auth/permissions.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import { consistency, scheduleRebuild } from '../rag/vector_pipeline.ts';
@@ -20,13 +19,12 @@ async function listVectorIndexes(c: Context<AppEnv>) {
   const state = c.get('appState');
   requireSuperAdmin(c.get('actor'));
   const sql = state.sql;
-  if (!sql) return c.json([]);
+  if (!sql) throw AppError.badRequest('DATABASE_REQUIRED', '向量索引状态需要 PostgreSQL');
 
-  const esDocCount = await elasticsearchIndexCount(state);
   const esUrl = state.config.elasticsearchUrl;
-  const snapshot = esUrl ? await consistency(sql, state.config.rag.embedding, esUrl) : null;
-  const indexConsistent = snapshot ? Boolean(snapshot.consistent) : false;
-  const physicalIndex = snapshot ? snapshot.physical_index : null;
+  if (!esUrl) throw AppError.badRequest('ELASTICSEARCH_REQUIRED', '未配置 Elasticsearch');
+  const snapshot = await consistency(sql, state.config.rag.embedding, esUrl);
+  const physicalIndex = snapshot.physical_index;
   const embedding = state.config.rag.embedding;
 
   // 用 unsafe 显式复用 $1/$2：postgres.js 的模板插值会为同一值生成不同占位符，
@@ -71,7 +69,7 @@ async function listVectorIndexes(c: Context<AppEnv>) {
     ORDER BY t.name ASC, kb.name ASC`,
     [embedding.model, embedding.dimension]);
 
-  return c.json(rows.map((row) => {
+  const indexes = rows.map((row) => {
     const chunks = Number(row.chunks ?? 0);
     const embeddedChunks = Number(row.embedded_chunks ?? 0);
     const buildingDocuments = Number(row.building_documents ?? 0);
@@ -79,8 +77,7 @@ async function listVectorIndexes(c: Context<AppEnv>) {
     const failedEmbeddings = Number(row.failed_embeddings ?? 0);
     const status = buildingDocuments > 0
       ? 'building'
-      : degradedDocuments > 0 || failedEmbeddings > 0
-        || embeddedChunks < chunks || !indexConsistent
+      : degradedDocuments > 0 || failedEmbeddings > 0 || embeddedChunks < chunks
         ? 'degraded' : 'healthy';
     const kbId = String(row.kb_id);
     const embeddingModel = String(row.embedding_model);
@@ -95,19 +92,22 @@ async function listVectorIndexes(c: Context<AppEnv>) {
       kb_id: kbId,
       kb_name: String(row.kb_name),
       embedding_model: embeddingModel,
-      index_version: `${embedding.indexAlias}:${embeddingModel}`,
       dimension: Number(row.embedding_dim ?? 0),
       documents: Number(row.indexed_documents ?? 0),
       building_documents: buildingDocuments,
       degraded_documents: degradedDocuments,
       chunks,
       embedded_chunks: embeddedChunks,
-      es_documents: esDocCount,
-      index_consistent: indexConsistent,
+      failed_embeddings: failedEmbeddings,
       status,
-      lastIndexed: lastIndexedAt ? toRfc3339(new Date(lastIndexedAt)) : null,
+      last_indexed_at: lastIndexedAt ? toRfc3339(new Date(lastIndexedAt)) : null,
     };
-  }));
+  });
+  return c.json({
+    checked_at: toRfc3339(new Date()),
+    summary: snapshot,
+    indexes,
+  });
 }
 
 async function reconcileVectorIndex(c: Context<AppEnv>) {
@@ -132,16 +132,4 @@ async function rebuildVectorIndex(c: Context<AppEnv>) {
   }
   const [jobId, targetIndex] = await scheduleRebuild(sql, state.config.rag.embedding);
   return c.json({ job_id: jobId, target_index: targetIndex, status: 'pending' });
-}
-
-async function elasticsearchIndexCount(state: AppState): Promise<number> {
-  const baseUrl = state.config.elasticsearchUrl;
-  if (!baseUrl) return 0;
-  const url = `${baseUrl.replace(/\/+$/, '')}/${state.config.rag.embedding.indexAlias}/_count`;
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw AppError.internal(`elasticsearch _count returned HTTP ${response.status}`);
-  }
-  const body = await response.json() as Record<string, unknown>;
-  return typeof body.count === 'number' ? body.count : 0;
 }

@@ -48,12 +48,15 @@ export interface SystemUserSummary {
   tenants: string[]; last_login_at: string | null;
 }
 export interface ModelService {
-  id: string; name: string; model: string; base_url: string; api_key_tail: string;
-  status: string; throughput: string; latency: string;
+  id: string; name: string; role: string; provider: string; model: string; base_url: string;
+  configured: boolean; status: 'healthy' | 'unavailable' | 'disabled';
+  latency_ms: number | null; checked_at: string; reason: string | null;
 }
 export interface JobSummary {
-  id: string; tenant_id: string; tenant_name: string; kind: string; status: string;
-  progress: number; created_at: string;
+  id: string; tenant_id: string; tenant_name: string; kind: string; title: string;
+  status: 'queued' | 'running'; progress: number | null; queue_position: number | null;
+  attempt_count: number; max_attempts: number; worker_id: string | null;
+  created_at: string; started_at: string | null; updated_at: string;
 }
 export interface KnowledgeBaseSummary {
   id: string; tenant_id: string; name: string; description: string | null; status: string;

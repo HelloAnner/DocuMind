@@ -478,24 +478,39 @@ export interface SystemVectorIndex {
   id: string;
   name: string;
   alias: string;
+  physical_index: string | null;
   tenant_id: string;
   tenant: string;
   kb_id: string;
   kb_name: string;
   embedding_model: string;
-  index_version: string;
   dimension: number;
   documents: number;
   building_documents: number;
   degraded_documents: number;
   chunks: number;
   embedded_chunks: number;
-  es_documents: number;
+  failed_embeddings: number;
   status: "healthy" | "building" | "degraded";
-  lastIndexed?: string;
+  last_indexed_at: string | null;
 }
 
-export async function listSystemVectorIndexes(): Promise<SystemVectorIndex[]> {
+export interface SystemVectorSnapshot {
+  checked_at: string;
+  summary: {
+    index_alias: string;
+    physical_index: string | null;
+    expected_chunks: number;
+    actual_chunks: number;
+    missing_chunks: number;
+    stale_chunks: number;
+    missing_or_stale_chunks: number;
+    consistent: boolean;
+  };
+  indexes: SystemVectorIndex[];
+}
+
+export async function listSystemVectorIndexes(): Promise<SystemVectorSnapshot> {
   return fetchJson("/api/system/vector-indexes");
 }
 
@@ -694,17 +709,26 @@ export interface AdminDocumentDetail {
   tables: DocumentTable[];
 }
 
+export interface AdminDocumentPage {
+  items: AdminDocument[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export async function listAdminDocuments(params?: {
   kb_id?: string;
   status?: string;
   q?: string;
-  limit?: number;
-}): Promise<AdminDocument[]> {
+  page?: number;
+  page_size?: number;
+}): Promise<AdminDocumentPage> {
   const qs = new URLSearchParams();
   if (params?.kb_id) qs.set("kb_id", params.kb_id);
   if (params?.status) qs.set("status", params.status);
   if (params?.q) qs.set("q", params.q);
-  if (params?.limit) qs.set("limit", String(params.limit));
+  if (params?.page) qs.set("page", String(params.page));
+  if (params?.page_size) qs.set("page_size", String(params.page_size));
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   return fetchJson(`/api/admin/documents${suffix}`);
 }

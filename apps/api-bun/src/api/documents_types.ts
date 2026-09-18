@@ -78,7 +78,8 @@ export interface DocumentListQuery {
   kb_id: string | null;
   status: string | null;
   q: string | null;
-  limit: number | null;
+  page: number;
+  page_size: number;
 }
 
 export interface MoveDocumentRequest {

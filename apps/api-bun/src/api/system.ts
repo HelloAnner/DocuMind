@@ -1,7 +1,6 @@
 // 移植自 apps/api-rs/src/api/system.rs
 import { Hono } from 'hono';
 import type { Context } from 'hono';
-import type { Sql } from 'postgres';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { AppState } from '../state.ts';
@@ -12,6 +11,9 @@ import { requireSuperAdmin } from '../auth/permissions.ts';
 import { newUuid } from '../infra/uuid.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import { systemVectorIndexesRouter } from './system_vector_indexes.ts';
+import {
+  checkFailed, checkOpenAiCompatibleEndpoint, type DependencyCheck,
+} from '../http/health.ts';
 
 // system_tenants.rs / system_tenant_invitations.rs / 向量索引部分的实现拆到独立文件，
 // 这里转发导出并在 systemRouter 中挂载；各 router 只注册互不冲突的路径。
@@ -232,74 +234,112 @@ async function listModels(c: Context<AppEnv>) {
   const state = c.get('appState');
   requireSuperAdmin(c.get('actor'));
   const cfg = state.config;
+  const checkedAt = toRfc3339(new Date());
+  const rerankerProbe = async (): Promise<DependencyCheck> => {
+    if (!cfg.rag.rerank.enabled) return checkFailed('Reranker is disabled');
+    const runtimeReranker = state.llm.reranker;
+    if (!('probe' in runtimeReranker) || typeof runtimeReranker.probe !== 'function') {
+      return checkFailed('Reranker does not expose a health probe');
+    }
+    try {
+      await Promise.race([
+        runtimeReranker.probe(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Reranker health check timed out')), 5_000)),
+      ]);
+      return { ok: true, reason: null, fields: {} };
+    } catch (error) {
+      return checkFailed((error as Error).message);
+    }
+  };
+
+  const [generation, embedding, reranker] = await Promise.all([
+    measuredProbe(() => checkOpenAiCompatibleEndpoint(
+      cfg.rag.generation.useRealLlm, cfg.rag.generation.baseUrl,
+      cfg.rag.generation.apiKey, 'LLM')),
+    measuredProbe(() => checkOpenAiCompatibleEndpoint(
+      cfg.rag.embedding.enabled, cfg.rag.embedding.baseUrl,
+      cfg.rag.embedding.apiKey, 'Embedding')),
+    measuredProbe(rerankerProbe),
+  ]);
   const services: ModelService[] = [
-    {
-      id: newUuid(), name: 'chat-default', model: cfg.rag.generation.model,
-      base_url: cfg.rag.generation.baseUrl, api_key_tail: tail(cfg.rag.generation.apiKey),
-      status: cfg.rag.generation.useRealLlm ? 'configured' : 'mock',
-      throughput: 'not_measured', latency: 'not_measured',
-    },
-    {
-      id: newUuid(), name: 'embedding-default', model: cfg.rag.embedding.model,
-      base_url: cfg.rag.embedding.baseUrl,
-      api_key_tail: cfg.rag.embedding.apiKey ? tail(cfg.rag.embedding.apiKey) : 'unset',
-      status: cfg.rag.embedding.enabled ? 'configured' : 'disabled',
-      throughput: 'not_measured', latency: 'not_measured',
-    },
-    {
-      id: newUuid(), name: 'reranker-default', model: cfg.rag.rerank.model,
-      base_url: cfg.rag.rerank.apiUrl ?? '',
-      api_key_tail: cfg.rag.rerank.apiKey ? tail(cfg.rag.rerank.apiKey) : 'unset',
-      status: rerankerStatus(state),
-      throughput: 'not_measured', latency: 'not_measured',
-    },
+    modelService('generation', '生成模型', '文本生成', providerFromUrl(cfg.rag.generation.baseUrl),
+      cfg.rag.generation.model, cfg.rag.generation.baseUrl, cfg.rag.generation.useRealLlm,
+      generation, checkedAt),
+    modelService('embedding', '向量模型', '文本向量化', providerFromUrl(cfg.rag.embedding.baseUrl),
+      cfg.rag.embedding.model, cfg.rag.embedding.baseUrl, cfg.rag.embedding.enabled,
+      embedding, checkedAt),
+    modelService('reranker', '重排模型', '检索结果重排', cfg.rag.rerank.provider,
+      cfg.rag.rerank.model, cfg.rag.rerank.apiUrl ?? '', cfg.rag.rerank.enabled,
+      reranker, checkedAt),
   ];
-  return c.json(services);
+  return c.json({ checked_at: checkedAt, services });
 }
 
 async function listJobs(c: Context<AppEnv>) {
   const state = c.get('appState');
   requireSuperAdmin(c.get('actor'));
   const sql = state.sql;
-  if (sql) {
-    await reconcileTerminalDocumentJobs(sql);
-    const rows = await sql`
-      SELECT id, tenant_id, tenant_name, kind, status, progress, created_at
-      FROM (
-          SELECT j.parse_job_id AS id, j.tenant_id, t.slug AS tenant_name,
-                 'document_parse'::text AS kind, j.status,
-                 COALESCE((d.metadata->>'parse_progress')::int, 0) AS progress,
-                 j.created_at
-          FROM document_parse_jobs j
-          JOIN tenant t ON t.id = j.tenant_id
-          JOIN documents d ON d.id = j.doc_id
-          UNION ALL
-          SELECT v.id,
-                 COALESCE(v.tenant_id, '00000000-0000-0000-0000-000000000000'::uuid),
-                 COALESCE(t.slug, 'system'),
-                 'vector_' || v.operation,
-                 v.status,
-                 CASE v.status
-                     WHEN 'pending' THEN 0
-                     WHEN 'running' THEN 50
-                     ELSE 100
-                 END,
-                 v.created_at
-          FROM vector_jobs v
-          LEFT JOIN tenant t ON t.id = v.tenant_id
-      ) jobs
-      ORDER BY created_at DESC
-      LIMIT 100
-    `;
-    const summaries: JobSummary[] = rows.map((row) => ({
-      id: String(row.id), tenant_id: String(row.tenant_id),
-      tenant_name: String(row.tenant_name), kind: String(row.kind),
-      status: String(row.status), progress: Number(row.progress ?? 0),
-      created_at: toRfc3339(new Date(row.created_at as Date | string)),
-    }));
-    return c.json(summaries);
-  }
-  return c.json([]);
+  const checkedAt = toRfc3339(new Date());
+  if (!sql) return c.json({ checked_at: checkedAt, queued: 0, running: 0, jobs: [] });
+
+  const rows = await sql.unsafe(`
+    SELECT active.*,
+           CASE WHEN status = 'queued'
+                THEN ROW_NUMBER() OVER (PARTITION BY status ORDER BY available_at, created_at)::int
+                ELSE NULL END AS queue_position
+    FROM (
+      SELECT j.parse_job_id AS id, j.tenant_id, t.name AS tenant_name,
+             CASE WHEN j.parser_config->>'job_kind' = 'ocr' THEN 'document_ocr'
+                  ELSE 'document_parse' END AS kind,
+             COALESCE(d.metadata->>'original_filename', d.title, d.storage_key) AS title,
+             CASE WHEN j.status IN ('pending', 'ocr_queued') THEN 'queued' ELSE 'running' END AS status,
+             CASE WHEN d.metadata->>'parse_progress' ~ '^[0-9]+$'
+                  THEN (d.metadata->>'parse_progress')::int ELSE NULL END AS progress,
+             j.attempt_count, j.max_attempts, j.worker_id, j.available_at,
+             j.created_at, j.started_at, j.updated_at
+      FROM document_parse_jobs j
+      JOIN documents d ON d.id = j.doc_id AND d.latest_parse_job_id = j.parse_job_id
+      JOIN tenant t ON t.id = j.tenant_id
+      WHERE j.status IN ('pending', 'ocr_queued', 'running')
+      UNION ALL
+      SELECT v.id, v.tenant_id, COALESCE(t.name, '系统'), 'vector_' || v.operation,
+             CASE WHEN v.operation = 'rebuild_index' THEN v.target_index
+                  ELSE COALESCE(d.metadata->>'original_filename', d.title, v.doc_id::text) END,
+             CASE WHEN v.status = 'pending' THEN 'queued' ELSE 'running' END,
+             CASE WHEN v.metadata->>'progress' ~ '^[0-9]+$'
+                  THEN (v.metadata->>'progress')::int ELSE NULL END,
+             v.attempt_count, v.max_attempts, v.worker_id, v.available_at,
+             v.created_at, v.started_at, v.updated_at
+      FROM vector_jobs v
+      LEFT JOIN tenant t ON t.id = v.tenant_id
+      LEFT JOIN documents d ON d.id = v.doc_id
+      WHERE v.status IN ('pending', 'running')
+    ) active
+    ORDER BY CASE WHEN status = 'running' THEN 0 ELSE 1 END, available_at, created_at`);
+
+  const jobs: JobSummary[] = rows.map((row) => ({
+    id: String(row.id),
+    tenant_id: row.tenant_id ? String(row.tenant_id) : '',
+    tenant_name: String(row.tenant_name),
+    kind: String(row.kind),
+    title: String(row.title),
+    status: row.status === 'running' ? 'running' : 'queued',
+    progress: row.progress === null ? null : Number(row.progress),
+    queue_position: row.queue_position === null ? null : Number(row.queue_position),
+    attempt_count: Number(row.attempt_count ?? 0),
+    max_attempts: Number(row.max_attempts ?? 0),
+    worker_id: row.worker_id ? String(row.worker_id) : null,
+    created_at: toRfc3339(new Date(row.created_at as Date | string)),
+    started_at: row.started_at ? toRfc3339(new Date(row.started_at as Date | string)) : null,
+    updated_at: toRfc3339(new Date(row.updated_at as Date | string)),
+  }));
+  return c.json({
+    checked_at: checkedAt,
+    queued: jobs.filter((job) => job.status === 'queued').length,
+    running: jobs.filter((job) => job.status === 'running').length,
+    jobs,
+  });
 }
 
 async function settings(c: Context<AppEnv>) {
@@ -402,16 +442,44 @@ async function listAudit(c: Context<AppEnv>) {
   }));
 }
 
-async function reconcileTerminalDocumentJobs(sql: Sql): Promise<void> {
-  await sql`
-    UPDATE document_parse_jobs j
-    SET status = 'completed',
-        completed_at = COALESCE(j.completed_at, NOW())
-    FROM documents d
-    WHERE d.id = j.doc_id
-      AND j.status IN ('pending', 'running')
-      AND d.parse_status IN ('indexed', 'parse_low_confidence')
-  `;
+
+interface MeasuredProbe {
+  check: DependencyCheck;
+  latency_ms: number;
+}
+
+async function measuredProbe(run: () => Promise<DependencyCheck>): Promise<MeasuredProbe> {
+  const started = performance.now();
+  const check = await run();
+  return { check, latency_ms: Math.round(performance.now() - started) };
+}
+
+function modelService(
+  id: string,
+  name: string,
+  role: string,
+  provider: string,
+  model: string,
+  baseUrl: string,
+  enabled: boolean,
+  probe: MeasuredProbe,
+  checkedAt: string,
+): ModelService {
+  return {
+    id, name, role, provider, model, base_url: baseUrl, configured: enabled,
+    status: enabled ? (probe.check.ok ? 'healthy' : 'unavailable') : 'disabled',
+    latency_ms: enabled ? probe.latency_ms : null,
+    checked_at: checkedAt,
+    reason: probe.check.reason,
+  };
+}
+
+function providerFromUrl(raw: string): string {
+  try {
+    return new URL(raw).hostname;
+  } catch {
+    return raw;
+  }
 }
 
 function runtimeModelsJson(state: AppState): Array<Record<string, string>> {
@@ -435,9 +503,7 @@ function rerankerStatus(state: AppState): string {
   return 'lexical_fallback';
 }
 
-function tail(secret: string): string {
-  return [...secret].slice(-4).join('');
-}
+
 
 function configured(value: string | null): boolean {
   return value !== null && value.trim().length > 0;

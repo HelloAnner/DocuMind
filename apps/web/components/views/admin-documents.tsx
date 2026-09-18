@@ -33,6 +33,7 @@ type Notice = { tone: "info" | "error"; message: string };
 
 const PROCESSING_STATUSES = new Set(["uploaded", "parsing", "embedding", "ocr_pending"]);
 const RETRYABLE_STATUSES = new Set(["parse_failed", "parse_low_confidence", "embedding_failed"]);
+const PAGE_SIZE = 25;
 
 function statusParam(filter: FilterValue): string | undefined {
   if (filter === "done") return "done";
@@ -46,6 +47,8 @@ export function AdminDocuments() {
   const [kbId, setKbId] = useState("");
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [documents, setDocuments] = useState<AdminDocument[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
   const [selectedDocId, setSelectedDocId] = useState<string>();
   const [filter, setFilter] = useState<FilterValue>("all");
   const [query, setQuery] = useState("");
@@ -68,18 +71,25 @@ export function AdminDocuments() {
       const currentRequest = ++requestId.current;
       if (showLoading) setLoading(true);
       try {
-        const [kbRows, docRows] = await Promise.all([
+        const [kbRows, docPage] = await Promise.all([
           listAdminKnowledgeBases(),
           listAdminDocuments({
             kb_id: kbId || undefined,
             status: statusParam(filter),
             q: query.trim() || undefined,
-            limit: 200,
+            page,
+            page_size: PAGE_SIZE,
           }),
         ]);
         if (requestId.current !== currentRequest) return;
+        const lastPage = Math.max(1, Math.ceil(docPage.total / PAGE_SIZE));
+        if (page > lastPage) {
+          setPage(lastPage);
+          return;
+        }
         setKnowledgeBases(kbRows);
-        setDocuments(docRows);
+        setDocuments(docPage.items);
+        setTotal(docPage.total);
         setNotice((current) => (current?.tone === "error" ? undefined : current));
       } catch (error) {
         if (requestId.current !== currentRequest) return;
@@ -91,7 +101,7 @@ export function AdminDocuments() {
         if (requestId.current === currentRequest) setLoading(false);
       }
     },
-    [filter, kbId, paramsReady, query]
+    [filter, kbId, page, paramsReady, query]
   );
 
   useEffect(() => {
@@ -115,6 +125,7 @@ export function AdminDocuments() {
     if (filter !== "parsing") return documents;
     return documents.filter((doc) => PROCESSING_STATUSES.has(doc.parse_status));
   }, [documents, filter]);
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
   const allSelected = visibleDocuments.length > 0 && visibleDocuments.every((doc) => selectedDocIds.has(doc.doc_id));
   const someSelected = visibleDocuments.some((doc) => selectedDocIds.has(doc.doc_id));
@@ -274,7 +285,7 @@ export function AdminDocuments() {
       <div className="dm-admin-content">
           <Panel
             className="dm-kb-document-panel"
-            title={`文档列表 · ${visibleDocuments.length}`}
+            title={`文档列表 · ${total}`}
             action={
               <div className="dm-document-panel-actions">
                 <Button
@@ -284,7 +295,7 @@ export function AdminDocuments() {
                 >
                   重试异常
                 </Button>
-                <Segmented options={filters} value={filter} onChange={setFilter} />
+                <Segmented options={filters} value={filter} onChange={(value) => { setFilter(value); setPage(1); }} />
               </div>
             }
           >
@@ -292,7 +303,7 @@ export function AdminDocuments() {
               <SearchInput
                 placeholder="搜索文件名或标题..."
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
+                onChange={(event) => { setQuery(event.target.value); setPage(1); }}
               />
             </div>
 
@@ -384,6 +395,15 @@ export function AdminDocuments() {
                   />
                 ))
               : null}
+            {!loading && total > 0 ? (
+              <div className="dm-pagination">
+                <span>第 {page} / {totalPages} 页 · 共 {total} 个文档</span>
+                <div>
+                  <Button disabled={page === 1} onClick={() => setPage((value) => value - 1)} variant="secondary">上一页</Button>
+                  <Button disabled={page === totalPages} onClick={() => setPage((value) => value + 1)} variant="secondary">下一页</Button>
+                </div>
+              </div>
+            ) : null}
           </Panel>
       </div>
 

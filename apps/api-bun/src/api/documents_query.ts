@@ -15,18 +15,17 @@ export function documentListQuery(c: Context<AppEnv>): DocumentListQuery {
   if (rawKbId !== undefined && !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(rawKbId)) {
     throw AppError.badRequest('BAD_REQUEST', 'query 参数无效');
   }
-  const rawLimit = c.req.query('limit');
-  let limit: number | null = null;
-  if (rawLimit !== undefined) {
-    const parsed = Number.parseInt(rawLimit, 10);
-    if (Number.isNaN(parsed)) throw AppError.badRequest('BAD_REQUEST', 'query 参数无效');
-    limit = parsed;
+  const rawPage = Number.parseInt(c.req.query('page') ?? '1', 10);
+  const rawPageSize = Number.parseInt(c.req.query('page_size') ?? c.req.query('limit') ?? '25', 10);
+  if (!Number.isFinite(rawPage) || rawPage < 1 || !Number.isFinite(rawPageSize) || rawPageSize < 1) {
+    throw AppError.badRequest('BAD_REQUEST', 'query 参数无效');
   }
   return {
     kb_id: rawKbId ?? null,
     status: c.req.query('status') ?? null,
     q: c.req.query('q') ?? null,
-    limit,
+    page: rawPage,
+    page_size: Math.min(100, rawPageSize),
   };
 }
 
@@ -37,48 +36,56 @@ export async function listDocuments(c: Context<AppEnv>): Promise<Response> {
   requirePermission(actor, 'document.upload');
   const sql = requiredSql(state, '文档列表查询需要启用 PostgreSQL 数据库连接');
   const query = documentListQuery(c);
-
   const trimmed = query.q?.trim();
-  const search = trimmed !== undefined && trimmed !== '' ? `%${trimmed}%` : null;
-  const rawLimit = query.limit ?? 200;
-  const limit = Math.min(200, Math.max(1, rawLimit));
+  const search = trimmed ? `%${trimmed}%` : null;
+  const offset = (query.page - 1) * query.page_size;
+  const filters = [actor.tenant_id, query.kb_id, query.status, search];
 
-  const rows = await sql.unsafe(
-    `SELECT d.id AS doc_id, d.kb_id, kb.name AS kb_name, d.title,
-           COALESCE(d.metadata->>'original_filename', d.storage_key) AS file_name,
-           d.file_type,
-           'application/octet-stream' AS mime_type,
-           d.file_size_bytes AS file_size,
-           COALESCE(d.file_sha256, '') AS file_sha256,
-           d.parse_status, d.parse_version,
-           d.latest_parse_job_id, j.quality_score, d.chunk_count,
-           COALESCE((j.parser_config->>'table_count')::int, 0) AS table_count,
-           COALESCE((j.parser_config->>'page_count')::int, NULL)::int AS page_count,
-           d.created_at AS uploaded_at, d.updated_at
-    FROM documents d
-    JOIN knowledge_base kb ON kb.id = d.kb_id
-    LEFT JOIN document_parse_jobs j ON j.parse_job_id = d.latest_parse_job_id
-    WHERE d.tenant_id = \$1
-      AND (\$2::uuid IS NULL OR d.kb_id = \$2)
+  const where = `d.tenant_id = $1
+      AND ($2::uuid IS NULL OR d.kb_id = $2)
       AND (
-        \$3::text IS NULL OR \$3 = 'all' OR d.parse_status = \$3
-        OR (\$3 = 'done' AND d.parse_status IN ('parsed', 'cleaned', 'chunked', 'indexed'))
-        OR (\$3 = 'failed' AND d.parse_status IN (
-            'parse_failed',
-            'parse_low_confidence',
-            'ocr_pending',
-            'embedding_failed',
-            'parsing',
-            'parsed'
+        $3::text IS NULL OR $3 = 'all' OR d.parse_status = $3
+        OR ($3 = 'done' AND d.parse_status IN ('parsed', 'cleaned', 'chunked', 'indexed'))
+        OR ($3 = 'failed' AND d.parse_status IN (
+            'parse_failed', 'parse_low_confidence', 'ocr_pending',
+            'embedding_failed', 'parsing', 'parsed'
         ))
       )
-      AND (\$4::text IS NULL OR d.title ILIKE \$4 OR COALESCE(d.metadata->>'original_filename', d.storage_key) ILIKE \$4)
-    ORDER BY d.updated_at DESC
-    LIMIT \$5`,
-    [actor.tenant_id, query.kb_id, query.status, search, limit],
-  );
+      AND ($4::text IS NULL OR d.title ILIKE $4
+        OR COALESCE(d.metadata->>'original_filename', d.storage_key) ILIKE $4)`;
 
-  return c.json(rows.map(documentSummaryFromRow));
+  const [countRows, rows] = await Promise.all([
+    sql.unsafe(
+      `SELECT COUNT(*)::bigint AS total
+       FROM documents d
+       WHERE ${where}`,
+      filters,
+    ),
+    sql.unsafe(
+      `SELECT d.id AS doc_id, d.kb_id, kb.name AS kb_name, d.title,
+              COALESCE(d.metadata->>'original_filename', d.storage_key) AS file_name,
+              d.file_type, 'application/octet-stream' AS mime_type,
+              d.file_size_bytes AS file_size, COALESCE(d.file_sha256, '') AS file_sha256,
+              d.parse_status, d.parse_version, d.latest_parse_job_id, j.quality_score,
+              d.chunk_count, COALESCE((j.parser_config->>'table_count')::int, 0) AS table_count,
+              COALESCE((j.parser_config->>'page_count')::int, NULL)::int AS page_count,
+              d.created_at AS uploaded_at, d.updated_at
+       FROM documents d
+       JOIN knowledge_base kb ON kb.id = d.kb_id
+       LEFT JOIN document_parse_jobs j ON j.parse_job_id = d.latest_parse_job_id
+       WHERE ${where}
+       ORDER BY d.updated_at DESC
+       LIMIT $5 OFFSET $6`,
+      [...filters, query.page_size, offset],
+    ),
+  ]);
+
+  return c.json({
+    items: rows.map(documentSummaryFromRow),
+    total: Number(countRows[0]?.total ?? 0),
+    page: query.page,
+    page_size: query.page_size,
+  });
 }
 
 /** Rust: get_document */
