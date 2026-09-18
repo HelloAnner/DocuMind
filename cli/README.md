@@ -50,6 +50,53 @@ documind doctor
 
 密码优先从 `auth.password_env` 指向的环境变量读取；也可以写入权限为 `0600` 的 TOML。JWT 缓存在同目录的 `session.json`，同样使用 `0600` 权限。`config show` 始终脱敏密码。
 
+## 后台管理全覆盖
+
+平台超级管理员使用 `system`，租户管理员使用 `admin`。所有命令都支持 `--json`；写操作直接调用与后台页面相同的 API。
+
+```bash
+# 平台后台：总览、租户、用户、模型、队列、审计、设置、向量与隔离完整性
+documind system overview
+documind system tenants
+documind system tenant <tenant-id>
+documind system tenant-create --name NAME --slug SLUG --plan trial
+documind system tenant-update <tenant-id> --plan team --status active
+documind system tenant-invite <tenant-id>
+documind system tenant-delete <tenant-id> --slug SLUG --force
+documind system users
+documind system models
+documind system jobs
+documind system audit --q TEXT --limit 100
+documind system settings
+documind system settings-set --auth-token-expire-hours 24 --object-storage-presign-expire-seconds 900
+documind system vectors
+documind system vector-reconcile
+documind system vector-rebuild --force
+documind system integrity
+
+# 租户后台：总览、日志、成员、邀请、授权与运行配置
+documind admin overview
+documind admin logs --range all --q TEXT --limit 100
+documind admin members
+documind admin member-update <user-id> --role end_user --status active
+documind admin member-remove <user-id> --force
+documind admin invitations
+documind admin invitation-create --email EMAIL --name NAME --role end_user
+documind admin invitation-resend <invitation-id>
+documind admin invitation-revoke <invitation-id> --force
+documind admin permissions
+documind admin permission-matrix
+documind admin permission-grant --kb <kb-id> --subject-type role --subject end_user --permission read
+documind admin permission-revoke <acl-id> --force
+documind admin runtime-config
+documind admin chunking
+documind admin search
+documind admin embedding
+documind admin llm
+```
+
+知识库、文档、文档任务和 API 接入沿用 `kb`、`documents`、`api-clients`。`system settings-set` 的两项设置立即生效并持久化到 PostgreSQL；`admin chunking/search/embedding/llm` 与页面一致，明确显示为服务端环境只读配置。
+
 ## 外部 API 接入
 
 API Token 只从 `[external].token_env` 指定的环境变量读取，默认是 `DOCUMIND_API_TOKEN`：
@@ -161,7 +208,7 @@ documind kb delete <kb-id> --force
 
 ```bash
 # 查询页面中的全部详情区段
-documind documents list --kb <kb-id> --status failed --query 合同
+documind documents list --kb <kb-id> --status failed --query 合同 --page 1 --page-size 25
 documind documents show <document-id> --json
 documind documents preview <document-id>
 documind documents blocks <document-id> --json

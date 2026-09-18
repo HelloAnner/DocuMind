@@ -19,6 +19,7 @@ import {
 import { CliError } from "./errors.ts";
 import { verifyExternalApi } from "./external_verify.ts";
 import { printHelp } from "./help.ts";
+import { adminCommand, systemCommand } from "./management_commands.ts";
 import {
   LiveChatRenderer,
   printChatReport,
@@ -59,6 +60,8 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "health": return healthCommand(api, json);
     case "doctor": return doctorCommand(api, json);
     case "external": return externalCommand(args, api, json);
+    case "system": return systemCommand(args, api);
+    case "admin": return adminCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
     case "kb": return knowledgeBaseCommand(args, api, json);
     case "chat": return chatCommand(args, api, json);

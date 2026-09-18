@@ -125,6 +125,21 @@ describe('pi agent kernel', () => {
     expect(run.trace.react_steps![0]!.action).toBe('respond');
   });
 
+  test('factual question cannot bypass authorized knowledge search', async () => {
+    const h = harness([
+      fauxAssistantMessage('唯一校验标记通常用于数据完整性。'),
+      fauxAssistantMessage([fauxToolCall('knowledge_search', searchArgs('唯一校验标记'))]),
+      fauxAssistantMessage('唯一校验标记是 CLI_PARSE_VERIFY_20260918。[1]'),
+    ]);
+    const run = await h.kernel.run(request('唯一校验标记是什么？'));
+    const { answer, citations } = await collectAnswer(run);
+
+    expect(answer).toContain('CLI_PARSE_VERIFY_20260918');
+    expect(citations).toHaveLength(1);
+    expect(h.retriever.calls).toEqual([['唯一校验标记']]);
+    expect(run.trace.stop_reason).toBe('grounded_response');
+  });
+
   test('answer_tokens_stream_without_a_duplicate_response_step', async () => {
     const h = harness([fauxAssistantMessage('你好！')]);
     const prepared = await h.kernel.prepare(request('你好'));

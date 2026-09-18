@@ -67,6 +67,12 @@ const GROUNDING_GUARD_MESSAGE =
 const GROUNDING_GUARD_WARNING =
   'citation markers rejected because this turn has no document evidence';
 
+const KNOWLEDGE_GUARD_MESSAGE =
+  'Runtime knowledge guard: this is a factual question in an authorized enterprise knowledge-base context. Call knowledge_search before answering.';
+
+const KNOWLEDGE_GUARD_WARNING =
+  'direct factual response rejected because authorized knowledge bases were not searched';
+
 const BUDGET_EXHAUSTED_ANSWER = '已达到本次处理步骤上限，暂时无法可靠完成这个问题。';
 
 export class PreparedAgentRequest {
@@ -164,6 +170,7 @@ export class PiAgentKernel {
     let documentSearchAttempted = false;
     let turnCount = 0;
     let groundingGuardUsed = false;
+    let knowledgeGuardUsed = false;
     let currentTurnToolNames: string[] = [];
 
     const toolContext: ToolRunContext = {
@@ -332,6 +339,23 @@ export class PiAgentKernel {
           });
           return false;
         }
+        if (
+          text !== null &&
+          state.evidence.length === 0 &&
+          !documentSearchAttempted &&
+          !knowledgeGuardUsed &&
+          requiresKnowledgeSearch(request.original_query)
+        ) {
+          knowledgeGuardUsed = true;
+          emit(progress, { type: 'response_reset' });
+          reactSteps.push(failedResponseStep(turnCount, text, KNOWLEDGE_GUARD_WARNING));
+          agent.steer({
+            role: 'user',
+            content: KNOWLEDGE_GUARD_MESSAGE,
+            timestamp: Date.now(),
+          });
+          return false;
+        }
         return false;
       },
     });
@@ -443,6 +467,12 @@ function zeroPiUsage(): PiUsage {
     totalTokens: 0,
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
   };
+}
+
+function requiresKnowledgeSearch(query: string): boolean {
+  const text = query.trim();
+  if (/^(你好|您好|嗨|谢谢|多谢|你是谁|介绍一下你自己)[?？!！。]?$/u.test(text)) return false;
+  return /[?？]|是什么|多少|哪些|如何|怎么|何时|哪里|谁|是否|有没有|为何|为什么|文档|制度|合同|规定/u.test(text);
 }
 
 async function flushProgress(progress: ProgressSender): Promise<void> {

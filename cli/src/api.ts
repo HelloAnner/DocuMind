@@ -19,6 +19,7 @@ import type {
   DeleteKnowledgeBaseResponse,
   DocumentJobDetail,
   DocumentJobsResponse,
+  DocumentPage,
   DownloadedDocument,
   ExcludeFromSearchResponse,
   Identity,
@@ -261,13 +262,15 @@ export class ApiClient {
     kbId?: string;
     status?: string;
     query?: string;
-    limit?: number;
-  } = {}): Promise<AdminDocument[]> {
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<DocumentPage> {
     const query = new URLSearchParams();
     if (options.kbId) query.set("kb_id", options.kbId);
     if (options.status) query.set("status", options.status);
     if (options.query) query.set("q", options.query);
-    if (options.limit) query.set("limit", String(options.limit));
+    if (options.page) query.set("page", String(options.page));
+    if (options.pageSize) query.set("page_size", String(options.pageSize));
     const suffix = query.size ? `?${query}` : "";
     return this.requestJson(`/api/admin/documents${suffix}`);
   }

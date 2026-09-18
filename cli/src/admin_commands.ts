@@ -98,13 +98,18 @@ async function listDocuments(args: ParsedArgs, api: ApiClient, json: boolean): P
   const kbId = stringOption(args, "kb");
   const status = stringOption(args, "status");
   const query = stringOption(args, "query");
-  const items = await api.listDocuments({
+  const page = await api.listDocuments({
     ...(kbId ? { kbId } : {}),
     ...(status ? { status } : {}),
     ...(query ? { query } : {}),
-    limit: numberOption(args, "limit", 100, { min: 1, max: 200 }),
+    page: numberOption(args, "page", 1, { min: 1 }),
+    pageSize: numberOption(args, "page-size", numberOption(args, "limit", 25, { min: 1, max: 100 }), { min: 1, max: 100 }),
   });
-  if (json) printJson(items); else printDocuments(items);
+  if (json) printJson(page);
+  else {
+    printDocuments(page.items);
+    process.stdout.write(`第 ${page.page} 页 · 每页 ${page.page_size} 条 · 共 ${page.total} 条\n`);
+  }
   return 0;
 }
 

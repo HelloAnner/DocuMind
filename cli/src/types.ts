@@ -373,6 +373,13 @@ export interface AdminDocument {
   updated_at: string;
 }
 
+export interface DocumentPage {
+  items: AdminDocument[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
 export interface DocumentChunk {
   chunk_id: string;
   chunk_index: number;
