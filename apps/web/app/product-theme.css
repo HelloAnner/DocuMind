@@ -1809,10 +1809,12 @@ select:focus-visible {
   box-shadow: none;
   color: var(--text-primary);
   font-size: 14px;
+  height: 32px;
   line-height: 1.6;
-  max-height: 160px;
+  max-height: 32px;
   min-height: 32px;
   outline: none;
+  overflow-y: auto;
   padding: 4px 6px;
   resize: none;
   width: 100%;

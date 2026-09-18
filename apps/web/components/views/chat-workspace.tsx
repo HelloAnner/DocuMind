@@ -65,7 +65,6 @@ export function ChatWorkspace() {
   const [input, setInput] = useState("");
   const [isComposing, setIsComposing] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const streamRef = useRef<HTMLDivElement | null>(null);
   const streamEndRef = useRef<HTMLDivElement | null>(null);
   const previousMessageCountRef = useRef(0);
@@ -139,9 +138,6 @@ export function ChatWorkspace() {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    if (textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-    }
     await sendMessage(text);
   };
 
@@ -260,15 +256,10 @@ export function ChatWorkspace() {
             <div className="dm-composer-box">
               <div className="dm-composer-input-row">
                 <textarea
-                  ref={textareaRef}
                   aria-label="消息输入框"
                   placeholder="描述你的需求，或 @ 引用文件"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  onInput={(e) => {
-                    e.currentTarget.style.height = "auto";
-                    e.currentTarget.style.height = `${Math.min(e.currentTarget.scrollHeight, 160)}px`;
-                  }}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
