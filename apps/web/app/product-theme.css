@@ -5044,7 +5044,7 @@ body > .hiddenCanvasElement {
 
 .dm-chat-stream {
   gap: 18px;
-  padding: 74px 24px 24px;
+  padding: 74px 24px 64px;
 }
 
 .dm-question-row,
