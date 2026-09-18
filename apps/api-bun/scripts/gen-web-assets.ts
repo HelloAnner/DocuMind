@@ -1,7 +1,7 @@
 // 生成 src/generated/web_assets.ts：把 apps/web/out 内嵌进 bun --compile 产物
 // 用法: bun run scripts/gen-web-assets.ts [webOutDir]
-import { readdirSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join, relative, dirname } from 'node:path';
+import { mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative } from 'node:path';
 
 const root = join(import.meta.dir, '..', '..', '..');
 const webOut = process.argv[2] ?? join(root, 'apps', 'web', 'out');
@@ -19,17 +19,13 @@ function* walk(dir: string): Generator<string> {
 const files = [...walk(webOut)].sort();
 mkdirSync(dirname(outFile), { recursive: true });
 
-const relToGenerated = (absPath: string): string => {
-  const rel = relative(join(import.meta.dir, '..', 'src', 'generated'), absPath);
-  return rel.split('\\').join('/');
-};
 
 let body = '// 自动生成，勿手改。来源: scripts/gen-web-assets.ts\n';
 body += 'const loaders: Record<string, () => Uint8Array> = {};\n';
-files.forEach((file, index) => {
+files.forEach((file) => {
   const webPath = relative(webOut, file).split('\\').join('/');
-  body += `import asset${index} from '${relToGenerated(file)}' with { type: 'file' };\n`;
-  body += `loaders[${JSON.stringify(webPath)}] = () => new Uint8Array(asset${index});\n`;
+  const base64 = readFileSync(file).toString('base64');
+  body += `loaders[${JSON.stringify(webPath)}] = () => Buffer.from(${JSON.stringify(base64)}, 'base64');\n`;
 });
 body += 'export default loaders;\n';
 writeFileSync(outFile, body);
