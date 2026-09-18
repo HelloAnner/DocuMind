@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Building2, LockKeyhole, UserRound } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { AgentOrb, BrandMark } from "@/components/ui/brand-mark";
+import { BrandMark } from "@/components/ui/brand-mark";
 import { getTenantLoginContext, type TenantLoginContext } from "@/lib/auth";
 import { createTenantLoginProfile, type TenantLoginProfile } from "./tenant-login-profile";
 
@@ -184,7 +184,6 @@ function TenantLoginExperience() {
           </ul>
           <div className="dm-login-story-signature">{profile.signature}</div>
         </div>
-        <AgentOrb size="large" />
       </section>
 
       <LoginForm profile={profile} tenantSlug={profile.tenantSlug ?? tenantSlug} tenantState={tenantState} />
