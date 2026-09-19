@@ -35,4 +35,28 @@ describe("external API mode", () => {
     expect(requests.map((request) => request.path)).not.toContain("/api/auth/login");
     expect(requests.every((request) => request.authorization === "Bearer dm_live_test_secret")).toBe(true);
   });
+
+  test("sends current MCP protocol metadata and parses SSE", async () => {
+    process.env.DOCUMIND_API_TOKEN = "dm_live_test_secret";
+    let request: { headers: Headers; body: { params: { _meta: Record<string, unknown> } } } | null = null;
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      request = {
+        headers: new Headers(init?.headers),
+        body: JSON.parse(String(init?.body)) as { params: { _meta: Record<string, unknown> } },
+      };
+      return new Response(
+        `data: {"jsonrpc":"2.0","id":"documind-cli","result":{"tools":[]}}
+
+`,
+        { headers: { "Content-Type": "text/event-stream" } },
+      );
+    }) as typeof fetch;
+    const directory = await mkdtemp(join(tmpdir(), "documind-mcp-"));
+    const api = new ApiClient(structuredClone(DEFAULT_CONFIG), join(directory, "config.toml"), fetcher);
+
+    expect((await api.mcpCall("tools/list")).result).toEqual({ tools: [] });
+    expect(request!.headers.get("Mcp-Method")).toBe("tools/list");
+    expect(request!.headers.get("MCP-Protocol-Version")).toBe("2026-07-28");
+    expect(request!.body.params._meta["io.modelcontextprotocol/protocolVersion"]).toBe("2026-07-28");
+  });
 });

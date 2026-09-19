@@ -45,7 +45,10 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  external doctor|whoami       使用 DOCUMIND_API_TOKEN 检查外部 API\n` +
   `  external chat <问题>         使用外部 API Token 真实问答\n` +
   `  external verify              自动验证真实问答、权限、限流与租户隔离\n` +
-  `  api-clients list|create      管理租户 API 接入与 Token\n\n` +
+  `  api-clients list|create      管理租户 MCP / API 客户端与 Token\n` +
+  `  mcp tools                    列出 Token 可用的 MCP 工具\n` +
+  `  mcp ask <问题>               通过 MCP 执行真实文档问答\n` +
+  `  mcp verify                   验证工具发现与租户会话隔离\n\n` +
   `  system <subcommand>          平台后台全量查看与管理\n` +
   `  admin <subcommand>           租户后台全量查看与管理\n` +
   `对话与评测\n` +

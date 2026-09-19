@@ -17,6 +17,7 @@ import {
   systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
+import { createDocumindMcpEndpoint } from './mcp.ts';
 
 /** 与 Rust 保持一致：这些端点不使用 ActorExtractor（自行鉴权或完全公开）。 */
 const PUBLIC_API_PATHS = new Set([
@@ -106,6 +107,9 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   });
 
   app.route('/', api);
+  const mcpEndpoint = createDocumindMcpEndpoint(state);
+  app.post('/mcp', mcpEndpoint);
+  app.post('/documind/mcp', mcpEndpoint);
   app.route('/documind', api);
 
   // 静态资源 + SPA 回退

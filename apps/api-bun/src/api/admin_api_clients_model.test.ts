@@ -4,7 +4,12 @@ import { normalizeName, normalizeScopes, validateExpiration } from './admin_api_
 
 describe('admin_api_clients_model', () => {
   test('validates scopes and expiration', () => {
-    expect(normalizeScopes([]).length).toBe(3);
+    expect(normalizeScopes([])).toEqual([
+      'chat:write',
+      'conversations:read',
+      'conversations:write',
+      'knowledge_bases:read',
+    ]);
     expect(() => normalizeScopes(['admin:write'])).toThrow();
     expect(() => validateExpiration(90)).not.toThrow();
     expect(() => validateExpiration(0)).toThrow();

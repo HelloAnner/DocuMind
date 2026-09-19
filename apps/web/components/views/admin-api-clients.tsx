@@ -37,7 +37,7 @@ export function AdminApiClients() {
   };
 
   useEffect(() => {
-    reload().catch((cause) => setError(cause instanceof Error ? cause.message : "API 接入数据加载失败"));
+    reload().catch((cause) => setError(cause instanceof Error ? cause.message : "MCP 接入数据加载失败"));
   }, []);
 
   const create = async () => {
@@ -109,12 +109,21 @@ export function AdminApiClients() {
 
   return (
     <>
-      <Topbar title="API 接入" />
+      <Topbar title="MCP 接入" />
       <div className="dm-admin-content">
+        <Panel title="MCP 服务地址">
+          <div className="dm-form-note" style={{ marginBottom: 10 }}>
+            第三方 AI 使用 Streamable HTTP 连接；Token 同时绑定当前租户、服务身份、知识库范围与会话。
+          </div>
+          <div className="dm-permission-form">
+            <code style={{ overflowWrap: "anywhere", flex: 1 }}>/documind/mcp</code>
+            <Button icon={<Copy size={14} />} onClick={() => copyToClipboard(`${window.location.origin}/documind/mcp`)}>复制地址</Button>
+          </div>
+        </Panel>
         {secret ? (
-          <Panel title="保存 API Token">
+          <Panel title="保存 MCP Token">
             <div className="dm-form-note" style={{ color: "var(--color-warning)", marginBottom: 12 }}>
-              Token 仅显示一次。请立即复制到外部系统的安全密钥存储中。
+              Token 仅显示一次。请立即复制到 MCP 客户端的安全密钥存储中。
             </div>
             <div className="dm-permission-form">
               <code style={{ overflowWrap: "anywhere", flex: 1 }}>{secret}</code>
@@ -124,7 +133,7 @@ export function AdminApiClients() {
           </Panel>
         ) : null}
 
-        <Panel title="创建外部应用">
+        <Panel title="创建 MCP 应用">
           <div className="dm-permission-form">
             <label className="dm-form-field"><span>应用名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如 CRM 客服机器人" /></label>
             <label className="dm-form-field"><span>说明</span><input value={description} onChange={(event) => setDescription(event.target.value)} placeholder="接入用途" /></label>
@@ -139,8 +148,8 @@ export function AdminApiClients() {
           <div style={{ marginTop: 16 }}><Button icon={<KeyRound size={14} />} disabled={busy} onClick={() => create().catch(console.error)}>创建并生成 Token</Button></div>
         </Panel>
 
-        <Panel title="外部应用">
-          {clients.length === 0 ? <div className="dm-empty-state">尚未创建外部应用</div> : null}
+        <Panel title="MCP 应用">
+          {clients.length === 0 ? <div className="dm-empty-state">尚未创建 MCP 应用</div> : null}
           {clients.map((client) => (
             <div key={client.id} style={{ borderBottom: "1px solid var(--border-subtle)", padding: "16px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>

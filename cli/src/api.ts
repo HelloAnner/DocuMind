@@ -429,6 +429,52 @@ export class ApiClient {
     return (await this.getSession()).last_conversation_id;
   }
 
+  async mcpCall(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const body = {
+      jsonrpc: "2.0",
+      id: "documind-cli",
+      method,
+      params: {
+        ...params,
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "documind-cli", version: "0.1.0" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    };
+    const headers = new Headers({
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${configuredApiToken(this.config)}`,
+      "Content-Type": "application/json",
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": method,
+    });
+    if (method === "tools/call" && typeof params.name === "string") {
+      headers.set("Mcp-Name", params.name);
+    }
+    const response = await this.fetcher(this.url("/mcp"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
+    });
+    if (!response.ok) {
+      throw new ApiError("POST", this.url("/mcp"), response.status, await responseBody(response));
+    }
+    const text = await response.text();
+    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+      const messages = text
+        .split("\n")
+        .filter((line) => line.startsWith("data:") && line.slice(5).trim())
+        .map((line) => JSON.parse(line.slice(5).trim()) as Record<string, unknown>);
+      const last = messages.at(-1);
+      if (!last) throw new CliError("MCP 返回了空 SSE 响应");
+      return last;
+    }
+    return JSON.parse(text) as Record<string, unknown>;
+  }
+
   async sse(path: string, body: unknown, retryAuthentication = true): Promise<Response> {
     const token = await this.accessToken();
     const response = await this.fetcher(this.url(path), {

@@ -60,6 +60,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "health": return healthCommand(api, json);
     case "doctor": return doctorCommand(api, json);
     case "external": return externalCommand(args, api, json);
+    case "mcp": return mcpCommand(args, api, json);
     case "system": return systemCommand(args, api);
     case "admin": return adminCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
@@ -197,6 +198,47 @@ async function doctorCommand(api: ApiClient, json: boolean): Promise<number> {
   }
   return ok ? 0 : 1;
 }
+
+async function mcpCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "tools";
+  if (subcommand === "tools") {
+    const response = await api.mcpCall("tools/list");
+    printJson(response);
+    return 0;
+  }
+  if (subcommand === "verify") {
+    const tools = await api.mcpCall("tools/list");
+    const conversations = await api.mcpCall("tools/call", {
+      name: "documind_conversation_list",
+      arguments: { limit: 1 },
+    });
+    const report = { ok: true, tools, conversations };
+    if (json) printJson(report);
+    else {
+      process.stdout.write("DocuMind MCP verify: PASS\n");
+      printJson(report);
+    }
+    return 0;
+  }
+  if (subcommand === "ask") {
+    const message = args.positionals.slice(2).join(" ").trim();
+    if (!message) throw new CliError("mcp ask 需要问题", 2);
+    const conversationId = stringOption(args, "conversation");
+    const kbIds = listOption(args, "kb");
+    const result = await api.mcpCall("tools/call", {
+      name: "documind_chat",
+      arguments: {
+        message,
+        ...(conversationId ? { conversation_id: conversationId } : {}),
+        ...(kbIds.length ? { kb_ids: kbIds } : {}),
+      },
+    });
+    printJson(result);
+    return 0;
+  }
+  throw new CliError(`未知 mcp 子命令: ${subcommand}`, 2);
+}
+
 
 async function externalCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "doctor";

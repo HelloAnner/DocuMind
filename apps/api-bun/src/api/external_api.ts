@@ -6,7 +6,12 @@ import { resolveActorFromDb } from '../auth/actor.ts';
 import { newUuid } from '../infra/uuid.ts';
 import { toRfc3339 } from '../infra/time.ts';
 
-export const DEFAULT_SCOPES = ['knowledge_bases:read', 'chat:write', 'conversations:read'];
+export const DEFAULT_SCOPES = [
+  'knowledge_bases:read',
+  'chat:write',
+  'conversations:read',
+  'conversations:write',
+];
 
 export async function actorFromApiHeaders(
   state: AppState, headers: Headers,
