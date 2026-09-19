@@ -1939,10 +1939,7 @@ select:focus-visible {
 }
 
 .chat-model-menu {
-  align-items: flex-end;
   bottom: calc(100% + 10px);
-  display: flex;
-  gap: 8px;
   left: 0;
   position: absolute;
   z-index: 80;
@@ -1956,20 +1953,20 @@ select:focus-visible {
 }
 
 .chat-model-list-panel {
-  border-radius: 14px;
+  border-radius: 10px;
   padding: 10px;
-  width: 360px;
+  width: 280px;
 }
 
 .chat-model-search {
   align-items: center;
   background: var(--surface-subdued);
   border: 1px solid var(--border-subtle);
-  border-radius: 8px;
+  border-radius: 7px;
   color: var(--text-muted);
   display: flex;
   gap: 7px;
-  height: 40px;
+  height: 32px;
   padding: 0 10px;
 }
 
@@ -1991,7 +1988,7 @@ select:focus-visible {
 .chat-model-section-label {
   color: var(--text-muted);
   font-size: 11px;
-  padding: 12px 8px 5px;
+  padding: 10px 7px 4px;
 }
 
 .chat-model-options {
@@ -2008,8 +2005,8 @@ select:focus-visible {
   cursor: pointer;
   display: flex;
   justify-content: space-between;
-  min-height: 40px;
-  padding: 0 8px;
+  min-height: 32px;
+  padding: 0 7px;
   text-align: left;
   width: 100%;
 }
@@ -2051,10 +2048,12 @@ select:focus-visible {
 }
 
 .chat-model-detail {
-  border-radius: 14px;
+  border-radius: 10px;
   color: var(--text-secondary);
-  padding: 18px;
-  width: 330px;
+  left: calc(100% + 8px);
+  padding: 14px;
+  position: absolute;
+  width: 280px;
 }
 
 .chat-model-detail-title,
@@ -2080,12 +2079,12 @@ select:focus-visible {
 .chat-model-detail > p {
   color: var(--text-muted);
   font-size: 12px;
-  margin: 7px 0 18px;
+  margin: 6px 0 14px;
 }
 
 .chat-model-capability {
   font-size: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 12px;
 }
 
 .chat-model-capability span {
@@ -2100,7 +2099,7 @@ select:focus-visible {
   font-family: var(--font-mono);
   font-size: 11px;
   overflow: hidden;
-  padding: 10px;
+  padding: 9px 10px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -6045,7 +6044,7 @@ body > .hiddenCanvasElement {
 
 @media (max-width: 860px) {
   .chat-model-list-panel {
-    width: min(360px, calc(100vw - 52px));
+    width: min(280px, calc(100vw - 52px));
   }
 
   .chat-model-detail {
