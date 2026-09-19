@@ -67,7 +67,7 @@ export function ReasoningTrace({
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
   }, [expanded, rounds, thinking]);
 
-  if (toolCount === 0 && !hasThinking && !isStreaming) return null;
+  if (rounds.length === 0 && !hasThinking && !isStreaming) return null;
 
   function toggle() {
     if (isStreaming) return;
@@ -116,7 +116,11 @@ export function ReasoningTrace({
           ref={feedRef}
         >
           {hasThinking ? (
-            <div className="dm-reasoning-thought">{thinking}</div>
+            <ThoughtGroup
+              hasFollowing={rounds.length > 0}
+              isStreaming={isStreaming}
+              text={thinking!.trim()}
+            />
           ) : null}
           {rounds.map((round, index) => (
             <ProcessGroup
@@ -156,6 +160,28 @@ function ProcessGroup({
           {round.tool_calls.map((tool) => <ToolAction key={tool.id} tool={tool} />)}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function ThoughtGroup({
+  text,
+  isStreaming,
+  hasFollowing,
+}: {
+  text: string;
+  isStreaming: boolean;
+  hasFollowing: boolean;
+}) {
+  return (
+    <div className="dm-process-group">
+      {hasFollowing ? <span aria-hidden="true" className="dm-process-connector continues" /> : null}
+      <div className="dm-process-row">
+        <span className="dm-process-icon-slot">
+          <ProcessIcon status={isStreaming ? "running" : "completed"} />
+        </span>
+        <ThinkingPreview text={text} />
+      </div>
     </div>
   );
 }
@@ -254,9 +280,7 @@ function buildReasoningRounds(steps: RuntimeReasoningStep[], liveTools: RuntimeT
     ...Array.from(rounds.values()).filter((round) => round.action !== "respond").map((round) => round.step)
   );
   for (const tool of liveTools) mergeTool(getRound(tool.step ?? fallbackStep), tool);
-  return Array.from(rounds.values())
-    .filter((round) => round.tool_calls.length > 0)
-    .sort((a, b) => a.step - b.step);
+  return Array.from(rounds.values()).sort((a, b) => a.step - b.step);
 }
 
 function reasoningRoundStatus(round: ReasoningRound): RoundStatus {
