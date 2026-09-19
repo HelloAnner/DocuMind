@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, Building2, CheckCheck, Heart, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, UserRound, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
@@ -23,6 +23,8 @@ export function UserAccountMenu() {
   const [windowPage, setWindowPage] = useState<{ href: string; title: string } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
   const [isDark, setIsDark] = useState(false);
+  const updatesRef = useRef<HTMLElement>(null);
+  const [updatesLeft, setUpdatesLeft] = useState(312);
   const rootRef = useRef<HTMLDivElement>(null);
   const roles = me?.roles ?? [];
   const isSuperAdmin = me?.scope === "platform" && isSuperAdminRole(roles);
@@ -31,7 +33,10 @@ export function UserAccountMenu() {
 
   useEffect(() => {
     const close = (event: MouseEvent) => {
-      if (!rootRef.current?.contains(event.target as Node)) {
+      if (
+        !rootRef.current?.contains(event.target as Node) &&
+        !updatesRef.current?.contains(event.target as Node)
+      ) {
         setOpen(false);
         setUpdatesOpen(false);
       }
@@ -108,8 +113,13 @@ export function UserAccountMenu() {
           </button>
         </div>
       ) : null}
-      {updatesOpen ? (
-        <section aria-label="产品更新" className={styles.updates}>
+      {updatesOpen && typeof document !== "undefined" ? createPortal(
+        <section
+          aria-label="产品更新"
+          className={styles.updates}
+          ref={updatesRef}
+          style={{ "--updates-left": `${updatesLeft}px` } as CSSProperties}
+        >
           <nav className={styles.updateTabs}>
             <span className={styles.whatsNew}>What&apos;s New</span>
             <button
@@ -165,7 +175,8 @@ export function UserAccountMenu() {
               <span>关注的内容有更新时会显示在这里</span>
             </div>
           )}
-        </section>
+        </section>,
+        document.body,
       ) : null}
       <div className={`${styles.footerRow} dm-user-footer-row`}>
         <button
@@ -192,7 +203,10 @@ export function UserAccountMenu() {
           aria-expanded={updatesOpen}
           aria-label="产品更新"
           className={`${styles.bell} dm-user-update-bell`}
-          onClick={() => {
+          onClick={(event) => {
+            const sidebarRight = event.currentTarget.closest("aside")?.getBoundingClientRect().right ?? 288;
+            const panelWidth = Math.min(520, window.innerWidth - 20);
+            setUpdatesLeft(Math.max(10, Math.min(sidebarRight + 16, window.innerWidth - panelWidth - 10)));
             setOpen(false);
             setUpdatesOpen((value) => !value);
           }}
