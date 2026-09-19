@@ -6319,9 +6319,9 @@ body > .hiddenCanvasElement {
 }
 
 .dm-settings-page {
-  align-items: flex-start;
+  align-items: center;
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   padding: 28px 32px 48px;
 }
 
