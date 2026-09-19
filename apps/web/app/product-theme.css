@@ -1358,7 +1358,7 @@ select:focus-visible {
   bottom: 8px;
   left: 48px;
   right: auto;
-  width: 210px;
+  width: 280px;
 }
 
 .dm-chat-workspace {
@@ -2128,15 +2128,6 @@ select:focus-visible {
   opacity: 0.65;
 }
 
-.dm-live-thinking {
-  color: var(--text-tertiary);
-  font-size: 13px;
-  font-style: italic;
-  line-height: 1.7;
-  max-height: 12rem;
-  overflow: auto;
-  white-space: pre-wrap;
-}
 
 .dm-send-button {
   background: var(--send-bg);
@@ -3873,6 +3864,17 @@ body > .hiddenCanvasElement {
   overflow-y: auto;
   padding-right: 8px;
   scrollbar-width: none;
+}
+
+.dm-reasoning-thought {
+  border-left: 1px solid var(--moss-trace-line);
+  color: var(--text-tertiary);
+  font-size: 13px;
+  line-height: 1.75;
+  margin: 2px 0 9px 7px;
+  overflow-wrap: anywhere;
+  padding: 2px 10px 3px 16px;
+  white-space: pre-wrap;
 }
 
 .dm-reasoning-feed::-webkit-scrollbar {

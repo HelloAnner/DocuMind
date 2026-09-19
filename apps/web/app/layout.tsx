@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import "streamdown/styles.css";
 import "./globals.css";
 import "./product-theme.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
@@ -24,9 +25,12 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{
             __html: `(() => {
               const media = matchMedia("(prefers-color-scheme: dark)");
-              const apply = () => document.documentElement.dataset.theme = media.matches ? "dark" : "light";
-              apply();
-              media.addEventListener("change", apply);
+              document.documentElement.dataset.theme =
+                localStorage.getItem("documind-theme") || (media.matches ? "dark" : "light");
+              media.addEventListener("change", () => {
+                document.documentElement.dataset.theme =
+                  localStorage.getItem("documind-theme") || (media.matches ? "dark" : "light");
+              });
             })();`,
           }}
         />

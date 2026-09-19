@@ -25,12 +25,14 @@
 
 .avatar {
   align-items: center;
-  background: var(--text-primary);
-  border-radius: var(--radius-sm);
-  color: var(--bg-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  color: var(--text-primary);
   display: flex;
-  font-size: 12px;
-  font-weight: 700;
+  flex: 0 0 32px;
+  font-size: 13px;
+  font-weight: 600;
   height: 32px;
   justify-content: center;
   overflow: hidden;
@@ -70,14 +72,16 @@
 .menu {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-md);
+  border-radius: 16px;
   bottom: calc(100% - 4px);
-  box-shadow: 0 16px 38px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--overlay-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   left: 12px;
-  overflow: hidden;
-  padding: 6px;
+  padding: 12px;
   position: absolute;
-  right: 12px;
+  width: 280px;
   z-index: 50;
 }
 
@@ -86,14 +90,15 @@
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  border-radius: 10px;
+  color: var(--text-primary);
   cursor: pointer;
   display: flex;
   font: inherit;
-  font-size: 14px;
-  gap: 9px;
-  padding: 9px 10px;
+  font-size: 13px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
   text-decoration: none;
   width: 100%;
 }
@@ -104,14 +109,47 @@
   color: var(--text-primary);
 }
 
+.menu .active {
+  background: var(--bg-tertiary);
+}
+
+.menuHeader {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.menuIdentity {
+  min-width: 0;
+}
+
+.menuIdentity strong,
+.menuIdentity span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuIdentity strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.menuIdentity span {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
 .menu .danger {
   color: var(--color-error);
 }
 
 .divider {
-  background: var(--border-muted);
+  background: var(--border-subtle);
   height: 1px;
-  margin: 5px 3px;
 }
 
 .windowOverlay {

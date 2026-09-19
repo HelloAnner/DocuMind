@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronUp, LogOut, Settings, UserRound, X } from "lucide-react";
+import { Building2, ChevronUp, LifeBuoy, LogOut, Moon, Settings, Sun, UserRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -12,6 +12,7 @@ export function UserAccountMenu() {
   const [open, setOpen] = useState(false);
   const [windowPage, setWindowPage] = useState<{ href: string; title: string } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const [isDark, setIsDark] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const roles = me?.roles ?? [];
   const isSuperAdmin = me?.scope === "platform" && isSuperAdminRole(roles);
@@ -28,26 +29,66 @@ export function UserAccountMenu() {
 
   useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
 
-  if (!me) return null;
-  const initials = (me.user.name || me.user.login_id).trim().slice(0, 1).toUpperCase();
+  useEffect(() => {
+    setIsDark(document.documentElement.dataset.theme === "dark");
+  }, []);
 
+  if (!me) return null;
+  const displayName = me.user.name || me.user.login_id;
+  const initials = displayName.trim().slice(0, 1).toUpperCase();
+  const roleLabel = isSuperAdmin ? "超级管理员" : isTenantAdmin ? "企业管理员" : "成员";
+
+  const openWindow = (href: string, title: string) => {
+    setOpen(false);
+    setWindowPage({ href, title });
+  };
+
+  const toggleTheme = () => {
+    const next = !isDark;
+    document.documentElement.dataset.theme = next ? "dark" : "light";
+    localStorage.setItem("documind-theme", next ? "dark" : "light");
+    setIsDark(next);
+  };
   return (
     <div className={`${styles.root} dm-user-menu-root`} ref={rootRef}>
       {open ? (
         <div className={`${styles.menu} dm-user-menu-popover`} role="menu">
-          <button onClick={() => { setOpen(false); setWindowPage({ href: "/account", title: "账号与个人资料" }); }} type="button">
-            <UserRound size={15} />
-            账号与个人资料
+          <div className={styles.menuHeader}>
+            <span className={styles.avatar}>
+              {me.user.avatar_url && !avatarFailed
+                ? <img alt="" onError={() => setAvatarFailed(true)} src={me.user.avatar_url} />
+                : initials}
+            </span>
+            <span className={styles.menuIdentity}>
+              <strong>{displayName}</strong>
+              <span>{roleLabel}</span>
+            </span>
+          </div>
+          <div className={styles.divider} />
+          <button className={styles.active} onClick={() => openWindow("/account", "个人设置")} type="button">
+            <UserRound size={16} />
+            个人设置
           </button>
           {managementHref ? (
-            <button onClick={() => { setOpen(false); setWindowPage({ href: managementHref, title: isSuperAdmin ? "平台管理后台" : "租户管理后台" }); }} type="button">
-              <Settings size={15} />
-              {isSuperAdmin ? "平台管理后台" : "租户管理后台"}
+            <button
+              onClick={() => openWindow(managementHref, isSuperAdmin ? "管理后台" : "企业控制台")}
+              type="button"
+            >
+              {isSuperAdmin ? <Settings size={16} /> : <Building2 size={16} />}
+              {isSuperAdmin ? "管理后台" : "企业控制台"}
             </button>
           ) : null}
+          <button onClick={() => openWindow("/help", "帮助中心")} type="button">
+            <LifeBuoy size={16} />
+            帮助中心
+          </button>
+          <button onClick={toggleTheme} type="button">
+            {isDark ? <Sun size={16} /> : <Moon size={16} />}
+            {isDark ? "切换亮色" : "切换暗色"}
+          </button>
           <div className={styles.divider} />
           <button className={styles.danger} onClick={logout} type="button">
-            <LogOut size={15} />
+            <LogOut size={16} />
             退出登录
           </button>
         </div>
@@ -65,8 +106,8 @@ export function UserAccountMenu() {
             : initials}
         </span>
         <span className={`${styles.identity} dm-user-menu-identity`}>
-          <strong>{me.user.name || me.user.login_id}</strong>
-          <span>{isSuperAdmin ? "超级管理员" : isTenantAdmin ? "租户管理员" : me.tenant?.name ?? "未选择租户"}</span>
+          <strong>{displayName}</strong>
+          <span>{roleLabel}</span>
         </span>
         <ChevronUp size={14} />
       </button>
