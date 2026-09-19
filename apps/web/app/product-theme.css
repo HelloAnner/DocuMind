@@ -1939,7 +1939,10 @@ select:focus-visible {
 }
 
 .chat-model-menu {
+  align-items: center;
   bottom: calc(100% + 10px);
+  display: flex;
+  gap: 8px;
   left: 0;
   position: absolute;
   z-index: 80;
@@ -2050,9 +2053,7 @@ select:focus-visible {
 .chat-model-detail {
   border-radius: 10px;
   color: var(--text-secondary);
-  left: calc(100% + 8px);
   padding: 14px;
-  position: absolute;
   width: 280px;
 }
 

@@ -138,10 +138,7 @@ function ModelPicker({
             </div>
           </div>
           {preview ? (
-            <aside
-              className="chat-model-detail"
-              style={{ top: 76 + Math.max(0, filtered.findIndex((model) => model.id === preview.id)) * 32 }}
-            >
+            <aside className="chat-model-detail">
               <div className="chat-model-detail-title">
                 <strong>{preview.name}</strong>
                 <span>{preview.thinking_mode === "always_on" ? "深度" : preview.thinking_mode === "switchable" ? "灵活" : "快速"}</span>
