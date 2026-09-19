@@ -61,8 +61,6 @@ export default function AccountPage() {
     setMessage("");
     try {
       await switchAccountTenant(tenant.id);
-      await refresh();
-      router.replace(AUTHENTICATED_HOME_PATH);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "切换失败");
     } finally {

@@ -25,6 +25,7 @@ export interface Tenant {
   slug: string;
   plan: string;
   status: string;
+  roles?: UserRole[];
 }
 
 export type AuthScope = "platform" | "tenant";
@@ -62,6 +63,7 @@ export interface TenantLoginContext {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const AUTH_KEY = "documind-auth";
+export const TENANT_SWITCH_STORAGE_KEY = "documind:tenant-switch";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
@@ -143,11 +145,11 @@ export async function updateAccountProfile(name: string, avatarUrl?: string): Pr
 }
 
 export async function listAccountTenants(): Promise<AccountTenant[]> {
-  const data = await authJson<{ tenants: Tenant[]; active_tenant_id: string | null }>(
+  const data = await authJson<{ items: Tenant[]; active_tenant_id: string | null }>(
     "/api/v1/auth/tenants"
   );
-  return data.tenants.map((tenant) => ({
-    ...tenant, roles: [], current: tenant.id === data.active_tenant_id,
+  return data.items.map((tenant) => ({
+    ...tenant, roles: tenant.roles ?? [], current: tenant.id === data.active_tenant_id,
   }));
 }
 
@@ -157,6 +159,9 @@ export async function switchAccountTenant(tenantId: string): Promise<LoginRespon
     body: JSON.stringify({ tenant_id: tenantId }),
   });
   storeLoginResponse(data);
+  localStorage.setItem(TENANT_SWITCH_STORAGE_KEY, `${tenantId}:${Date.now()}`);
+  const basePath = window.location.pathname.startsWith("/documind") ? "/documind" : "";
+  window.location.replace(`${basePath}${AUTHENTICATED_HOME_PATH}`);
   return data;
 }
 
@@ -214,6 +219,9 @@ export async function createTenant(name: string): Promise<LoginResponse> {
     body: JSON.stringify({ name }),
   });
   storeLoginResponse(data);
+  localStorage.setItem(TENANT_SWITCH_STORAGE_KEY, `${data.tenant?.id ?? "created"}:${Date.now()}`);
+  const basePath = window.location.pathname.startsWith("/documind") ? "/documind" : "";
+  window.location.replace(`${basePath}${AUTHENTICATED_HOME_PATH}`);
   return data;
 }
 

@@ -40,6 +40,13 @@ documind auth login
 documind doctor
 ```
 
+登录后可列出账号加入的企业空间，并切换 CLI 的活动空间；切换会替换缓存 JWT，并清除上一个空间的会话选择：
+
+```bash
+documind auth tenants
+documind auth switch <tenant-id>
+```
+
 默认配置路径是 `~/.config/documind/config.toml`；可通过 `--config` 或 `DOCUMIND_CONFIG` 覆盖。当前真实环境默认值为：
 
 - API：`http://123.57.255.204:8089`

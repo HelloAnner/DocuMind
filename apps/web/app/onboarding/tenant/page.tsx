@@ -24,7 +24,6 @@ export default function TenantOnboardingPage() {
     setError("");
     try {
       await switchAccountTenant(tenantId);
-      window.location.assign("/chat");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "进入租户失败");
       setBusy(false);
@@ -37,7 +36,6 @@ export default function TenantOnboardingPage() {
     setError("");
     try {
       await createTenant(name);
-      window.location.assign("/chat");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "创建租户失败");
       setBusy(false);

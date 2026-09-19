@@ -26,6 +26,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { NavItem } from "./nav-item";
 import { UserAccountMenu } from "./user-account-menu";
 import { BrandMark } from "./brand-mark";
+import { TenantSwitcher } from "./tenant-switcher";
 
 interface NavEntry {
   label: string;
@@ -111,9 +112,7 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const isPlatform = me?.scope === "platform" || pathname.startsWith("/system");
   const sections = isPlatform ? platformSections : tenantSections;
   const homeHref = isPlatform ? "/system" : "/admin";
-  const tenantName = me?.tenant?.name;
-  const tenantSlug = me?.tenant?.slug;
-  const showTenantContext = !isPlatform && Boolean(tenantName);
+  const showTenantContext = !isPlatform && Boolean(me?.tenant);
 
   return (
     <aside className="dm-admin-sidebar">
@@ -123,20 +122,7 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
             <BrandMark />
           </Link>
         </div>
-        {showTenantContext ? (
-          <Link
-            aria-label={`返回${tenantName}租户总览`}
-            className="dm-admin-context"
-            href={homeHref}
-            onClick={onNavigate}
-          >
-            <Building2 aria-hidden="true" size={15} />
-            <span className="dm-admin-context-copy">
-              <strong>{tenantName}</strong>
-              {tenantSlug ? <small>{tenantSlug}</small> : null}
-            </span>
-          </Link>
-        ) : null}
+        {showTenantContext ? <TenantSwitcher /> : null}
       </div>
 
       <nav className="dm-nav">

@@ -32,7 +32,7 @@ export interface UserProfile {
   avatar_url: string | null; status: string;
 }
 export interface TenantProfile {
-  id: string; name: string; slug: string; plan: string; status: string;
+  id: string; name: string; slug: string; plan: string; status: string; roles?: string[];
 }
 export interface MeResponse {
   scope: string; user: UserProfile; tenant: TenantProfile;

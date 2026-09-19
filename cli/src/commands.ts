@@ -64,6 +64,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "admin": return adminCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
     case "kb": return knowledgeBaseCommand(args, api, json);
+    case "models": return modelsCommand(api, json);
     case "chat": return chatCommand(args, api, json);
     case "run": return runCommand(args, api, json);
     case "conversations": return conversationCommand(args, api, json);
@@ -131,6 +132,27 @@ async function authCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
   if (subcommand === "logout") {
     await api.logout();
     if (json) printJson({ logged_out: true }); else process.stdout.write("已退出并清除本地 token\n");
+    return 0;
+  }
+  if (subcommand === "tenants") {
+    const result = await api.listTenants();
+    if (json) printJson(result);
+    else printTable(
+      ["当前", "ID", "名称", "Slug"],
+      result.items.map((tenant) => [
+        tenant.id === result.active_tenant_id ? "✓" : "",
+        tenant.id,
+        tenant.name,
+        tenant.slug,
+      ]),
+    );
+    return 0;
+  }
+  if (subcommand === "switch") {
+    const tenantId = args.positionals[2];
+    if (!tenantId) throw new CliError("auth switch 需要 tenant-id", 2);
+    const identity = await api.switchTenant(tenantId);
+    if (json) printJson(identity); else printIdentity(identity);
     return 0;
   }
   throw new CliError(`未知 auth 子命令: ${subcommand}`, 2);
@@ -284,6 +306,21 @@ async function doctorCheck(
   }
 }
 
+async function modelsCommand(api: ApiClient, json: boolean): Promise<number> {
+  const catalog = await api.chatModels();
+  if (json) printJson(catalog);
+  else printTable(
+    ["默认", "模型", "名称", "深度思考"],
+    catalog.models.map((model) => [
+      model.id === catalog.default_model_id ? "✓" : "",
+      model.id,
+      model.name,
+      model.thinking_mode,
+    ]),
+  );
+  return 0;
+}
+
 async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   if (booleanOption(args, "interactive")) {
     if (json) throw new CliError("交互模式不能与 --json 同时使用", 2);
@@ -324,12 +361,17 @@ async function chatRequest(args: ParsedArgs, api: ApiClient): Promise<ChatReques
   const kbIds = input.kb_ids ?? (requestedKbs.length ? requestedKbs : api.config.chat.kb_ids);
   const title = input.title ?? stringOption(args, "title");
   const clientRequestId = input.client_request_id ?? stringOption(args, "request-id");
+  const modelId = input.model_id ?? stringOption(args, "model");
+  const thinkingEnabled = input.thinking_enabled ??
+    ("thinking" in args.options ? booleanOption(args, "thinking") : undefined);
   return {
     content,
     ...(conversationId ? { conversation_id: conversationId } : {}),
     kb_ids: kbIds,
     ...(title ? { title } : {}),
     ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
+    ...(modelId ? { model_id: modelId } : {}),
+    ...(thinkingEnabled !== undefined ? { thinking_enabled: thinkingEnabled } : {}),
   };
 }
 
@@ -352,6 +394,10 @@ async function interactiveChat(args: ParsedArgs, api: ApiClient): Promise<number
   let conversationId = stringOption(args, "conversation");
   if (!conversationId && booleanOption(args, "continue")) conversationId = await api.lastConversationId();
   let trace = traceOption(args, api.config.chat.trace);
+  const modelId = stringOption(args, "model");
+  const thinkingEnabled = "thinking" in args.options
+    ? booleanOption(args, "thinking")
+    : undefined;
   const service = new ChatService(api);
   const readline = createInterface({ input: process.stdin, output: process.stdout });
   process.stdout.write("DocuMind 真实环境交互模式。/help 查看命令，/quit 退出。\n");
@@ -394,6 +440,8 @@ async function interactiveChat(args: ParsedArgs, api: ApiClient): Promise<number
         content: line,
         ...(conversationId ? { conversation_id: conversationId } : {}),
         kb_ids: kbIds,
+        ...(modelId ? { model_id: modelId } : {}),
+        ...(thinkingEnabled !== undefined ? { thinking_enabled: thinkingEnabled } : {}),
       }, {
         onEvent: (event) => renderer.onEvent(event),
         onDelta: (text) => renderer.onDelta(text),

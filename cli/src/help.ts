@@ -39,6 +39,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  init                         创建 ~/.config/documind/config.toml\n` +
   `  config show|path             查看脱敏配置或配置路径\n` +
   `  auth login|whoami|logout     登录、身份检查、退出\n` +
+  `  auth tenants|switch <id>     列出并切换当前账号的企业空间\n` +
   `  health                       检查真实服务器健康状态\n` +
   `  doctor                       检查 API、认证、租户与 Elasticsearch\n` +
   `  external doctor|whoami       使用 DOCUMIND_API_TOKEN 检查外部 API\n` +
@@ -49,6 +50,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  admin <subcommand>           租户后台全量查看与管理\n` +
   `对话与评测\n` +
   `  chat|ask <问题>              真实 SSE 对话并合并落库 trace\n` +
+  `  models                       列出可选模型与深度思考能力\n` +
   `  chat --interactive           多轮交互 REPL\n` +
   `  run <scenario.json>          运行 JSON 多轮评测场景\n` +
   `  conversations list|create|show|messages|delete\n` +
@@ -90,6 +92,8 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --continue                   使用本地记录的上一次会话\n` +
   `  --kb, -k <id[,id]>           指定知识库，可重复\n` +
   `  --title <title>              新会话标题\n` +
+  `  --model <id>                 指定本次问答模型（省略时使用服务端 ENV 默认）\n` +
+  `  --thinking / --no-thinking   开启或关闭本次深度思考\n` +
   `  --trace, -t off|summary|full 人类输出的诊断详细度\n` +
   `  --events                     显示实时步骤（默认人类输出已显示）\n` +
   `  --json                       输出含 events/trace/citations 的完整 JSON\n` +

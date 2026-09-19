@@ -8,6 +8,7 @@ import {
   getStoredAuth,
   loginWithPassword,
   logoutRequest,
+  TENANT_SWITCH_STORAGE_KEY,
   register as registerAccount,
   type MeResponse,
 } from "@/lib/auth";
@@ -48,6 +49,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       mounted = false;
     };
   }, [refresh]);
+  useEffect(() => {
+    const reloadForTenantSwitch = (event: StorageEvent) => {
+      if (event.key === TENANT_SWITCH_STORAGE_KEY) window.location.reload();
+    };
+    window.addEventListener("storage", reloadForTenantSwitch);
+    return () => window.removeEventListener("storage", reloadForTenantSwitch);
+  }, []);
+
 
   const finishAuthentication = useCallback((data: MeResponse) => {
     setMe(data);

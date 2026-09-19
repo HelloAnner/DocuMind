@@ -14,12 +14,13 @@ import {
   X,
 } from "lucide-react";
 import { IconButton } from "./icon-button";
+import { useAuth } from "@/components/providers/auth-provider";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Conversation } from "@/lib/types";
 import { UserAccountMenu } from "./user-account-menu";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
-import { BrandMark } from "./brand-mark";
 import { ConfirmDialog } from "./confirm-dialog";
+import { TenantSwitcher } from "./tenant-switcher";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
 
@@ -49,23 +50,24 @@ function groupByDate(items: Conversation[]) {
   });
 }
 
-function useAliases() {
+function useAliases(tenantId: string | undefined) {
+  const storageKey = `${FAVORITES_KEY}:${tenantId ?? "none"}`;
   const [aliases, setAliases] = useState<Record<string, string>>({});
   useEffect(() => {
     try {
-      const raw = localStorage.getItem(FAVORITES_KEY);
-      if (raw) setAliases(JSON.parse(raw));
+      const raw = localStorage.getItem(storageKey);
+      setAliases(raw ? JSON.parse(raw) : {});
     } catch {
-      // ignore
+      setAliases({});
     }
-  }, []);
+  }, [storageKey]);
   const setAlias = (id: string, title: string | null) => {
     setAliases((prev) => {
       const next = { ...prev };
       if (title) next[id] = title;
       else delete next[id];
       try {
-        localStorage.setItem(FAVORITES_KEY, JSON.stringify(next));
+        localStorage.setItem(storageKey, JSON.stringify(next));
       } catch {
         // ignore
       }
@@ -78,6 +80,7 @@ function useAliases() {
 export function ChatSidebar() {
   const router = useRouter();
   const { collapsed, mobileOpen, closeMobile, toggleCollapsed } = useChatShell();
+  const { me } = useAuth();
   const {
     conversations,
     currentId,
@@ -90,7 +93,7 @@ export function ChatSidebar() {
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [menuId, setMenuId] = useState<string | null>(null);
-  const { aliases, setAlias } = useAliases();
+  const { aliases, setAlias } = useAliases(me?.tenant?.id);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
   const openMenuRef = useRef<HTMLDivElement | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -287,7 +290,7 @@ export function ChatSidebar() {
   return (
     <aside className={`dm-chat-sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="dm-chat-sidebar-header">
-        <BrandMark />
+        <TenantSwitcher collapsed={collapsed} />
         <div className="dm-chat-sidebar-header-actions">
           <IconButton
             aria-label={collapsed ? "展开会话导航" : "收起会话导航"}

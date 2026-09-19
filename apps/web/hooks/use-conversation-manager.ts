@@ -17,6 +17,7 @@ import {
   type KnowledgeBase,
 } from "@/lib/api";
 import { streamSse } from "@/lib/sse";
+import { getStoredAuth } from "@/lib/auth";
 import type {
   Citation,
   Conversation,
@@ -31,6 +32,7 @@ import type {
   SendMessageRequest,
 } from "@/lib/types";
 
+const FAVORITES_KEY = "documind:favorite-conversations";
 type MessageListUpdate = (messages: Message[]) => Message[];
 
 function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
@@ -69,6 +71,10 @@ function runtimeStepNumber(value: unknown) {
 
 export function useConversationManager() {
   const router = useRouter();
+  const favoriteStorageKey = useMemo(
+    () => `${FAVORITES_KEY}:${getStoredAuth()?.tenantId ?? "none"}`,
+    []
+  );
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -104,7 +110,7 @@ export function useConversationManager() {
     loadConversations();
     loadKnowledgeBases();
     try {
-      const raw = localStorage.getItem("documind:favorite-conversations");
+      const raw = localStorage.getItem(favoriteStorageKey);
       if (raw) {
         const ids = JSON.parse(raw) as string[];
         setFavorites(new Set(ids));
@@ -112,7 +118,7 @@ export function useConversationManager() {
     } catch {
       // ignore
     }
-  }, [loadConversations, loadKnowledgeBases]);
+  }, [favoriteStorageKey, loadConversations, loadKnowledgeBases]);
 
   useEffect(() => {
     if (!currentId) {
@@ -360,15 +366,23 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "thinking.delta") {
-              // Raw model reasoning is intentionally not rendered. The visible trace is
-              // assembled from real step, tool argument, result, and final-response events.
+              const delta = runtime.payload.delta;
+              if (typeof delta !== "string") continue;
+              const messageId = runtime.response_message_id;
+              queueMessageUpdate((prev) =>
+                prev.map((m) =>
+                  m.message_id === messageId || m.message_id === assistantTempId
+                    ? { ...m, thinking: (m.thinking ?? "") + delta }
+                    : m
+                )
+              );
               continue;
             }
 
             if (runtime.event_type === "response.replace") {
               const content = runtime.payload.content;
               if (typeof content === "string") {
-                updateAssistantInStream({ content });
+                updateAssistantInStream({ content, thinking: undefined });
               }
               continue;
             }
@@ -457,7 +471,7 @@ export function useConversationManager() {
               queueMessageUpdate((prev) =>
                 prev.map((m) =>
                   m.message_id === messageId || m.message_id === assistantTempId
-                    ? { ...m, content: m.content + delta }
+                    ? { ...m, content: m.content + delta, thinking: undefined }
                     : m
                 )
               );
@@ -493,6 +507,7 @@ export function useConversationManager() {
                 status: "completed",
                 confidence,
                 runtime_stage: undefined,
+                thinking: undefined,
               });
               continue;
             }
@@ -564,6 +579,7 @@ export function useConversationManager() {
               flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, {
                 status: "completed",
+                thinking: undefined,
                 duration_ms:
                   typeof runtime.payload.duration_ms === "number"
                     ? runtime.payload.duration_ms
@@ -588,6 +604,7 @@ export function useConversationManager() {
               updateMessage(runtime.response_message_id, {
                 status: "failed",
                 content: error?.message ?? "生成失败，请重试",
+                thinking: undefined,
               });
               continue;
             }
@@ -612,7 +629,7 @@ export function useConversationManager() {
             queueMessageUpdate((prev) =>
               prev.map((m) =>
                 m.message_id === data.message_id || m.message_id === assistantTempId
-                  ? { ...m, content: m.content + data.text }
+                  ? { ...m, content: m.content + data.text, thinking: undefined }
                   : m
               )
             );
@@ -634,6 +651,7 @@ export function useConversationManager() {
             updateMessage(data.message_id, {
               status: "completed",
               confidence: data.confidence,
+              thinking: undefined,
             });
             abortControllersRef.current.delete(data.message_id);
             setStreamingId((current) => (current === data.message_id ? null : current));
@@ -680,7 +698,10 @@ export function useConversationManager() {
   );
 
   const sendMessage = useCallback(
-    async (content: string) => {
+    async (
+      content: string,
+      runtime?: Pick<SendMessageRequest, "model_id" | "thinking_enabled">
+    ) => {
       if (requestActiveRef.current) return;
       requestActiveRef.current = true;
       try {
@@ -695,6 +716,7 @@ export function useConversationManager() {
           content,
           client_request_id: `req-${Date.now()}`,
           stream: true,
+          ...runtime,
         };
         const controller = new AbortController();
         await processStream(
@@ -800,13 +822,13 @@ export function useConversationManager() {
         next.add(conversationId);
       }
       try {
-        localStorage.setItem("documind:favorite-conversations", JSON.stringify(Array.from(next)));
+        localStorage.setItem(favoriteStorageKey, JSON.stringify(Array.from(next)));
       } catch {
         // ignore
       }
       return next;
     });
-  }, []);
+  }, [favoriteStorageKey]);
 
   const doDeleteConversation = useCallback(
     async (conversationId: string) => {
@@ -827,7 +849,7 @@ export function useConversationManager() {
           next.delete(conversationId);
           try {
             localStorage.setItem(
-              "documind:favorite-conversations",
+              favoriteStorageKey,
               JSON.stringify(Array.from(next))
             );
           } catch {
@@ -841,7 +863,7 @@ export function useConversationManager() {
         return false;
       }
     },
-    [currentId]
+    [currentId, favoriteStorageKey]
   );
 
   const doRenameConversation = useCallback(async (conversationId: string, title: string) => {

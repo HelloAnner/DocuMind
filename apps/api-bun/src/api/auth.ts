@@ -374,7 +374,7 @@ async function identityProfile(sql: Sql, userId: string): Promise<UserProfile> {
 
 async function identityTenants(sql: Sql, userId: string): Promise<TenantProfile[]> {
   const rows = await sql`
-    SELECT t.id, t.name, t.slug, t.plan, t.status
+    SELECT t.id, t.name, t.slug, t.plan, t.status, tm.roles
     FROM tenant_member tm
     JOIN tenant t ON t.id = tm.tenant_id
     WHERE tm.user_id = ${userId} AND tm.status = 'active' AND t.status = 'active'
@@ -383,7 +383,7 @@ async function identityTenants(sql: Sql, userId: string): Promise<TenantProfile[
   `;
   return rows.map((tenant) => ({
     id: String(tenant.id), name: String(tenant.name), slug: String(tenant.slug),
-    plan: String(tenant.plan), status: String(tenant.status),
+    plan: String(tenant.plan), status: String(tenant.status), roles: tenant.roles as string[],
   }));
 }
 
@@ -455,7 +455,7 @@ async function authTenantsHandler(c: import('hono').Context<AppEnv>) {
     state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
   return c.json({
-    tenants: await identityTenants(sql, claims.sub),
+    items: await identityTenants(sql, claims.sub),
     active_tenant_id: claims.tenant_id,
   });
 }

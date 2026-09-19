@@ -13,6 +13,7 @@ import type {
   ApiTokenSummary,
   CreatedApiClient,
   ExternalIdentity,
+  ChatModelCatalog,
   CliConfig,
   ConversationSummary,
   DeleteDocumentResponse,
@@ -33,6 +34,7 @@ import type {
   RetryDocumentsResponse,
   SendToOcrResponse,
   SessionState,
+  TenantProfile,
   UploadDocumentResponse,
   VectorIndexSummary,
 } from "./types.ts";
@@ -154,6 +156,28 @@ export class ApiClient {
     return response;
   }
 
+  async listTenants(): Promise<{ items: TenantProfile[]; active_tenant_id: string | null }> {
+    return this.requestJson("/api/v1/auth/tenants");
+  }
+
+  async switchTenant(tenantId: string): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>("/api/v1/auth/switch-tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenant_id: tenantId }),
+    });
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
   async logout(): Promise<void> {
     const current = await this.getSession();
     if (current.access_token) {
@@ -180,6 +204,10 @@ export class ApiClient {
 
   async health(): Promise<unknown> {
     return this.requestJson("/api/health", undefined, false, false);
+  }
+
+  async chatModels(): Promise<ChatModelCatalog> {
+    return this.requestJson("/api/chat/models");
   }
 
   async listKnowledgeBases(): Promise<KnowledgeBase[]> {
