@@ -375,12 +375,23 @@ export async function resumePendingDocumentJobs(state: AppState): Promise<number
 /** Rust: recover_interrupted_document_jobs */
 export async function recoverInterruptedDocumentJobs(sql: Sql): Promise<number> {
   return sql.begin(async (tx) => {
+    await tx.unsafe(
+      `UPDATE document_parse_jobs
+       SET status = 'failed',
+           worker_id = NULL,
+           heartbeat_at = NULL,
+           error_code = 'RUNTIME_INTERRUPTED_RETRY_EXHAUSTED',
+           error_message = '任务因服务反复中断，已达到最大重试次数',
+           completed_at = NOW(),
+           finished_at = NOW(),
+           updated_at = NOW()
+       WHERE status = 'running' AND attempt_count >= max_attempts`,
+    );
     const result = await tx.unsafe(
       `UPDATE document_parse_jobs
        SET status = CASE WHEN parser_config->>'job_kind' = 'ocr' THEN 'ocr_queued' ELSE 'pending' END,
            worker_id = NULL,
            heartbeat_at = NULL,
-           attempt_count = attempt_count + 1,
            available_at = NOW(),
            error_code = 'RUNTIME_INTERRUPTED',
            error_message = '任务因服务重启已自动重新排队',
@@ -388,20 +399,28 @@ export async function recoverInterruptedDocumentJobs(sql: Sql): Promise<number> 
            completed_at = NULL,
            finished_at = NULL,
            updated_at = NOW()
-       WHERE status = 'running'`,
+       WHERE status = 'running' AND attempt_count < max_attempts`,
     );
     await tx.unsafe(
       `UPDATE documents d
-       SET parse_status = CASE WHEN j.parser_config->>'job_kind' = 'ocr' THEN 'ocr_pending' ELSE 'uploaded' END,
+       SET parse_status = CASE
+             WHEN j.status = 'failed' AND j.parser_config->>'job_kind' = 'ocr' THEN 'parse_low_confidence'
+             WHEN j.status = 'failed' THEN 'parse_failed'
+             WHEN j.parser_config->>'job_kind' = 'ocr' THEN 'ocr_pending'
+             ELSE 'uploaded'
+           END,
            metadata = d.metadata || jsonb_build_object(
-               'parse_progress', 10,
+               'parse_progress', CASE WHEN j.status = 'failed' THEN 100 ELSE 10 END,
                'recovered_at', NOW(),
-               'recovery_message', '任务因服务重启已自动重新排队'
+               'recovery_message', j.error_message
            ),
            updated_at = NOW()
        FROM document_parse_jobs j
        WHERE j.doc_id = d.id
-         AND j.status IN ('pending', 'ocr_queued')
+         AND (
+           j.status IN ('pending', 'ocr_queued')
+           OR (j.status = 'failed' AND j.error_code = 'RUNTIME_INTERRUPTED_RETRY_EXHAUSTED')
+         )
          AND (d.latest_parse_job_id = j.parse_job_id OR d.metadata->>'active_ocr_job_id' = j.parse_job_id::text)`,
     );
     return result.count;

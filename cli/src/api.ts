@@ -97,7 +97,33 @@ export class ApiClient {
     });
   }
 
-  async login(force = false): Promise<Identity> {
+  async register(): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>(
+      "/api/v1/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          username: this.config.auth.username,
+          password: configuredPassword(this.config),
+        }),
+      },
+      false,
+      false,
+    );
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
+  async login(force = false, platform = false): Promise<Identity> {
     const previous = await this.getSession();
     if (!force) {
       if (previous.access_token) {
@@ -118,7 +144,9 @@ export class ApiClient {
         "/api/auth/login",
         {
           method: "POST",
-          body: JSON.stringify({ ...credentials, tenant_slug: this.config.auth.tenant }),
+          body: JSON.stringify(platform
+            ? credentials
+            : { ...credentials, tenant_slug: this.config.auth.tenant }),
         },
         false,
         false,

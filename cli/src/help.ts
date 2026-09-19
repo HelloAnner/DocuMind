@@ -42,7 +42,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `初始化与连接\n` +
   `  init                         创建 ~/.config/documind/config.toml\n` +
   `  config show|path             查看脱敏配置或配置路径\n` +
-  `  auth login|whoami|logout     登录、身份检查、退出\n` +
+  `  auth register|login [--platform]|whoami|logout  注册、登录、身份检查、退出\n` +
   `  auth profile                查看展示名称与头像\n` +
   `  auth profile-update [--name N] [--avatar-url URL|--clear-avatar]\n` +
   `  auth tenants|switch <id>     列出并切换当前账号的企业空间\n` +

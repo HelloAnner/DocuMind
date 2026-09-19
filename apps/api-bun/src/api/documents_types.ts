@@ -11,8 +11,8 @@ export const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 export const OFFICE_CONVERSION_TIMEOUT_SECONDS = 90;
 /** Rust: OCR_RENDER_DPI */
 export const OCR_RENDER_DPI = 220;
-/** Rust: PARSE_WORKER_CONCURRENCY */
-export const PARSE_WORKER_CONCURRENCY = 2;
+/** ponytail: PDF.js can exceed 300 MB per complex PDF; serialize parsing until it moves out of process. */
+export const PARSE_WORKER_CONCURRENCY = 1;
 
 // ---------------------------------------------------------------------------
 // Cloud-side response / request types

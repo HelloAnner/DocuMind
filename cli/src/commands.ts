@@ -121,8 +121,13 @@ async function configCommand(args: ParsedArgs, path: string): Promise<number> {
 
 async function authCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "whoami";
+  if (subcommand === "register") {
+    const identity = await api.register();
+    if (json) printJson(identity); else printIdentity(identity);
+    return 0;
+  }
   if (subcommand === "login") {
-    const identity = await api.login(true);
+    const identity = await api.login(true, booleanOption(args, "platform"));
     if (json) printJson(identity); else printIdentity(identity);
     return 0;
   }

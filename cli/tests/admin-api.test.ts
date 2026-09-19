@@ -117,6 +117,56 @@ describe("ApiClient admin management", () => {
       await rm(temporary, { recursive: true, force: true });
     }
   });
+
+  test("supports an explicit platform-scoped login", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-platform-"));
+    const bodies: Array<Record<string, unknown>> = [];
+    const fetcher = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return jsonResponse(identity());
+    }) as typeof fetch;
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+      auth: { ...DEFAULT_CONFIG.auth, password: "secret", tenant: "acme" },
+    };
+
+    try {
+      await new ApiClient(config, join(temporary, "config.toml"), fetcher).login(true, true);
+      expect(bodies).toEqual([
+        { username: config.auth.username, password: "secret" },
+      ]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+
+  test("registers configured credentials and persists the identity session", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-register-"));
+    const requests: Array<{ path: string; body: unknown }> = [];
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      requests.push({ path: url.pathname, body: JSON.parse(String(init?.body)) });
+      return jsonResponse(identity());
+    }) as typeof fetch;
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+      auth: { ...DEFAULT_CONFIG.auth, username: "moss", password: "complex-secret" },
+    };
+    try {
+      const registered = await new ApiClient(
+        config, join(temporary, "config.toml"), fetcher,
+      ).register();
+      expect(registered.user.email).toBe("admin@example.com");
+      expect(requests).toEqual([{
+        path: "/api/v1/auth/register",
+        body: { username: "moss", password: "complex-secret" },
+      }]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
 });
 
 function createFetcher(requests: CapturedRequest[]): typeof fetch {

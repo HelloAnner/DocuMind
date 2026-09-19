@@ -19,6 +19,7 @@ const BOOLEAN_OPTIONS = new Set([
   "interactive",
   "json",
   "ndjson",
+  "platform",
   "quiet",
   "raw",
   "stream",
