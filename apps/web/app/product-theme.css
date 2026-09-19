@@ -6717,6 +6717,16 @@ body > .hiddenCanvasElement {
   }
 }
 
+@media (max-width: 767px) {
+  .dm-product-admin-shell .dm-admin-sidebar-drawer {
+    visibility: hidden;
+  }
+
+  .dm-product-admin-shell .dm-admin-sidebar-drawer.open {
+    visibility: visible;
+  }
+}
+
 @media (max-width: 640px) {
   .dm-product-admin-shell .dm-topbar {
     padding-right: 16px;
