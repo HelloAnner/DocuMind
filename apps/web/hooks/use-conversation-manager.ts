@@ -372,7 +372,9 @@ export function useConversationManager() {
               queueMessageUpdate((prev) =>
                 prev.map((m) =>
                   m.message_id === messageId || m.message_id === assistantTempId
-                    ? { ...m, thinking: (m.thinking ?? "") + delta }
+                    ? m.content
+                      ? m
+                      : { ...m, thinking: (m.thinking ?? "") + delta }
                     : m
                 )
               );
