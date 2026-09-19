@@ -32,6 +32,14 @@ async function updateProfileHandler(c: import('hono').Context<AppEnv>) {
   if (avatarUrl !== null && [...avatarUrl].length > 2048) {
     throw AppError.badRequest('PROFILE_AVATAR_URL_INVALID', '头像地址不能超过 2048 个字符');
   }
+  if (avatarUrl !== null) {
+    try {
+      const protocol = new URL(avatarUrl).protocol;
+      if (protocol !== 'http:' && protocol !== 'https:') throw new Error();
+    } catch {
+      throw AppError.badRequest('PROFILE_AVATAR_URL_INVALID', '头像地址必须是 HTTP 或 HTTPS 地址');
+    }
+  }
   const sql = state.sql;
   if (!sql) throw AppError.badRequest('DB_REQUIRED', '个人资料功能需要数据库');
   await sql`

@@ -131,6 +131,28 @@ async function authCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
     if (json) printJson(identity); else printIdentity(identity);
     return 0;
   }
+  if (subcommand === "profile") {
+    const identity = await api.me();
+    if (json) printJson(identity);
+    else {
+      process.stdout.write(`展示名称 ${identity.user.name || identity.user.email}\n`);
+      process.stdout.write(`头像 ${identity.user.avatar_url || "未设置"}\n`);
+    }
+    return 0;
+  }
+  if (subcommand === "profile-update") {
+    const current = await api.me();
+    const avatarUrl = stringOption(args, "avatar-url");
+    if (avatarUrl !== undefined && booleanOption(args, "clear-avatar")) {
+      throw new CliError("--avatar-url 与 --clear-avatar 不能同时使用", 2);
+    }
+    const identity = await api.updateProfile(
+      stringOption(args, "name") ?? current.user.name ?? current.user.email,
+      booleanOption(args, "clear-avatar") ? null : avatarUrl ?? current.user.avatar_url ?? null,
+    );
+    if (json) printJson(identity); else printIdentity(identity);
+    return 0;
+  }
   if (subcommand === "logout") {
     await api.logout();
     if (json) printJson({ logged_out: true }); else process.stdout.write("已退出并清除本地 token\n");

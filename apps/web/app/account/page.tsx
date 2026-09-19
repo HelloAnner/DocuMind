@@ -20,6 +20,7 @@ export default function AccountPage() {
   const { me, loading, refresh } = useAuth();
   const [name, setName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [tenants, setTenants] = useState<AccountTenant[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -38,6 +39,8 @@ export default function AccountPage() {
     setAvatarUrl(me.user.avatar_url || "");
     listAccountTenants().then(setTenants).catch(() => setTenants([]));
   }, [loading, me, router]);
+
+  useEffect(() => setAvatarFailed(false), [avatarUrl]);
 
   if (loading || !me) return <main className={styles.page}>加载中…</main>;
 
@@ -85,6 +88,17 @@ export default function AccountPage() {
           <section className={styles.card}>
             <h2>个人资料</h2>
             <p>用户 ID 用于登录，展示名称用于页面显示。</p>
+            <div className={styles.profilePreview}>
+              <span className={styles.avatar}>
+                {avatarUrl && !avatarFailed
+                  ? <img alt="" onError={() => setAvatarFailed(true)} src={avatarUrl} />
+                  : (name || me.user.login_id).trim().slice(0, 1).toUpperCase()}
+              </span>
+              <span>
+                <strong>{name.trim() || me.user.login_id}</strong>
+                <small>头像会显示在账号菜单和对话中</small>
+              </span>
+            </div>
             <label className={styles.field}>
               <span>展示名称</span>
               <input maxLength={128} onChange={(event) => setName(event.target.value)} value={name} />
@@ -101,7 +115,7 @@ export default function AccountPage() {
             ) : null}
             <label className={styles.field}>
               <span>头像地址（可选）</span>
-              <input onChange={(event) => setAvatarUrl(event.target.value)} placeholder="https://…" value={avatarUrl} />
+              <input maxLength={2048} onChange={(event) => setAvatarUrl(event.target.value)} placeholder="https://…" type="url" value={avatarUrl} />
             </label>
             <div className={styles.actions}>
               <button className={styles.primary} disabled={busy || !name.trim()} onClick={save} type="button">

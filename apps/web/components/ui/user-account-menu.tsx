@@ -10,6 +10,7 @@ import styles from "./user-account-menu.module.css";
 export function UserAccountMenu() {
   const { me, logout } = useAuth();
   const [open, setOpen] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const roles = me?.roles ?? [];
   const isSuperAdmin = me?.scope === "platform" && isSuperAdminRole(roles);
@@ -23,6 +24,8 @@ export function UserAccountMenu() {
     document.addEventListener("mousedown", close);
     return () => document.removeEventListener("mousedown", close);
   }, []);
+
+  useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
 
   if (!me) return null;
   const initials = (me.user.name || me.user.login_id).trim().slice(0, 1).toUpperCase();
@@ -56,7 +59,9 @@ export function UserAccountMenu() {
         type="button"
       >
         <span className={`${styles.avatar} dm-user-menu-avatar`}>
-          {me.user.avatar_url ? <img alt="" src={me.user.avatar_url} /> : initials}
+          {me.user.avatar_url && !avatarFailed
+            ? <img alt="" onError={() => setAvatarFailed(true)} src={me.user.avatar_url} />
+            : initials}
         </span>
         <span className={`${styles.identity} dm-user-menu-identity`}>
           <strong>{me.user.name || me.user.login_id}</strong>

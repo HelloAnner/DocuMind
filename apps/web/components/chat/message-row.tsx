@@ -182,6 +182,7 @@ export function MessageRow({
 }: MessageRowProps) {
   const { me } = useAuth();
   const [copied, setCopied] = useState(false);
+  const [avatarFailed, setAvatarFailed] = useState(false);
   const [feedbackRating, setFeedbackRating] = useState<Rating | null>(
     message.feedback?.rating ?? null
   );
@@ -203,6 +204,8 @@ export function MessageRow({
     setDownPanelOpen(false);
     setFeedbackError("");
   }, [message.feedback?.comment, message.feedback?.rating, message.message_id]);
+
+  useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
 
   const saveFeedback = async (
     rating: Rating,
@@ -253,7 +256,9 @@ export function MessageRow({
     return (
       <article className="dm-question-row">
         <span className="dm-user-message-avatar" aria-hidden="true">
-          {me?.user.avatar_url ? <img alt="" src={me.user.avatar_url} /> : initials}
+          {me?.user.avatar_url && !avatarFailed
+            ? <img alt="" onError={() => setAvatarFailed(true)} src={me.user.avatar_url} />
+            : initials}
         </span>
         <div className="dm-user-message-stack">
           <div className="dm-user-message-meta">

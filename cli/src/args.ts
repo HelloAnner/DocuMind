@@ -10,6 +10,7 @@ export interface ParsedArgs {
 const BOOLEAN_OPTIONS = new Set([
   "accessible",
   "continue",
+  "clear-avatar",
   "events",
   "force",
   "full",

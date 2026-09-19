@@ -230,6 +230,15 @@ export class ApiClient {
     return identity;
   }
 
+  async updateProfile(name: string, avatarUrl: string | null): Promise<Identity> {
+    const identity = await this.requestJson<Identity>("/api/account/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ name, avatar_url: avatarUrl }),
+    });
+    await this.updateSession(identity);
+    return identity;
+  }
+
   async health(): Promise<unknown> {
     return this.requestJson("/api/health", undefined, false, false);
   }
