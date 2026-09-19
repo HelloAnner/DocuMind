@@ -3,13 +3,15 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowDownUp,
   Bookmark,
-  ChevronDown,
-  Headphones,
+  Compass,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
   Pencil,
+  Plus,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
@@ -17,20 +19,17 @@ import { IconButton } from "./icon-button";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Conversation } from "@/lib/types";
-import { UserAccountMenu } from "./user-account-menu";
+import { AppWindow, UserAccountMenu } from "./user-account-menu";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { ConfirmDialog } from "./confirm-dialog";
 import { TenantSwitcher } from "./tenant-switcher";
+import { BrandMark } from "./brand-mark";
 
 const FAVORITES_KEY = "documind:conversation-aliases";
 
 function formatGroupLabel(date: string) {
-  const d = new Date(date);
-  const today = new Date().toDateString();
-  const yesterday = new Date(Date.now() - 86400000).toDateString();
-  if (d.toDateString() === today) return "今天";
-  if (d.toDateString() === yesterday) return "昨天";
-  return "更早";
+  const age = Date.now() - new Date(date).getTime();
+  return age <= 7 * 86400000 ? "近 7 天" : "更早";
 }
 
 function groupByDate(items: Conversation[]) {
@@ -39,15 +38,8 @@ function groupByDate(items: Conversation[]) {
     const label = formatGroupLabel(item.updated_at);
     groups.set(label, [...(groups.get(label) || []), item]);
   }
-  const order = ["今天", "昨天", "更早"];
-  return Array.from(groups.entries()).sort(([a], [b]) => {
-    const ai = order.indexOf(a);
-    const bi = order.indexOf(b);
-    if (ai !== -1 && bi !== -1) return ai - bi;
-    if (ai !== -1) return -1;
-    if (bi !== -1) return 1;
-    return a.localeCompare(b);
-  });
+  const order = ["近 7 天", "更早"];
+  return Array.from(groups.entries()).sort(([a], [b]) => order.indexOf(a) - order.indexOf(b));
 }
 
 function useAliases(tenantId: string | undefined) {
@@ -92,6 +84,10 @@ export function ChatSidebar() {
   } = useConversation();
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [oldestFirst, setOldestFirst] = useState(false);
+  const [exploreOpen, setExploreOpen] = useState(false);
   const [menuId, setMenuId] = useState<string | null>(null);
   const { aliases, setAlias } = useAliases(me?.tenant?.id);
   const renameInputRef = useRef<HTMLInputElement | null>(null);
@@ -101,7 +97,19 @@ export function ChatSidebar() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
-  const filtered = useMemo(() => conversations, [conversations]);
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLocaleLowerCase();
+    return conversations
+      .filter((conversation) =>
+        !needle || `${aliases[conversation.conversation_id] || conversation.title} ${conversation.last_message_preview || ""}`
+          .toLocaleLowerCase()
+          .includes(needle)
+      )
+      .sort((left, right) => {
+        const difference = new Date(left.updated_at).getTime() - new Date(right.updated_at).getTime();
+        return oldestFirst ? difference : -difference;
+      });
+  }, [aliases, conversations, oldestFirst, query]);
 
   const favorites = useMemo(
     () => filtered.filter((c) => isFavorite(c.conversation_id)),
@@ -290,57 +298,100 @@ export function ChatSidebar() {
   return (
     <aside className={`dm-chat-sidebar ${collapsed ? "collapsed" : ""} ${mobileOpen ? "mobile-open" : ""}`}>
       <div className="dm-chat-sidebar-header">
-        <TenantSwitcher collapsed={collapsed} />
+        <BrandMark />
         <div className="dm-chat-sidebar-header-actions">
           <IconButton
             aria-label={collapsed ? "展开会话导航" : "收起会话导航"}
             className="dm-chat-sidebar-collapse"
             onClick={toggleCollapsed}
           >
-            {collapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
+            {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           </IconButton>
           <IconButton aria-label="关闭会话导航" className="dm-chat-sidebar-mobile-close" onClick={closeMobile}>
-            <X size={17} />
+            <X size={18} />
           </IconButton>
         </div>
       </div>
 
+      <div className="dm-chat-workspace-switcher">
+        <TenantSwitcher collapsed={collapsed} />
+      </div>
+
       <div className="dm-chat-primary-actions">
         <button type="button" className="dm-new-session-button" onClick={handleCreate}>
-          <Headphones size={18} />
-          <span>新会话</span>
+          <Plus size={19} />
+          <span>新任务</span>
         </button>
       </div>
+
+      <div className="dm-chat-history-toolbar">
+        <span>对话</span>
+        <div>
+          <button
+            aria-label={oldestFirst ? "按最新对话排序" : "按最早对话排序"}
+            className={oldestFirst ? "active" : ""}
+            onClick={() => setOldestFirst((value) => !value)}
+            title={oldestFirst ? "当前：最早优先" : "当前：最新优先"}
+            type="button"
+          >
+            <ArrowDownUp size={16} />
+          </button>
+          <button
+            aria-label="搜索对话"
+            className={searchOpen ? "active" : ""}
+            onClick={() => {
+              setSearchOpen((value) => !value);
+              if (searchOpen) setQuery("");
+            }}
+            type="button"
+          >
+            <Search size={17} />
+          </button>
+        </div>
+      </div>
+
+      {searchOpen ? (
+        <label className="dm-chat-history-search">
+          <Search aria-hidden="true" size={15} />
+          <input
+            aria-label="搜索对话"
+            autoFocus
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="搜索对话"
+            value={query}
+          />
+        </label>
+      ) : null}
 
       <div className="dm-chat-history">
         {favorites.length > 0 && (
           <div className="dm-history-group">
-            <div className="dm-history-group-title">
-              <span>收藏</span>
-              <ChevronDown size={14} />
-            </div>
+            <div className="dm-history-group-title">收藏</div>
             {favorites.map(renderItem)}
           </div>
         )}
 
         {filtered.length === 0 && (
-          <div className="dm-history-empty">暂无会话</div>
+          <div className="dm-history-empty">{query ? "没有匹配的对话" : "暂无对话"}</div>
         )}
 
         {dateGroups.map(([label, items]) => (
           <div className="dm-history-group" key={label}>
-            <div className="dm-history-group-title">
-              <span>{label}</span>
-              <ChevronDown size={14} />
-            </div>
+            <div className="dm-history-group-title">{label}</div>
             {items.map(renderItem)}
           </div>
         ))}
       </div>
 
-      <div style={{ marginTop: "auto" }}>
+      <div className="dm-chat-sidebar-footer">
+        <button className="dm-chat-explore" onClick={() => setExploreOpen(true)} type="button">
+          <Compass size={18} />
+          <span>探索</span>
+        </button>
         <UserAccountMenu />
       </div>
+
+      {exploreOpen ? <AppWindow href="/help" onClose={() => setExploreOpen(false)} title="探索" /> : null}
 
       <ConfirmDialog
         cancelText="取消"

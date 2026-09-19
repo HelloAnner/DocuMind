@@ -1,6 +1,6 @@
 "use client";
 
-import { Building2, Check, ChevronDown, LoaderCircle, Search } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle, Search, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { switchAccountTenant, type Tenant } from "@/lib/auth";
@@ -48,7 +48,17 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     requestAnimationFrame(() => searchRef.current?.focus());
   }, [open]);
 
-  if (!me || me.scope === "platform" || !activeTenant) return null;
+  if (!me) return null;
+  if (me.scope === "platform" || !activeTenant) {
+    return (
+      <div className={`${styles.root} ${collapsed ? styles.collapsed : ""}`}>
+        <button className={styles.trigger} disabled title="平台空间" type="button">
+          <span className={styles.mark}><Sparkles aria-hidden="true" size={17} /></span>
+          <span className={styles.current}><strong>平台空间</strong></span>
+        </button>
+      </div>
+    );
+  }
 
   const choose = async (tenant: Tenant) => {
     if (tenant.id === activeId) {
@@ -91,9 +101,8 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
         title={activeTenant.name}
         type="button"
       >
-        <span className={styles.mark}><Building2 aria-hidden="true" size={16} /></span>
+        <span className={styles.mark}><Sparkles aria-hidden="true" size={17} /></span>
         <span className={styles.current}>
-          <small>当前企业空间</small>
           <strong>{activeTenant.name}</strong>
         </span>
         {pendingId ? <LoaderCircle className={styles.spin} size={16} /> : <ChevronDown className={open ? styles.chevronOpen : ""} size={16} />}

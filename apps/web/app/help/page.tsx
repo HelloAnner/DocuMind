@@ -1,6 +1,6 @@
 "use client";
 
-import { BookOpen, Files, LifeBuoy, MessageCircle, UserRound } from "lucide-react";
+import { BookOpen, Compass, Files, MessageCircle, UserRound } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -26,10 +26,10 @@ export default function HelpPage() {
     <main style={{ background: "var(--bg-primary)", minHeight: "100vh", padding: "48px clamp(24px, 5vw, 72px)" }}>
       <header style={{ marginBottom: 32, maxWidth: 760 }}>
         <div style={{ alignItems: "center", color: "var(--text-muted)", display: "flex", fontSize: 13, gap: 10, marginBottom: 12 }}>
-          <LifeBuoy size={17} /> 帮助中心
+          <Compass size={17} /> 探索
         </div>
-        <h1 style={{ color: "var(--text-primary)", fontSize: 28, fontWeight: 650, letterSpacing: -0.6, margin: 0 }}>使用 DocuMind</h1>
-        <p style={{ color: "var(--text-muted)", fontSize: 14, lineHeight: 1.7, margin: "10px 0 0" }}>常用功能入口与使用方式。</p>
+        <h1 style={{ color: "var(--text-primary)", fontSize: 28, fontWeight: 650, letterSpacing: -0.6, margin: 0 }}>探索 DocuMind</h1>
+        <p style={{ color: "var(--text-muted)", fontSize: 14, lineHeight: 1.7, margin: "10px 0 0" }}>从使用文档开始，了解常用功能和提问方式。</p>
       </header>
       <section style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", maxWidth: 920 }}>
         {ITEMS.map(({ icon: Icon, title, text }) => (

@@ -5,24 +5,23 @@
 
 .trigger {
   align-items: center;
-  background: color-mix(in srgb, var(--bg-tertiary) 72%, transparent);
-  border: 1px solid var(--border-subtle);
-  border-radius: 12px;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
   color: var(--text-primary);
   cursor: pointer;
   display: flex;
   gap: 10px;
-  min-height: 54px;
+  min-height: 48px;
   padding: 8px 10px;
   text-align: left;
-  transition: background 160ms ease, border-color 160ms ease;
+  transition: background 160ms ease;
   width: 100%;
 }
 
 .trigger:hover,
 .trigger:focus-visible {
   background: var(--hover-bg);
-  border-color: color-mix(in srgb, var(--text-muted) 36%, var(--border-subtle));
   outline: none;
 }
 
@@ -38,6 +37,13 @@
   height: 32px;
   justify-content: center;
   width: 32px;
+}
+
+.mark {
+  background: transparent;
+  border: 0;
+  height: 28px;
+  width: 28px;
 }
 
 .current,
@@ -57,8 +63,8 @@
 
 .current strong,
 .optionCopy strong {
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   line-height: 1.45;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -67,6 +73,11 @@
 
 .chevronOpen {
   transform: rotate(180deg);
+}
+
+.trigger:disabled {
+  cursor: default;
+  opacity: 1;
 }
 
 .popover {
