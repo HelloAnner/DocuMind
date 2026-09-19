@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import "streamdown/styles.css";
 import "./globals.css";
 import "./product-theme.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
