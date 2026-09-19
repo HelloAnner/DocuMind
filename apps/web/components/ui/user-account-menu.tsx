@@ -101,12 +101,6 @@ export function UserAccountMenu() {
               {isSuperAdmin ? "管理后台" : "企业控制台"}
             </button>
           ) : null}
-          {isTenantAdmin ? (
-            <button onClick={() => openWindow("/admin/skills", "技能管理")} type="button">
-              <Sparkles size={16} />
-              技能管理
-            </button>
-          ) : null}
           
           <button onClick={toggleTheme} type="button">
             {isDark ? <Sun size={16} /> : <Moon size={16} />}
