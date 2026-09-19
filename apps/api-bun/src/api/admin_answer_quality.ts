@@ -460,7 +460,11 @@ async function insertVersion(
 async function correctionDetail(sql: Sql, tenantId: string, correctionId: string): Promise<Record<string, unknown>> {
   const rows = await sql`
     SELECT correction.*, version.version AS latest_version, version.canonical_question,
-           version.answer_markdown, version.change_note
+           version.answer_markdown, version.change_note,
+           (SELECT COUNT(*)::int
+              FROM conversation_messages message
+             WHERE message.correction_id = correction.id
+               AND message.answer_source = 'manual_correction') AS hit_count
     FROM answer_corrections correction
     LEFT JOIN answer_correction_versions version
       ON version.id = COALESCE(correction.draft_version_id, correction.published_version_id)
