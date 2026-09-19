@@ -39,6 +39,7 @@ export function ReasoningTrace({
   const rounds = useMemo(() => buildReasoningRounds(steps ?? [], toolCalls ?? []), [steps, toolCalls]);
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
   const hasThinking = Boolean(thinking?.trim());
+  const showThinking = hasThinking && (steps?.length ?? 0) === 0;
 
   useEffect(() => {
     if (isStreaming) {
@@ -67,7 +68,7 @@ export function ReasoningTrace({
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
   }, [expanded, rounds, thinking]);
 
-  if (rounds.length === 0 && !hasThinking && !isStreaming) return null;
+  if (rounds.length === 0 && !showThinking && !isStreaming) return null;
 
   function toggle() {
     if (isStreaming) return;
@@ -115,7 +116,7 @@ export function ReasoningTrace({
           }}
           ref={feedRef}
         >
-          {hasThinking ? (
+          {showThinking ? (
             <ThoughtGroup
               hasFollowing={rounds.length > 0}
               isStreaming={isStreaming}
