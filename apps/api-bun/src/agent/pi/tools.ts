@@ -140,8 +140,14 @@ export function mergeCoveredReranks(
 ): RerankedChunk[] {
   const merged: RerankedChunk[] = [];
   const seen = new Set<string>();
+  const coveredDocs = new Set<string>();
   const covered = [0, 1].flatMap((rank) => perQuery.flatMap((items) => items.slice(rank, rank + 1)));
-  for (const item of [...covered, ...global]) {
+  for (const item of covered) coveredDocs.add(item.chunk.doc_id);
+  const uncoveredDocs = [...new Set(global.map((item) => item.chunk.doc_id))]
+    .filter((docId) => !coveredDocs.has(docId));
+  const heads = uncoveredDocs.map((docId) => global.find((item) => item.chunk.doc_id === docId))
+    .filter((item): item is RerankedChunk => item !== undefined);
+  for (const item of [...covered, ...heads, ...global]) {
     if (seen.has(item.chunk.chunk_id)) continue;
     seen.add(item.chunk.chunk_id);
     merged.push({ ...item, rank: merged.length + 1 });

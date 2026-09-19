@@ -4,7 +4,7 @@ import { mergeCoveredReranks } from './tools.ts';
 
 function result(chunkId: string, score: number): RerankedChunk {
   return {
-    chunk: { chunk_id: chunkId } as RerankedChunk['chunk'],
+    chunk: { chunk_id: chunkId, doc_id: `${chunkId}-doc` } as RerankedChunk['chunk'],
     score,
     rank: 1,
   };
@@ -21,4 +21,20 @@ test('keeps one result for every generated query before global rerank results', 
     'security', 'ai-risk', 'tables', 'other',
   ]);
   expect(merged.map((item) => item.rank)).toEqual([1, 2, 3, 4]);
+});
+
+test('adds the top result for documents that per-query rerank missed', () => {
+  const nist = result('nist-one', 0.4);
+  nist.chunk.doc_id = 'nist-doc';
+  const ai = result('ai-one', 0.3);
+  ai.chunk.doc_id = 'ai-doc';
+  const merged = mergeCoveredReranks(
+    [[result('table-one', 0.9)], [result('table-two', 0.8)]],
+    [nist, ai],
+    3,
+  );
+
+  expect(merged.map((item) => item.chunk.chunk_id)).toEqual([
+    'table-one', 'table-two', 'nist-one',
+  ]);
 });
