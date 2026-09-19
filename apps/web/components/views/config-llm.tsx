@@ -28,40 +28,49 @@ export function ConfigLlm() {
         </Badge>
       </Topbar>
 
-      <div className="dm-admin-content">
+      <div className="dm-admin-content dm-settings-page">
         <div className="dm-config-content">
-          <p>当前大模型配置来自服务器环境变量，密钥只显示配置状态。</p>
+          <p className="dm-config-intro">当前大模型配置来自服务器环境变量，密钥只显示配置状态。</p>
           {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
           {!config && !error ? <div className="dm-empty-state">加载 LLM 配置中...</div> : null}
 
-          <div className="dm-provider-grid">
-            {providers.map((provider) => (
-              <button
-                key={provider}
-                className={`dm-provider-card ${llm?.provider === provider ? "active" : ""}`}
-                disabled
-                type="button"
-              >
-                <strong>{provider}</strong>
-                <small>{llm?.provider === provider ? llm.model : "未启用"}</small>
-              </button>
-            ))}
-          </div>
+          <section className="dm-config-section">
+            <div>
+              <div className="dm-config-section-title">服务商</div>
+              <p className="dm-config-section-description">当前仅展示运行中的服务商与模型，切换配置需重新部署。</p>
+            </div>
+            <div className="dm-provider-grid">
+              {providers.map((provider) => (
+                <button
+                  key={provider}
+                  className={`dm-provider-card ${llm?.provider === provider ? "active" : ""}`}
+                  disabled
+                  type="button"
+                >
+                  <strong>{provider}</strong>
+                  <small>{llm?.provider === provider ? llm.model : "未启用"}</small>
+                </button>
+              ))}
+            </div>
+          </section>
 
-          <div className="dm-config-stack">
-            <ReadonlyField label="API 地址" value={llm?.base_url ?? ""} code copyable />
-            <ReadonlyField
-              label="API Key"
-              value={llm?.api_key_configured ? "已配置" : "未配置"}
-            />
-            <ReadonlyField label="模型名称" value={llm?.model ?? ""} />
-            <ReadonlyField
-              label="查询改写模型"
-              value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"}
-            />
-          </div>
+          <section className="dm-config-section">
+            <div className="dm-config-section-title">连接配置</div>
+            <div className="dm-config-stack">
+              <ReadonlyField label="API 地址" value={llm?.base_url ?? ""} code copyable />
+              <ReadonlyField
+                label="API Key"
+                value={llm?.api_key_configured ? "已配置" : "未配置"}
+              />
+              <ReadonlyField label="模型名称" value={llm?.model ?? ""} />
+              <ReadonlyField
+                label="查询改写模型"
+                value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"}
+              />
+            </div>
+          </section>
 
-          <div className="dm-config-section">
+          <section className="dm-config-section">
             <div className="dm-config-section-title">高级参数</div>
             <div className="dm-range-field">
               <div>
@@ -71,7 +80,7 @@ export function ConfigLlm() {
               <input disabled max={100} min={0} type="range" value={Math.round((llm?.temperature ?? 0) * 100)} />
             </div>
             <ReadonlyField label="最大输出 tokens" value={llm?.max_output_tokens ?? ""} />
-          </div>
+          </section>
         </div>
       </div>
     </>

@@ -6312,3 +6312,444 @@ body > .hiddenCanvasElement {
     width: 100%;
   }
 }
+
+/* Configuration workspace */
+.dm-product-admin-shell .dm-topbar {
+  padding-right: 64px;
+}
+
+.dm-settings-page {
+  align-items: flex-start;
+  display: flex;
+  justify-content: center;
+  padding: 28px 32px 48px;
+}
+
+.dm-settings-layout,
+.dm-settings-page .dm-config-content {
+  max-width: 960px;
+  width: 100%;
+}
+
+.dm-settings-layout {
+  align-content: start;
+  display: grid;
+  gap: 18px;
+}
+
+.dm-settings-panel {
+  border-radius: 14px;
+  overflow-x: auto;
+  padding: 20px 22px;
+}
+
+.dm-settings-panel .dm-panel-head {
+  margin-bottom: 16px;
+}
+
+.dm-settings-panel .dm-panel-title {
+  color: var(--text-primary);
+  font-size: 15px;
+}
+
+.dm-settings-tabs {
+  align-items: center;
+  align-self: start;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 11px;
+  gap: 3px;
+  height: auto;
+  padding: 3px;
+  width: fit-content;
+}
+
+.dm-settings-tabs button {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  height: 34px;
+  padding: 0 14px;
+}
+
+.dm-settings-tabs button.active {
+  background: var(--surface-panel);
+  border-color: var(--border-subtle);
+  box-shadow: var(--card-shadow);
+}
+
+.dm-config-content {
+  gap: 16px;
+  margin: 0 auto;
+}
+
+.dm-config-intro {
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  color: var(--text-secondary) !important;
+  padding: 13px 16px;
+}
+
+.dm-config-content .dm-config-section {
+  background: var(--surface-panel);
+  border: 1px solid var(--border-subtle);
+  border-radius: 14px;
+  box-shadow: var(--card-shadow);
+  gap: 14px;
+  padding: 20px;
+}
+
+.dm-config-content .dm-config-section-title {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.dm-config-section-description {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 4px 0 0;
+}
+
+.dm-config-content .dm-config-stack {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-config-content .dm-readonly-field {
+  align-items: flex-start;
+  background: var(--surface-subdued);
+  flex-direction: column;
+  gap: 5px;
+  justify-content: center;
+  min-height: 66px;
+  padding: 10px 14px;
+}
+
+.dm-config-content .dm-readonly-field-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.dm-config-content .dm-readonly-field-value {
+  justify-content: space-between;
+  overflow: hidden;
+  width: 100%;
+}
+
+.dm-config-content .dm-readonly-field-value code {
+  max-width: calc(100% - 34px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-config-content .dm-config-card,
+.dm-config-content .dm-model-card,
+.dm-config-content .dm-provider-card,
+.dm-config-content .dm-range-field,
+.dm-config-content .dm-check-row {
+  background: var(--surface-subdued);
+  border-color: var(--border-subtle);
+  border-radius: 11px;
+}
+
+.dm-config-content .dm-config-card,
+.dm-config-content .dm-provider-card {
+  min-height: 72px;
+  padding: 14px 16px;
+}
+
+.dm-config-content .dm-config-card.selected,
+.dm-config-content .dm-model-card.selected,
+.dm-config-content .dm-provider-card.active {
+  background: var(--surface-panel);
+  border-color: var(--border-strong);
+  border-width: 1px;
+  box-shadow: inset 3px 0 0 var(--text-primary);
+}
+
+.dm-config-content .dm-provider-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-config-content .dm-option-strip {
+  background: var(--surface-subdued);
+  border-radius: 11px;
+  padding: 4px;
+}
+
+.dm-config-content .dm-option-strip button {
+  height: 38px;
+}
+
+.dm-config-content .dm-option-strip button.selected {
+  background: var(--surface-panel);
+  box-shadow: var(--card-shadow);
+}
+
+.dm-config-checks {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dm-config-content .dm-check-row {
+  min-height: 46px;
+}
+
+.dm-settings-page .dm-form-field {
+  gap: 7px;
+}
+
+.dm-settings-page .dm-form-field > span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.dm-settings-page .dm-form-field input,
+.dm-settings-page .dm-form-field select {
+  border-radius: 10px;
+  height: 42px;
+}
+
+.dm-settings-page .dm-permission-form {
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-bottom: 16px;
+}
+
+.dm-settings-page .dm-permission-form .dm-button {
+  justify-self: start;
+}
+
+.dm-mcp-endpoint-row {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.dm-mcp-endpoint-row code,
+.dm-mcp-secret {
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-primary);
+  display: block;
+  flex: 1;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  padding: 11px 13px;
+}
+
+.dm-mcp-secret-panel {
+  border-color: color-mix(in srgb, var(--color-warning) 30%, var(--border-subtle));
+}
+
+.dm-mcp-secret {
+  margin: 14px 0 10px;
+}
+
+.dm-mcp-token-actions,
+.dm-mcp-client-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dm-mcp-token-actions {
+  margin-bottom: 10px;
+}
+
+.dm-mcp-create-form {
+  display: grid;
+  gap: 18px;
+}
+
+.dm-mcp-form-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dm-mcp-choice-section {
+  border: 0;
+  border-top: 1px solid var(--border-faint);
+  margin: 0;
+  min-width: 0;
+  padding: 18px 0 0;
+}
+
+.dm-mcp-choice-section legend {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 10px 0 0;
+}
+
+.dm-mcp-choice-grid {
+  display: grid;
+  gap: 9px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 4px;
+}
+
+.dm-mcp-choice {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  gap: 9px;
+  min-height: 44px;
+  min-width: 0;
+  padding: 8px 11px;
+}
+
+.dm-mcp-choice:hover {
+  background: var(--hover-bg);
+  border-color: var(--border-strong);
+}
+
+.dm-mcp-choice input {
+  accent-color: var(--text-primary);
+  flex: 0 0 auto;
+  height: 16px;
+  width: 16px;
+}
+
+.dm-mcp-choice span {
+  min-width: 0;
+}
+
+.dm-mcp-choice code {
+  color: var(--text-muted);
+  font-size: 10px;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-mcp-create-actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.dm-settings-empty {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px dashed var(--border-subtle);
+  border-radius: 11px;
+  color: var(--text-muted);
+  display: flex;
+  justify-content: center;
+  min-height: 104px;
+}
+
+.dm-mcp-client-list {
+  display: grid;
+  gap: 12px;
+}
+
+.dm-mcp-client {
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 11px;
+  padding: 14px;
+}
+
+.dm-mcp-client-head {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+}
+
+.dm-mcp-client-title {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+}
+
+.dm-mcp-client p,
+.dm-mcp-token-row span {
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 5px 0;
+}
+
+.dm-mcp-client > code,
+.dm-mcp-client-head code {
+  color: var(--text-tertiary);
+  font-size: 11px;
+}
+
+.dm-mcp-token-row {
+  align-items: center;
+  border-top: 1px solid var(--border-faint);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(100px, 0.5fr) minmax(0, 1fr) auto;
+  margin-top: 12px;
+  padding-top: 12px;
+}
+
+@media (max-width: 900px) {
+  .dm-settings-page {
+    padding: 22px;
+  }
+
+  .dm-config-content .dm-config-cards,
+  .dm-config-checks {
+    grid-template-columns: 1fr;
+  }
+
+  .dm-settings-page .dm-permission-form {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 640px) {
+  .dm-product-admin-shell .dm-topbar {
+    padding-right: 16px;
+  }
+
+  .dm-settings-page {
+    padding: 16px;
+  }
+
+  .dm-settings-panel,
+  .dm-config-content .dm-config-section {
+    padding: 16px;
+  }
+
+  .dm-config-content .dm-config-stack,
+  .dm-config-content .dm-provider-grid,
+  .dm-mcp-form-grid,
+  .dm-mcp-choice-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dm-mcp-endpoint-row,
+  .dm-mcp-client-head {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dm-mcp-endpoint-row .dm-button,
+  .dm-mcp-create-actions .dm-button {
+    width: 100%;
+  }
+
+  .dm-mcp-token-row {
+    grid-template-columns: 1fr;
+  }
+}

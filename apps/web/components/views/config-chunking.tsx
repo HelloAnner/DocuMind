@@ -49,40 +49,52 @@ export function ConfigChunking() {
         <Badge tone="neutral">只读配置</Badge>
       </Topbar>
 
-      <div className="dm-admin-content">
+      <div className="dm-admin-content dm-settings-page">
         <div className="dm-config-content">
-          <p>当前运行参数来自服务器环境变量，配置变更需走部署流程。</p>
+          <p className="dm-config-intro">当前运行参数来自服务器环境变量，配置变更需走部署流程。</p>
           {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
           {!config && !error ? <div className="dm-empty-state">加载切割配置中...</div> : null}
 
-          <div className="dm-config-cards">
-            {strategyCards.map((strategy) => (
-              <button
-                key={strategy.id}
-                className={`dm-config-card ${chunking?.strategy === strategy.id ? "selected" : ""}`}
-                disabled
-                type="button"
-              >
-                <strong>{strategy.name}</strong>
-                <p>{strategy.desc}</p>
-              </button>
-            ))}
-          </div>
+          <section className="dm-config-section">
+            <div>
+              <div className="dm-config-section-title">切分方式</div>
+              <p className="dm-config-section-description">当前策略决定文档如何按结构边界拆分为可检索片段。</p>
+            </div>
+            <div className="dm-config-cards">
+              {strategyCards.map((strategy) => (
+                <button
+                  key={strategy.id}
+                  className={`dm-config-card ${chunking?.strategy === strategy.id ? "selected" : ""}`}
+                  disabled
+                  type="button"
+                >
+                  <strong>{strategy.name}</strong>
+                  <p>{strategy.desc}</p>
+                </button>
+              ))}
+            </div>
+          </section>
 
-          <div className="dm-config-stack">
-            {parameters.map((param) => (
-              <ReadonlyField key={param.label} label={param.label} value={`${param.value} ${param.suffix}`} />
-            ))}
-          </div>
+          <section className="dm-config-section">
+            <div className="dm-config-section-title">切片参数</div>
+            <div className="dm-config-stack">
+              {parameters.map((param) => (
+                <ReadonlyField key={param.label} label={param.label} value={`${param.value} ${param.suffix}`} />
+              ))}
+            </div>
+          </section>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {checks.map((item) => (
-              <label className="dm-check-row" key={item.label}>
-                <input checked={item.checked} disabled readOnly type="checkbox" />
-                {item.label}
-              </label>
-            ))}
-          </div>
+          <section className="dm-config-section">
+            <div className="dm-config-section-title">结构保留</div>
+            <div className="dm-config-checks">
+              {checks.map((item) => (
+                <label className="dm-check-row" key={item.label}>
+                  <input checked={item.checked} disabled readOnly type="checkbox" />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+          </section>
         </div>
       </div>
     </>

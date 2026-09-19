@@ -27,37 +27,45 @@ export function ConfigEmbedding() {
         </Badge>
       </Topbar>
 
-      <div className="dm-admin-content">
+      <div className="dm-admin-content dm-settings-page">
         <div className="dm-config-content">
-          <p>当前模型与索引配置来自服务器环境变量，模型变更需重建索引。</p>
+          <p className="dm-config-intro">当前模型与索引配置来自服务器环境变量，模型变更需重建索引。</p>
           {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
           {!config && !error ? <div className="dm-empty-state">加载向量化配置中...</div> : null}
 
-          <div className="dm-model-list">
-            {embedding ? (
-              <button
-                className="dm-model-card selected"
-                disabled
-                type="button"
-              >
-                <span className="dm-model-radio checked">
-                  <Check size={11} strokeWidth={3} />
-                </span>
-                <span>
-                  <strong>{embedding.model}</strong>
-                  <small>{embedding.base_url}</small>
-                </span>
-                <em>{embedding.api_key_configured ? "API key 已配置" : "API key 未配置"}</em>
-              </button>
-            ) : null}
-          </div>
+          <section className="dm-config-section">
+            <div>
+              <div className="dm-config-section-title">当前模型</div>
+              <p className="dm-config-section-description">用于将文档切片和查询转换为统一向量空间。</p>
+            </div>
+            <div className="dm-model-list">
+              {embedding ? (
+                <button
+                  className="dm-model-card selected"
+                  disabled
+                  type="button"
+                >
+                  <span className="dm-model-radio checked">
+                    <Check size={11} strokeWidth={3} />
+                  </span>
+                  <span>
+                    <strong>{embedding.model}</strong>
+                    <small>{embedding.base_url}</small>
+                  </span>
+                  <em>{embedding.api_key_configured ? "API key 已配置" : "API key 未配置"}</em>
+                </button>
+              ) : null}
+            </div>
+          </section>
 
-          <div className="dm-config-section">
+          <section className="dm-config-section">
             <div className="dm-config-section-title">运行参数</div>
-            <ReadonlyField label="批处理大小" value={String(embedding?.batch_size ?? "")} />
-            <ReadonlyField label="索引名称" value={embedding?.index_name ?? ""} code />
-            <ReadonlyField label="查询别名" value={embedding?.index_alias ?? ""} code />
-          </div>
+            <div className="dm-config-stack">
+              <ReadonlyField label="批处理大小" value={String(embedding?.batch_size ?? "")} />
+              <ReadonlyField label="索引名称" value={embedding?.index_name ?? ""} code />
+              <ReadonlyField label="查询别名" value={embedding?.index_alias ?? ""} code />
+            </div>
+          </section>
         </div>
       </div>
     </>

@@ -25,7 +25,6 @@ export function ConfigSearch() {
         { label: "BM25 Top-K", value: search.bm25_top_k, suffix: "个" },
         { label: "RRF Top-K", value: search.rrf_top_k, suffix: "个" },
         { label: "最终上下文 Top-K", value: search.effective_top_k, suffix: "个" },
-        { label: "精排阈值", value: search.rerank_min_score, suffix: "分" },
       ]
     : [];
 
@@ -37,19 +36,25 @@ export function ConfigSearch() {
         </Badge>
       </Topbar>
 
-      <div className="dm-admin-content">
+      <div className="dm-admin-content dm-settings-page">
         <div className="dm-config-content">
-          <p>当前检索参数来自服务器环境变量，修改需通过部署生效。</p>
+          <p className="dm-config-intro">当前检索参数来自服务器环境变量，修改需通过部署生效。</p>
           {error ? <p className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</p> : null}
           {!config && !error ? <div className="dm-empty-state">加载检索配置中...</div> : null}
 
-          <div className="dm-config-stack">
-            {fields.map((field) => (
-              <ReadonlyField key={field.label} label={field.label} value={`${field.value} ${field.suffix}`} />
-            ))}
-          </div>
+          <section className="dm-config-section">
+            <div>
+              <div className="dm-config-section-title">召回范围</div>
+              <p className="dm-config-section-description">控制各检索阶段保留的候选数量，以及最终进入上下文的片段数。</p>
+            </div>
+            <div className="dm-config-stack">
+              {fields.map((field) => (
+                <ReadonlyField key={field.label} label={field.label} value={`${field.value} ${field.suffix}`} />
+              ))}
+            </div>
+          </section>
 
-          <div className="dm-config-section">
+          <section className="dm-config-section">
             <div className="dm-config-section-title">检索策略</div>
             <div className="dm-option-strip">
               {strategies.map((s) => (
@@ -63,15 +68,15 @@ export function ConfigSearch() {
                 </button>
               ))}
             </div>
-          </div>
+          </section>
 
-          <div className="dm-config-section">
+          <section className="dm-config-section">
             <div className="dm-config-section-title">重排序模型</div>
             <ReadonlyField
               label={search?.rerank_model ?? "—"}
               value={search?.rerank_api_configured ? "HTTP 服务" : "词法回退"}
             />
-          </div>
+          </section>
         </div>
       </div>
     </>

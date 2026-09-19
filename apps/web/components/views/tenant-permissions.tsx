@@ -171,134 +171,139 @@ export function TenantPermissions() {
 
   return (
     <>
-      <Topbar title="权限策略" />
+      <Topbar
+        title="访问权限"
+        subtitle="按知识库为角色或成员授予读取、写入与管理权限"
+      />
 
-      <div className="dm-admin-content">
-        <div className="dm-tabs" style={{ marginBottom: 16 }}>
-          <button
-            className={activeTab === "auth" ? "active" : ""}
-            onClick={() => setActiveTab("auth")}
-            type="button"
-          >
-            知识库授权
-          </button>
-          <button
-            className={activeTab === "matrix" ? "active" : ""}
-            onClick={() => setActiveTab("matrix")}
-            type="button"
-          >
-            角色矩阵
-          </button>
-        </div>
+      <div className="dm-admin-content dm-settings-page">
+        <div className="dm-settings-layout">
+          <div className="dm-tabs dm-settings-tabs">
+            <button
+              className={activeTab === "auth" ? "active" : ""}
+              onClick={() => setActiveTab("auth")}
+              type="button"
+            >
+              知识库授权
+            </button>
+            <button
+              className={activeTab === "matrix" ? "active" : ""}
+              onClick={() => setActiveTab("matrix")}
+              type="button"
+            >
+              角色矩阵
+            </button>
+          </div>
 
-        {activeTab === "auth" && (
-          <Panel title="知识库授权">
-            <div className="dm-permission-form">
-              <label className="dm-form-field">
-                <span>知识库</span>
-                <select
-                  value={form.kbId}
-                  onChange={(event) => setForm((prev) => ({ ...prev, kbId: event.target.value }))}
-                >
-                  {knowledgeBases.map((kb) => (
-                    <option key={kb.id} value={kb.id}>
-                      {kb.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="dm-form-field">
-                <span>对象类型</span>
-                <select
-                  value={form.subjectType}
-                  onChange={(event) => updateSubjectType(event.target.value as PermissionSubjectType)}
-                >
-                  <option value="role">角色</option>
-                  <option value="user">用户</option>
-                </select>
-              </label>
-              <label className="dm-form-field">
-                <span>授权对象</span>
-                <select
-                  value={form.subjectId}
-                  onChange={(event) => setForm((prev) => ({ ...prev, subjectId: event.target.value }))}
-                >
-                  {subjectOptions.map((subject) => (
-                    <option key={subject.value} value={subject.value}>
-                      {subject.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="dm-form-field">
-                <span>权限</span>
-                <select
-                  value={form.permission}
-                  onChange={(event) =>
-                    setForm((prev) => ({ ...prev, permission: event.target.value as KnowledgeBasePermission }))
-                  }
-                >
-                  <option value="read">读取</option>
-                  <option value="write">写入</option>
-                  <option value="manage">管理</option>
-                </select>
-              </label>
-              <Button icon={<ShieldPlus size={14} />} onClick={() => grant().catch(console.error)} disabled={saving || loading}>
-                授权
-              </Button>
-            </div>
-            {error ? <div className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</div> : null}
-            <div className="dm-table-head dm-permission-row">
-              <span>知识库</span>
-              <span>授权对象</span>
-              <span>权限</span>
-              <span>操作</span>
-            </div>
-            {loading ? <div className="dm-empty-state">加载授权记录中...</div> : null}
-            {authorizations.map((a) => (
-              <div className="dm-permission-row" key={a.id}>
-                <span>{a.kb_name}</span>
-                <span>{a.subject_type}:{a.subject_label}</span>
-                <span>
-                  <Badge tone={a.permission === "manage" ? "warning" : a.permission === "write" ? "info" : "neutral"}>
-                    {permissionLabels[a.permission]}
-                  </Badge>
-                </span>
-                <div className="dm-row-actions">
-                  <Button
-                    variant="ghost"
-                    icon={<Trash2 size={13} />}
-                    onClick={() => revoke(a.id).catch(console.error)}
-                    disabled={saving}
-                    style={{ height: 28, padding: "0 8px", color: "var(--color-error)" }}
+          {activeTab === "auth" && (
+            <Panel className="dm-settings-panel" title="新增授权">
+              <div className="dm-permission-form">
+                <label className="dm-form-field">
+                  <span>知识库</span>
+                  <select
+                    value={form.kbId}
+                    onChange={(event) => setForm((prev) => ({ ...prev, kbId: event.target.value }))}
                   >
-                    撤销
-                  </Button>
-                </div>
+                    {knowledgeBases.map((kb) => (
+                      <option key={kb.id} value={kb.id}>
+                        {kb.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dm-form-field">
+                  <span>对象类型</span>
+                  <select
+                    value={form.subjectType}
+                    onChange={(event) => updateSubjectType(event.target.value as PermissionSubjectType)}
+                  >
+                    <option value="role">角色</option>
+                    <option value="user">用户</option>
+                  </select>
+                </label>
+                <label className="dm-form-field">
+                  <span>授权对象</span>
+                  <select
+                    value={form.subjectId}
+                    onChange={(event) => setForm((prev) => ({ ...prev, subjectId: event.target.value }))}
+                  >
+                    {subjectOptions.map((subject) => (
+                      <option key={subject.value} value={subject.value}>
+                        {subject.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="dm-form-field">
+                  <span>权限</span>
+                  <select
+                    value={form.permission}
+                    onChange={(event) =>
+                      setForm((prev) => ({ ...prev, permission: event.target.value as KnowledgeBasePermission }))
+                    }
+                  >
+                    <option value="read">读取</option>
+                    <option value="write">写入</option>
+                    <option value="manage">管理</option>
+                  </select>
+                </label>
+                <Button icon={<ShieldPlus size={14} />} onClick={() => grant().catch(console.error)} disabled={saving || loading}>
+                  授权
+                </Button>
               </div>
-            ))}
-            {!loading && authorizations.length === 0 ? <div className="dm-empty-state">暂无知识库授权记录</div> : null}
-          </Panel>
-        )}
-
-        {activeTab === "matrix" && (
-          <Panel title="角色矩阵">
-            <div className="dm-table-head dm-matrix-row">
-              <span>权限</span>
-              {penRoles.map((r) => (
-                <span key={r}>{r}</span>
+              {error ? <div className="dm-form-note" style={{ color: "var(--color-error)" }}>{error}</div> : null}
+              <div className="dm-table-head dm-permission-row">
+                <span>知识库</span>
+                <span>授权对象</span>
+                <span>权限</span>
+                <span>操作</span>
+              </div>
+              {loading ? <div className="dm-empty-state">加载授权记录中...</div> : null}
+              {authorizations.map((a) => (
+                <div className="dm-permission-row" key={a.id}>
+                  <span>{a.kb_name}</span>
+                  <span>{a.subject_type}:{a.subject_label}</span>
+                  <span>
+                    <Badge tone={a.permission === "manage" ? "warning" : a.permission === "write" ? "info" : "neutral"}>
+                      {permissionLabels[a.permission]}
+                    </Badge>
+                  </span>
+                  <div className="dm-row-actions">
+                    <Button
+                      variant="ghost"
+                      icon={<Trash2 size={13} />}
+                      onClick={() => revoke(a.id).catch(console.error)}
+                      disabled={saving}
+                      style={{ height: 28, padding: "0 8px", color: "var(--color-error)" }}
+                    >
+                      撤销
+                    </Button>
+                  </div>
+                </div>
               ))}
-            </div>
-            {penPermissions.map((perm) => (
-              <div className="dm-matrix-row" key={perm}>
-                <span>{perm}</span>
-                {matrix[perm]?.map((allowed, idx) => (
-                  <span key={idx}>{allowed ? "✓" : "✗"}</span>
+              {!loading && authorizations.length === 0 ? <div className="dm-empty-state">暂无知识库授权记录</div> : null}
+            </Panel>
+          )}
+
+          {activeTab === "matrix" && (
+            <Panel className="dm-settings-panel" title="角色矩阵">
+              <div className="dm-table-head dm-matrix-row">
+                <span>权限</span>
+                {penRoles.map((r) => (
+                  <span key={r}>{r}</span>
                 ))}
               </div>
-            ))}
-          </Panel>
-        )}
+              {penPermissions.map((perm) => (
+                <div className="dm-matrix-row" key={perm}>
+                  <span>{perm}</span>
+                  {matrix[perm]?.map((allowed, idx) => (
+                    <span key={idx}>{allowed ? "✓" : "✗"}</span>
+                  ))}
+                </div>
+              ))}
+            </Panel>
+          )}
+        </div>
       </div>
     </>
   );

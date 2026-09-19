@@ -475,7 +475,6 @@ export interface AdminRuntimeConfig {
     rerank_enabled: boolean;
     rerank_model: string;
     rerank_api_configured: boolean;
-    rerank_min_score: number;
   };
   llm: {
     provider: string;
