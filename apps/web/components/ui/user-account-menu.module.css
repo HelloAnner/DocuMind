@@ -66,61 +66,199 @@
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
-  bottom: calc(100% + 8px);
-  box-shadow: var(--overlay-shadow);
-  padding: 14px;
+  bottom: 24px;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.18);
+  height: min(760px, calc(100vh - 48px));
+  left: calc(var(--dm-chat-sidebar-width) + 24px);
+  overflow: hidden;
+  position: fixed;
+  width: 520px;
+  z-index: 110;
+}
+
+.updateTabs {
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  height: 64px;
+}
+
+.updateTabs > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  gap: 8px;
+  justify-content: center;
+  position: relative;
+}
+
+.updateTabs > button:hover {
+  background: var(--hover-bg);
+}
+
+.updateTabs > .updateTabActive::after {
+  background: var(--text-primary);
+  bottom: -1px;
+  content: "";
+  height: 3px;
+  left: 0;
   position: absolute;
   right: 0;
-  width: 300px;
-  z-index: 60;
 }
 
-.updates header {
-  border-bottom: 1px solid var(--border-subtle);
+.whatsNew {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  font-family: "Snell Roundhand", "Segoe Script", cursive;
+  font-size: 24px;
+  font-style: italic;
+  justify-content: center;
+  letter-spacing: -0.04em;
+}
+
+.updateFilters {
+  align-items: center;
+  display: flex;
+  height: 68px;
+  justify-content: space-between;
+  padding: 0 22px;
+}
+
+.updateFilters > div {
+  display: flex;
+  gap: 6px;
+}
+
+.updateFilters button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 14px;
+  height: 36px;
+  justify-content: center;
+  padding: 0 14px;
+}
+
+.updateFilters button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.updateFilters .filterActive {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.updateList {
+  height: calc(100% - 132px);
+  overflow-y: auto;
+  padding: 12px 30px 28px;
+}
+
+.updateItem {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  padding: 14px 0 27px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.updateItem:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.updateMeta {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.updateMeta > span {
+  align-items: center;
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
+  border-radius: 6px;
+  color: #9b7bea;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 4px;
+  padding: 4px 7px;
+}
+
+.updateMeta time {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.updateItem > strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.updateItem > p {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.65;
+  margin: 3px 0 0;
+}
+
+.updateItem > i {
+  background: #8b5cf6;
+  border-radius: 50%;
+  height: 6px;
+  position: absolute;
+  right: -14px;
+  top: 52px;
+  width: 6px;
+}
+
+.updateEmpty {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 0;
+  padding: 72px 0;
+  text-align: center;
+}
+
+.updateEmptyState {
+  align-items: center;
+  color: var(--text-muted);
   display: flex;
   flex-direction: column;
-  padding: 2px 2px 12px;
+  gap: 8px;
+  justify-content: center;
+  min-height: 320px;
 }
 
-.updates header strong {
+.updateEmptyState strong {
   color: var(--text-primary);
   font-size: 14px;
 }
 
-.updates header span,
-.updates time {
-  color: var(--text-muted);
-  font-size: 11px;
-  margin-top: 3px;
-}
-
-.updates article {
-  display: grid;
-  gap: 10px;
-  grid-template-columns: 7px minmax(0, 1fr);
-  padding: 13px 2px 0;
-}
-
-.updates article strong {
-  color: var(--text-primary);
-  display: block;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.updates article p {
-  color: var(--text-muted);
+.updateEmptyState span {
   font-size: 12px;
-  line-height: 1.55;
-  margin: 4px 0 0;
-}
-
-.updateDot {
-  background: var(--text-primary);
-  border-radius: 50%;
-  height: 6px;
-  margin-top: 6px;
-  width: 6px;
 }
 
 .avatar {
@@ -311,6 +449,13 @@
 }
 
 @media (max-width: 720px) {
+  .updates {
+    bottom: 10px;
+    height: calc(100vh - 20px);
+    left: 10px;
+    width: calc(100vw - 20px);
+  }
+
   .windowOverlay {
     padding: 10px;
   }
