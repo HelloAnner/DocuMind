@@ -8,9 +8,12 @@ import {
   Bookmark,
   Brain,
   BookOpen,
+  Check,
+  ChevronUp,
   Folder,
   Menu,
   MessageSquareText,
+  Search,
   Square,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -33,6 +36,126 @@ const suggestions = [
   "员工报销需要哪些材料？",
   "华东区 Q3 销售目标是多少？",
 ];
+
+function thinkingLabel(mode: ChatModelOption["thinking_mode"]) {
+  if (mode === "always_on") return "始终深度思考";
+  if (mode === "switchable") return "快速 / 深度思考";
+  return "快速模式";
+}
+
+function ModelPicker({
+  models,
+  value,
+  disabled,
+  onChange,
+}: {
+  models: ChatModelOption[];
+  value: string;
+  disabled: boolean;
+  onChange: (model: ChatModelOption) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [previewId, setPreviewId] = useState(value);
+  const selected = models.find((model) => model.id === value);
+  const preview = models.find((model) => model.id === previewId) ?? selected;
+  const needle = query.trim().toLowerCase();
+  const filtered = needle
+    ? models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(needle))
+    : models;
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="chat-model-picker" ref={rootRef}>
+      <button
+        type="button"
+        className="chat-model-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={disabled || models.length === 0}
+        onClick={() => {
+          setPreviewId(value);
+          setQuery("");
+          setOpen((current) => !current);
+        }}
+      >
+        <span>{selected?.name ?? "选择模型"}</span>
+        <ChevronUp size={14} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="chat-model-menu" role="dialog" aria-label="选择对话模型">
+          <div className="chat-model-list-panel">
+            <label className="chat-model-search">
+              <Search size={15} aria-hidden="true" />
+              <span className="sr-only">搜索模型</span>
+              <input
+                autoFocus
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="搜索模型"
+              />
+            </label>
+            <div className="chat-model-section-label">可用模型</div>
+            <div className="chat-model-options" role="listbox">
+              {filtered.map((model) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={model.id === value}
+                  className={`chat-model-option${model.id === value ? " selected" : ""}`}
+                  key={model.id}
+                  onMouseEnter={() => setPreviewId(model.id)}
+                  onFocus={() => setPreviewId(model.id)}
+                  onClick={() => {
+                    onChange(model);
+                    setOpen(false);
+                  }}
+                >
+                  <span>
+                    <strong>{model.name}</strong>
+                    <small>{thinkingLabel(model.thinking_mode)}</small>
+                  </span>
+                  {model.id === value ? <Check size={17} aria-hidden="true" /> : null}
+                </button>
+              ))}
+              {filtered.length === 0 ? <p className="chat-model-empty">没有匹配的模型</p> : null}
+            </div>
+          </div>
+          {preview ? (
+            <aside className="chat-model-detail">
+              <div className="chat-model-detail-title">
+                <strong>{preview.name}</strong>
+                <span>{preview.thinking_mode === "always_on" ? "深度" : preview.thinking_mode === "switchable" ? "灵活" : "快速"}</span>
+              </div>
+              <p>{preview.id}</p>
+              <div className="chat-model-capability">
+                <span>思考能力</span>
+                <strong>{thinkingLabel(preview.thinking_mode)}</strong>
+              </div>
+              <code>{preview.id}</code>
+            </aside>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function timeGreeting() {
   const hour = new Date().getHours();
@@ -307,22 +430,15 @@ export function ChatWorkspace() {
                   </span>
                   {chatModels.length > 0 ? (
                     <>
-                      <select
-                        className="dm-model-select"
-                        aria-label="选择对话模型"
-                        disabled={!!streamingId}
+                      <ModelPicker
+                        models={chatModels}
                         value={selectedModel}
-                        onChange={(event) => {
-                          const id = event.target.value;
-                          const model = chatModels.find((item) => item.id === id);
-                          setSelectedModel(id);
-                          setThinkingEnabled(model?.thinking_default ?? false);
+                        disabled={!!streamingId}
+                        onChange={(model) => {
+                          setSelectedModel(model.id);
+                          setThinkingEnabled(model.thinking_default);
                         }}
-                      >
-                        {chatModels.map((model) => (
-                          <option key={model.id} value={model.id}>{model.name}</option>
-                        ))}
-                      </select>
+                      />
                       <label
                         className={`dm-thinking-toggle ${thinkingEnabled ? "active" : ""}`}
                         title="开启后实时显示灰色思考文字，正文开始时自动消失"

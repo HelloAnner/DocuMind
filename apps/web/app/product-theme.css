@@ -1890,7 +1890,6 @@ select:focus-visible {
   text-overflow: ellipsis;
 }
 
-.dm-model-select,
 .dm-thinking-toggle {
   align-items: center;
   background: transparent;
@@ -1902,10 +1901,203 @@ select:focus-visible {
   height: 30px;
 }
 
-.dm-model-select {
+.chat-model-picker {
+  position: relative;
+}
+
+.chat-model-trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-secondary);
   cursor: pointer;
-  max-width: 168px;
-  padding: 0 22px 0 7px;
+  display: inline-flex;
+  font: inherit;
+  font-size: 12px;
+  gap: 5px;
+  height: 30px;
+  max-width: 188px;
+  padding: 0 7px;
+}
+
+.chat-model-trigger:hover,
+.chat-model-trigger[aria-expanded="true"] {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.chat-model-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.chat-model-trigger span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-model-menu {
+  align-items: flex-end;
+  bottom: calc(100% + 12px);
+  display: flex;
+  gap: 10px;
+  left: 0;
+  position: absolute;
+  z-index: 80;
+}
+
+.chat-model-list-panel,
+.chat-model-detail {
+  background: var(--surface-raised);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--overlay-shadow);
+}
+
+.chat-model-list-panel {
+  border-radius: 16px;
+  padding: 12px;
+  width: 390px;
+}
+
+.chat-model-search {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 9px;
+  color: var(--text-muted);
+  display: flex;
+  gap: 8px;
+  height: 44px;
+  padding: 0 12px;
+}
+
+.chat-model-search:focus-within {
+  border-color: var(--border-strong);
+}
+
+.chat-model-search input {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  flex: 1;
+  font: inherit;
+  font-size: 14px;
+  min-width: 0;
+  outline: 0;
+}
+
+.chat-model-section-label {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 14px 10px 7px;
+}
+
+.chat-model-options {
+  max-height: 286px;
+  overflow-y: auto;
+}
+
+.chat-model-option {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  min-height: 52px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.chat-model-option:hover,
+.chat-model-option:focus-visible,
+.chat-model-option.selected {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+  outline: 0;
+}
+
+.chat-model-option strong,
+.chat-model-option small {
+  display: block;
+}
+
+.chat-model-option strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.chat-model-option small {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.chat-model-empty {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 20px 0;
+  text-align: center;
+}
+
+.chat-model-detail {
+  border-radius: 16px;
+  color: var(--text-secondary);
+  padding: 20px;
+  width: 350px;
+}
+
+.chat-model-detail-title,
+.chat-model-capability {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.chat-model-detail-title strong {
+  color: var(--text-primary);
+  font-size: 18px;
+}
+
+.chat-model-detail-title span {
+  background: var(--hover-bg);
+  border-radius: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 3px 6px;
+}
+
+.chat-model-detail > p {
+  color: var(--text-muted);
+  font-size: 13px;
+  margin: 8px 0 22px;
+}
+
+.chat-model-capability {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.chat-model-capability span {
+  color: var(--text-muted);
+}
+
+.chat-model-detail code {
+  background: var(--surface-subdued);
+  border-radius: 8px;
+  color: var(--text-muted);
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  overflow: hidden;
+  padding: 11px 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dm-thinking-toggle {
@@ -5843,5 +6035,15 @@ body > .hiddenCanvasElement {
   .dm-settings-save-state,
   .dm-settings-actions > div {
     justify-content: space-between;
+  }
+}
+
+@media (max-width: 860px) {
+  .chat-model-list-panel {
+    width: min(390px, calc(100vw - 52px));
+  }
+
+  .chat-model-detail {
+    display: none;
   }
 }
