@@ -2,6 +2,7 @@
 
 import { ChevronUp, LogOut, Settings, UserRound, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
 import styles from "./user-account-menu.module.css";
@@ -86,8 +87,10 @@ function AppWindow({ href, title, onClose }: { href: string; title: string; onCl
   const basePath = typeof window !== "undefined" && window.location.pathname.startsWith("/documind")
     ? "/documind"
     : "";
+  if (typeof document === "undefined") return null;
 
-  return (
+
+  return createPortal(
     <div className={styles.windowOverlay}>
       <button aria-label={`关闭${title}`} className={styles.windowBackdrop} onClick={onClose} type="button" />
       <section aria-label={title} aria-modal="true" className={styles.appWindow} role="dialog">
@@ -104,6 +107,7 @@ function AppWindow({ href, title, onClose }: { href: string; title: string; onCl
           <X size={18} />
         </button>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
