@@ -139,7 +139,7 @@ function AppWindow({ href, title, onClose }: { href: string; title: string; onCl
           className={styles.windowFrame}
           onLoad={(event) => {
             const doc = event.currentTarget.contentDocument;
-            doc?.querySelector("aside")?.remove();
+            doc?.querySelector(".dm-admin-sidebar-drawer")?.remove();
           }}
           src={`${basePath}${href}`}
           title={title}
