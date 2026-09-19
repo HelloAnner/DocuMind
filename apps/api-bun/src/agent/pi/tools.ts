@@ -140,7 +140,7 @@ export function mergeCoveredReranks(
 ): RerankedChunk[] {
   const merged: RerankedChunk[] = [];
   const seen = new Set<string>();
-  const covered = perQuery.flatMap((items) => items.slice(0, 1));
+  const covered = [0, 1].flatMap((rank) => perQuery.flatMap((items) => items.slice(rank, rank + 1)));
   for (const item of [...covered, ...global]) {
     if (seen.has(item.chunk.chunk_id)) continue;
     seen.add(item.chunk.chunk_id);
@@ -278,10 +278,10 @@ async function runKnowledgeSearch(
     ...queries.map((query) => context.reranker.rerank({
       query: query,
       chunks: retrieved,
-      top_k: 1,
+      top_k: 2,
     })),
   ]);
-  const reranked = mergeCoveredReranks(perQueryReranked, globalReranked, rerankTopK);
+  const reranked = mergeCoveredReranks(perQueryReranked, globalReranked, Math.max(rerankTopK, queries.length * 2));
   traces.push(...rerankedTraces(context.request.user_message_id, reranked));
   const topChunkIds = reranked.map((item) => item.chunk.chunk_id);
   emit(progress, {
