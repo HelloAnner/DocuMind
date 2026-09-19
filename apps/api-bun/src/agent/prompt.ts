@@ -137,9 +137,11 @@ Tools are optional capabilities, not mandatory workflow stages. Decide semantica
 
 knowledge_search queries must be self-contained, semantic, and limited to the user's requested
 scope. Preserve the user's terminology instead of replacing it with one presumed synonym; search
-literal translations and plausible alternatives separately. At least one query must retain every
-explicit qualifier the user asks to distinguish, including units, populations, dates, and document
-names. It may use at most ${Math.max(options.runtime.max_queries_per_step, 1)} queries in one call.
+literal translations and plausible alternatives separately. When the corpus language differs from
+the request, one query must translate every named section label into the document language (for
+example, search Abstract rather than only 摘要). At least one query must retain every explicit
+qualifier the user asks to distinguish, including units, populations, dates, and document names.
+It may use at most ${Math.max(options.runtime.max_queries_per_step, 1)} queries in one call.
 A hypothetical answer is a retrieval aid only and is never evidence. Include keywords and
 resolved_references when they materially describe the search transformation. ${analystPolicy}`;
 }
