@@ -130,11 +130,61 @@ async function skillCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pr
     return 0;
   }
   const value = args.positionals[2];
+  if (subcommand === "files") {
+    const action = value ?? "list";
+    const id = args.positionals[3];
+    const path = args.positionals[4];
+    if (!id) throw new CliError("用法: skills files list|show|put|rename|delete <技能ID> [路径]", 2);
+    const skill = await api.getSkill(id);
+    const files = (skill.files ?? []) as Array<{ path: string; content: string; size_bytes: number }>;
+    if (action === "list") {
+      if (json) printJson({ items: files });
+      else printTable(["路径", "字节数"], files.map((file) => [file.path, String(file.size_bytes)]));
+      return 0;
+    }
+    if (!path) throw new CliError(`skills files ${action} 需要文件路径`, 2);
+    const existing = files.find((file) => file.path === path);
+    if (action === "show") {
+      if (!existing) throw new CliError(`文件不存在: ${path}`, 2);
+      const output = stringOption(args, "out");
+      if (output) await writeFile(output, existing.content, "utf8");
+      else if (json) printJson(existing);
+      else process.stdout.write(existing.content);
+      return 0;
+    }
+    let next = files;
+    if (action === "put") {
+      const source = stringOption(args, "content-file");
+      if (!source) throw new CliError("skills files put 需要 --content-file <UTF-8 文本文件>", 2);
+      if (existing && !booleanOption(args, "force")) throw new CliError("覆盖已有文件需要 --force", 2);
+      const bytes = await readFile(source);
+      if (bytes.byteLength > 256 * 1024) throw new CliError("附属文件不得超过 256 KB", 2);
+      let content: string;
+      try { content = new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+      catch { throw new CliError("文件须为 UTF-8 文本", 2); }
+      next = [...files.filter((file) => file.path !== path), { path, content, size_bytes: Buffer.byteLength(content, "utf8") }];
+    } else if (action === "rename") {
+      const target = args.positionals[5];
+      if (!existing || !target) throw new CliError("skills files rename <技能ID> <原路径> <新路径>", 2);
+      if (files.some((file) => file.path === target && file !== existing)) throw new CliError(`文件已存在: ${target}`, 2);
+      next = files.map((file) => file === existing ? { ...file, path: target } : file);
+    } else if (action === "delete") {
+      if (!existing) throw new CliError(`文件不存在: ${path}`, 2);
+      if (!booleanOption(args, "force")) throw new CliError("skills files delete 需要 --force", 2);
+      next = files.filter((file) => file.path !== path);
+    } else throw new CliError(`未知文件操作: ${action}`, 2);
+    printJson(await api.updateSkill(id, { ...skill, source: "editor", files: next }));
+    return 0;
+  }
   if (subcommand === "create" || subcommand === "update") {
     if (subcommand === "update" && !value) throw new CliError("skills update 需要技能 ID", 2);
     const current = subcommand === "update" ? await api.getSkill(value!) : {};
     const contentFile = stringOption(args, "content-file");
-    const content = contentFile ? await readFile(contentFile, "utf8") : current.content;
+    let content = current.content;
+    if (contentFile) {
+      try { content = new TextDecoder("utf-8", { fatal: true }).decode(await readFile(contentFile)); }
+      catch { throw new CliError("无法读取 SKILL.md，请提供有效的 UTF-8 文本文件", 2); }
+    }
     const input = {
       name: stringOption(args, "name") ?? current.name,
       display_name: stringOption(args, "display-name") ?? current.display_name,

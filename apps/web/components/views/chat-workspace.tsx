@@ -279,7 +279,7 @@ function timeGreeting() {
   return "晚上好";
 }
 
-export function ChatWorkspace() {
+export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) {
   const { openMobile } = useChatShell();
   const { me } = useAuth();
   const {
@@ -304,7 +304,7 @@ export function ChatWorkspace() {
     toggleFavorite,
   } = useConversation();
 
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput);
   const [isComposing, setIsComposing] = useState(false);
   const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const streamRef = useRef<HTMLDivElement | null>(null);

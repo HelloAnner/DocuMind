@@ -2,6 +2,10 @@ import { VERSION } from "./version.ts";
 
 export function printHelp(path: string[]): void {
   const topic = path[0];
+  if (topic === "skills") {
+    process.stdout.write(SKILLS_HELP);
+    return;
+  }
   if (topic === "system") {
     process.stdout.write(SYSTEM_HELP);
     return;
@@ -62,7 +66,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  api-clients list|create      管理租户 MCP / API 客户端与 Token\n` +
   `  mcp tools                    列出 Token 可用的 MCP 工具\n` +
   `  mcp ask <问题>               通过 MCP 执行真实文档问答\n` +
-  `  skills list|show|create|update|delete|upload|import  管理租户技能\n` +
+  `  skills list|show|create|update|delete|upload|import|files  管理租户技能\n` +
   `  mcp verify                   验证工具发现与租户会话隔离\n\n` +
   `  system <subcommand>          平台后台全量查看与管理\n` +
   `  admin <subcommand>           租户后台全量查看与管理\n` +
@@ -84,7 +88,19 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  --json, -j                   机器可读 JSON 输出\n` +
   `  --help, -h                   查看帮助\n` +
   `  --version, -V                查看版本\n\n` +
-  `运行 documind help system|admin|chat|run|kb|documents|vector 查看详细帮助。\n`;
+  `运行 documind help system|admin|chat|run|kb|documents|skills|vector 查看详细帮助。\n`;
+
+const SKILLS_HELP = `用法: documind skills <subcommand> [options]\n\n` +
+  `  list [--search TEXT] | show <技能ID或名称>\n` +
+  `  create --name NAME --display-name TITLE --description TEXT --content-file SKILL.md\n` +
+  `  update <技能ID> [--name NAME --display-name TITLE --description TEXT --content-file SKILL.md]\n` +
+  `  delete <技能ID> --force | upload <skill.zip或SKILL.md> | import <HTTPS地址>\n` +
+  `  files list <技能ID> | files show <技能ID> <路径> [--out 本地文件]\n` +
+  `  files put <技能ID> <路径> --content-file 本地文件 [--force 覆盖已有文件]\n` +
+  `  files rename <技能ID> <原路径> <新路径> | files delete <技能ID> <路径> --force\n\n` +
+  `脚本使用 scripts/ 路径；参考文档建议使用 references/。仅保存/读取 UTF-8 文本，不执行脚本。\n` +
+  `每个附属文件最多 256 KB、最多 100 个；SKILL.md 正文最多 64 KB；总文本及上传包最多 5 MB。\n` +
+  `update 保留已有文件，files put 新建或更新单文件。所有命令支持 --json。\n`;
 
 const SYSTEM_HELP = `用法: documind system <subcommand> [options]\n\n` +
   `查看: overview | tenants | tenant <id> | users | models | jobs | audit | settings | vectors | vector-reconcile | integrity\n` +

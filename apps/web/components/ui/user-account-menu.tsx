@@ -1,7 +1,7 @@
 "use client";
 
 import { Bell, Building2, CheckCheck, Heart, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, UserRound, X } from "lucide-react";
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
@@ -222,30 +222,35 @@ export function UserAccountMenu() {
 }
 
 export function AppWindow({ href, title, onClose }: { href: string; title: string; onClose: () => void }) {
+  const frameRef = useRef<HTMLIFrameElement>(null);
+  const requestClose = useCallback(() => {
+    const frame = frameRef.current?.contentWindow;
+    if (frame && !frame.dispatchEvent(new Event("documind:before-close", { cancelable: true }))) return;
+    onClose();
+  }, [onClose]);
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") requestClose();
     };
     document.addEventListener("keydown", close);
     return () => document.removeEventListener("keydown", close);
-  }, [onClose]);
+  }, [requestClose]);
 
-  const basePath = typeof window !== "undefined" && window.location.pathname.startsWith("/documind")
-    ? "/documind"
-    : "";
+  const basePath = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
   if (typeof document === "undefined") return null;
 
 
   return createPortal(
     <div className={styles.windowOverlay}>
-      <button aria-label={`关闭${title}`} className={styles.windowBackdrop} onClick={onClose} type="button" />
+      <button aria-label={`关闭${title}`} className={styles.windowBackdrop} onClick={requestClose} type="button" />
       <section aria-label={title} aria-modal="true" className={styles.appWindow} role="dialog">
         <iframe
+          ref={frameRef}
           className={styles.windowFrame}
           src={`${basePath}${href}`}
           title={title}
         />
-        <button aria-label={`关闭${title}`} className={styles.windowClose} onClick={onClose} type="button">
+        <button aria-label={`关闭${title}`} className={styles.windowClose} onClick={requestClose} type="button">
           <X size={18} />
         </button>
       </section>

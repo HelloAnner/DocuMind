@@ -6172,4 +6172,4 @@ a {
 .dm-skill-conversation-head strong { color: var(--text-primary); font-size: 15px; }
 .dm-skill-conversation-head code { color: var(--text-muted); font-size: 11px; }
 .dm-skill-conversation-card > p { border-top: 1px solid var(--border-faint); color: var(--text-tertiary); font-size: 12px; line-height: 1.65; margin: 0; padding: 13px 20px; }
-.dm-skill-conversation-card > a { align-items: center; border-top: 1px solid var(--border-faint); color: var(--text-primary); display: flex; font-size: 12px; font-weight: 550; gap: 6px; justify-content: flex-end; padding: 11px 20px; text-decoration: none; }
+.dm-skill-conversation-card > button { align-items: center; background: transparent; border: 0; border-top: 1px solid var(--border-faint); color: var(--text-primary); cursor: pointer; display: flex; font: inherit; font-size: 12px; font-weight: 550; gap: 6px; justify-content: flex-end; padding: 11px 20px; width: 100%; }
