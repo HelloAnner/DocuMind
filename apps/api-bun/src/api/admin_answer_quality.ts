@@ -506,8 +506,16 @@ async function caseEvidence(sql: Sql, assistantMessageId: string): Promise<Recor
     ORDER BY CASE source WHEN 'rerank' THEN 2 ELSE 1 END, rank ASC
   `;
   const citations = await sql`
-    SELECT index, doc_id, chunk_id, doc_title, page_range, quote, score, source_status
-    FROM conversation_citations WHERE assistant_message_id = ${assistantMessageId} ORDER BY index ASC
+    SELECT citation.index, citation.doc_id, citation.chunk_id, citation.doc_title,
+           citation.page_range, citation.quote, citation.score,
+           CASE
+             WHEN document.id IS NULL OR document.parse_status = 'deleted' THEN 'deleted'
+             ELSE 'available'
+           END AS source_status
+    FROM conversation_citations citation
+    LEFT JOIN documents document ON document.id = citation.doc_id
+    WHERE citation.assistant_message_id = ${assistantMessageId}
+    ORDER BY citation.index ASC
   `;
   return { ...(messages[0] ?? {}), retrieval_traces: retrievals, citations };
 }
