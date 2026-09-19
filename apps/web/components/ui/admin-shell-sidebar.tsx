@@ -1,9 +1,7 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowLeft,
   BrainCircuit,
   Building2,
   ClipboardList,
@@ -24,9 +22,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { NavItem } from "./nav-item";
-import { UserAccountMenu } from "./user-account-menu";
-import { BrandMark } from "./brand-mark";
-import { TenantSwitcher } from "./tenant-switcher";
 
 interface NavEntry {
   label: string;
@@ -111,19 +106,9 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
   const { me } = useAuth();
   const isPlatform = me?.scope === "platform" || pathname.startsWith("/system");
   const sections = isPlatform ? platformSections : tenantSections;
-  const homeHref = isPlatform ? "/system" : "/admin";
-  const showTenantContext = !isPlatform && Boolean(me?.tenant);
 
   return (
     <aside className="dm-admin-sidebar">
-      <div className={`dm-sidebar-top dm-admin-sidebar-header${showTenantContext ? " has-context" : ""}`}>
-        <div className="dm-admin-brand-line">
-          <Link className="dm-admin-logo" href={homeHref} onClick={onNavigate}>
-            <BrandMark />
-          </Link>
-        </div>
-        {showTenantContext ? <TenantSwitcher /> : null}
-      </div>
 
       <nav className="dm-nav">
         {sections.map((section) => (
@@ -136,11 +121,6 @@ export function AdminShellSidebar({ onNavigate }: { onNavigate?: () => void }) {
         ))}
       </nav>
 
-      <Link className="dm-return-row" href="/chat" onClick={onNavigate}>
-        <ArrowLeft size={15} />
-        <span>返回知识问答</span>
-      </Link>
-      <UserAccountMenu />
     </aside>
   );
 }
