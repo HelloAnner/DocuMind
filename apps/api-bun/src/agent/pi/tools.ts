@@ -128,7 +128,7 @@ function normalizeQueries(raw: string[], maxQueries: number, originalQuery: stri
     .slice(0, Math.min(2, limit));
   const literalSet = new Set(literal);
   return [
-    ...generated.filter((query) => !literalSet.has(query)).slice(0, limit - literal.length),
+    ...generated.filter((query) => !literalSet.has(query)).slice(0, limit),
     ...literal,
   ];
 }
