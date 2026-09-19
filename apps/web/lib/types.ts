@@ -150,6 +150,8 @@ export interface SendMessageRequest {
   kb_ids?: UUID[];
   client_request_id?: string;
   stream?: boolean;
+  model_id?: string;
+  thinking_enabled?: boolean;
 }
 
 export interface RetryMessageRequest {

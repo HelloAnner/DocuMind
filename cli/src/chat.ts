@@ -47,6 +47,10 @@ export class ChatService {
         kb_ids: kbIds,
         client_request_id: clientRequestId,
         stream: true,
+        ...(request.model_id ? { model_id: request.model_id } : {}),
+        ...(request.thinking_enabled !== undefined
+          ? { thinking_enabled: request.thinking_enabled }
+          : {}),
       },
     );
 
@@ -140,6 +144,10 @@ export class ChatService {
         content: request.content,
         kb_ids: kbIds,
         client_request_id: clientRequestId,
+        ...(request.model_id ? { model_id: request.model_id } : {}),
+        ...(request.thinking_enabled !== undefined
+          ? { thinking_enabled: request.thinking_enabled }
+          : {}),
       },
       response: {
         ...(userMessageId ? { user_message_id: userMessageId } : {}),

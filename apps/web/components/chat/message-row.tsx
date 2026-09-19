@@ -291,6 +291,12 @@ export function MessageRow({
         deletedAll={deletedAll}
       />
 
+      {message.thinking ? (
+        <div className="dm-live-thinking" aria-live="polite">
+          {message.thinking}
+        </div>
+      ) : null}
+
       <ReasoningTrace
         steps={message.reasoning_steps}
         toolCalls={message.tool_calls}

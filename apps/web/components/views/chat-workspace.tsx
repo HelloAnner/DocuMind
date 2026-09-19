@@ -6,6 +6,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   Bookmark,
+  Brain,
   BookOpen,
   Folder,
   Menu,
@@ -25,6 +26,7 @@ import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
+import { getChatModels, type ChatModelOption } from "@/lib/api";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -70,6 +72,9 @@ export function ChatWorkspace() {
   const previousMessageCountRef = useRef(0);
   const followStreamRef = useRef(true);
   const [previewTarget, setPreviewTarget] = useState<DocumentPreviewTarget | null>(null);
+  const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
+  const [selectedModel, setSelectedModel] = useState("");
+  const [thinkingEnabled, setThinkingEnabled] = useState(false);
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
   const currentFavorite = currentId ? isFavorite(currentId) : false;
@@ -77,6 +82,28 @@ export function ChatWorkspace() {
   const filesRefreshKey = messages
     .map((message) => `${message.message_id}:${message.status}:${message.citations.length}`)
     .join("|");
+
+  const selectedModelOption = chatModels.find((model) => model.id === selectedModel);
+  const runtimeOptions = {
+    model_id: selectedModel || undefined,
+    thinking_enabled: selectedModelOption?.thinking_mode === "always_on"
+      ? true
+      : thinkingEnabled,
+  };
+
+  useEffect(() => {
+    let active = true;
+    getChatModels().then((catalog) => {
+      if (!active) return;
+      setChatModels(catalog.models);
+      setSelectedModel(catalog.default_model_id);
+      setThinkingEnabled(
+        catalog.models.find((model) => model.id === catalog.default_model_id)?.thinking_default
+          ?? false
+      );
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     setPreviewTarget(null);
@@ -138,7 +165,7 @@ export function ChatWorkspace() {
     const text = input.trim();
     if (!text) return;
     setInput("");
-    await sendMessage(text);
+    await sendMessage(text, runtimeOptions);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -195,7 +222,7 @@ export function ChatWorkspace() {
             onSubmitFeedback={submitFeedback}
             onClearFeedback={clearFeedback}
             onCitationClick={handleCitationClick}
-            onFollowUp={(text) => sendMessage(text)}
+            onFollowUp={(text) => sendMessage(text, runtimeOptions)}
           />
         </div>
       ))}
@@ -278,6 +305,43 @@ export function ChatWorkspace() {
                       {availableKbs.length > 0 ? `${availableKbs.length} 个知识库` : "知识库问答"}
                     </span>
                   </span>
+                  {chatModels.length > 0 ? (
+                    <>
+                      <select
+                        className="dm-model-select"
+                        aria-label="选择对话模型"
+                        disabled={!!streamingId}
+                        value={selectedModel}
+                        onChange={(event) => {
+                          const id = event.target.value;
+                          const model = chatModels.find((item) => item.id === id);
+                          setSelectedModel(id);
+                          setThinkingEnabled(model?.thinking_default ?? false);
+                        }}
+                      >
+                        {chatModels.map((model) => (
+                          <option key={model.id} value={model.id}>{model.name}</option>
+                        ))}
+                      </select>
+                      <label
+                        className={`dm-thinking-toggle ${thinkingEnabled ? "active" : ""}`}
+                        title="开启后实时显示灰色思考文字，正文开始时自动消失"
+                      >
+                        <Brain size={13} aria-hidden="true" />
+                        <span>深度思考</span>
+                        <input
+                          type="checkbox"
+                          checked={selectedModelOption?.thinking_mode === "always_on" || thinkingEnabled}
+                          disabled={
+                            !!streamingId ||
+                            selectedModelOption?.thinking_mode === "always_on" ||
+                            selectedModelOption?.thinking_mode === "unsupported"
+                          }
+                          onChange={(event) => setThinkingEnabled(event.target.checked)}
+                        />
+                      </label>
+                    </>
+                  ) : null}
                 </div>
                 <button
                   className={`dm-send-button ${streamingId ? "running" : ""}`}

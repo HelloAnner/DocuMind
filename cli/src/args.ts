@@ -22,6 +22,7 @@ const BOOLEAN_OPTIONS = new Set([
   "raw",
   "stream",
   "traces",
+  "thinking",
   "version",
   "wait",
 ]);

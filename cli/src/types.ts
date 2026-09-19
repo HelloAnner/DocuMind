@@ -301,12 +301,26 @@ export interface ExecutionRound {
   result?: unknown;
 }
 
+export interface ChatModelOption {
+  id: string;
+  name: string;
+  thinking_mode: "switchable" | "always_on" | "unsupported";
+  thinking_default: boolean;
+}
+
+export interface ChatModelCatalog {
+  default_model_id: string;
+  models: ChatModelOption[];
+}
+
 export interface ChatRequest {
   content: string;
   conversation_id?: string;
   kb_ids?: string[];
   title?: string;
   client_request_id?: string;
+  model_id?: string;
+  thinking_enabled?: boolean;
 }
 
 export interface ChatRunReport {
@@ -323,6 +337,8 @@ export interface ChatRunReport {
     content: string;
     kb_ids: string[];
     client_request_id: string;
+    model_id?: string;
+    thinking_enabled?: boolean;
   };
   response: {
     user_message_id?: string;

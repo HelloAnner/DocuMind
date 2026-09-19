@@ -39,7 +39,7 @@ export interface AppConfig {
   superAdminEmail: string; superAdminPassword: string;
   enterpriseAdminEmail: string; enterpriseAdminPassword: string;
   standardUserEmail: string; standardUserPassword: string;
-  rag: RagConfig; agent: AgentConfig;
+  rag: RagConfig; agent: AgentConfig; chatModels: string[];
 }
 
 const DEFAULT_TENANT_ID = '00000000-0000-0000-0000-000000000001';
@@ -119,6 +119,11 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     const raw = envStr(key);
     if (raw === undefined) return defaultValue;
     return raw.split(',').map((item) => item.trim()).filter(isUuid);
+  };
+  const envList = (key: string, defaultValue: string[]): string[] => {
+    const raw = envStr(key);
+    if (raw === undefined) return defaultValue;
+    return raw.split(',').map((item) => item.trim()).filter(Boolean);
   };
 
   const environment: RuntimeEnvironment = (() => {
@@ -239,6 +244,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     standardUserPassword: envStr('STANDARD_USER_PASSWORD') ?? 'documind123',
     rag,
     agent,
+    chatModels: envList('CHAT_MODELS', ['deepseek-v4.1-flash', 'qwen3.8-max', 'glm-5.3']),
   };
   validateConfig(config);
   return config;

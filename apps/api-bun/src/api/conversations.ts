@@ -2,8 +2,10 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import { PiAgentKernel, buildPiStreamFn } from '../agent/pi/index.ts';
 import { requirePermission } from '../auth/permissions.ts';
 import { spawnTitleUpdate } from '../conversation_title.ts';
+import { chatModelCatalog, resolveChatModel } from '../chat_models.ts';
 import { AppError } from '../errors.ts';
 import { nowRfc3339 } from '../infra/time.ts';
 import { newUuid } from '../infra/uuid.ts';
@@ -34,6 +36,7 @@ interface UpdateConversationTitleRequest { title: string; }
 
 export function conversationsRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();
+  router.get('/api/chat/models', chatModelsHandler);
   router.post('/api/conversations', createConversationHandler);
   router.get('/api/conversations', listConversationsHandler);
   router.get('/api/conversations/:conversation_id', getConversationHandler);
@@ -53,6 +56,10 @@ export function conversationsRouter(): Hono<AppEnv> {
   router.delete(
     '/api/conversations/:conversation_id/messages/:message_id/feedback', deleteFeedbackHandler);
   return router;
+}
+
+function chatModelsHandler(c: Context<AppEnv>): Response {
+  return c.json(chatModelCatalog(c.get('appState').config));
 }
 
 export async function createConversationHandler(c: Context<AppEnv>): Promise<Response> {
@@ -202,6 +209,13 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
   }
   const content = request.content.trim();
   if (content === '') throw AppError.badRequest('EMPTY_MESSAGE', '消息内容不能为空');
+  const modelSettings = resolveChatModel(
+    state.config, request.model_id, request.thinking_enabled);
+  const agentKernel = new PiAgentKernel({
+    ...state.agentKernel.options,
+    settings: modelSettings,
+    streamFn: buildPiStreamFn(modelSettings),
+  });
 
   const scope = await resolveConversationScope(
     state, actor, conversationId, request.kb_ids ?? []);
@@ -254,7 +268,7 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
     try {
       await runAgentPipeline({
         repo: state.repository,
-        kernel: state.agentKernel,
+        kernel: agentKernel,
         config: state.config,
         sql: state.sql,
         actor: actor,

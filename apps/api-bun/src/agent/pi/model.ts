@@ -6,11 +6,14 @@ import type { StreamFn } from '@earendil-works/pi-agent-core';
 /** DocuMind 生成端点的连接与采样设置。 */
 export interface PiModelSettings {
   model: string;
+  name?: string;
   baseUrl: string;
   apiKey: string;
   contextWindow: number;
   maxTokens: number;
   temperature: number;
+  thinkingEnabled?: boolean;
+  reasoningEffort?: 'low' | 'high' | 'max';
 }
 
 /** DocuMind 在 pi-ai 中的 provider 标识；实际路由由 baseUrl 决定。 */
@@ -23,7 +26,8 @@ export function buildPiModel(settings: PiModelSettings): Model<'openai-completio
     api: 'openai-completions',
     provider: DOCUMIND_PROVIDER,
     baseUrl: settings.baseUrl,
-    reasoning: false,
+    reasoning: settings.thinkingEnabled ?? false,
+    compat: { supportsDeveloperRole: false },
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: settings.contextWindow,
@@ -40,6 +44,11 @@ export function buildPiStreamFn(settings: PiModelSettings): StreamFn {
       apiKey: settings.apiKey,
       temperature: settings.temperature,
       maxTokens: settings.maxTokens,
+      samplingParams: {
+        ...options?.samplingParams,
+        enable_thinking: settings.thinkingEnabled ?? false,
+        ...(settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),
+      },
     });
   return streamFn;
 }

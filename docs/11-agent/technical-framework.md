@@ -18,6 +18,7 @@ PromptRegistry.compose() ──► systemPrompt
   ▼
 pi core Agent（src/agent/pi/kernel.ts）
   │  streamFn = pi-ai openai-completions（LLM_BASE_URL / LLM_API_KEY / LLM_MODEL）
+  │  selector = CHAT_MODELS；未选择时回退 LLM_MODEL
   │  tools    = [knowledge_search, ask_clarification]
   │
   ├── 模型只给 content ──────────────────► 结束循环
@@ -72,6 +73,11 @@ streamFn = (_model, context, options) =>
   streamSimple(model, context, { ...options, apiKey: LLM_API_KEY,
     temperature: LLM_TEMPERATURE, maxTokens: LLM_MAX_OUTPUT_TOKENS });
 ```
+
+对话页与 CLI 可以逐请求选择 `CHAT_MODELS` 中的模型；凭据、Base URL 和
+默认模型仍由 ENV 控制。DeepSeek / Qwen 的深度思考可切换，GLM 始终开启。
+开启后，`thinking.delta` 只在生成期间以灰色临时文字展示；第一个正文增量
+到达后立即清除，且不写入最终消息正文。
 
 协议语义：
 

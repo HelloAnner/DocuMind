@@ -42,6 +42,7 @@ export interface MessageResponse {
 
 export interface SendMessageRequest {
   content: string; kb_ids?: string[]; client_request_id?: string | null; stream?: boolean;
+  model_id?: string; thinking_enabled?: boolean;
 }
 export interface MessageListResponse { conversation_id: string; messages: MessageResponse[]; }
 export interface RetryMessageRequest { stream?: boolean; }

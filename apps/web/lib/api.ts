@@ -49,6 +49,20 @@ export async function createConversation(
   });
 }
 
+export interface ChatModelOption {
+  id: string;
+  name: string;
+  thinking_mode: "switchable" | "always_on" | "unsupported";
+  thinking_default: boolean;
+}
+
+export async function getChatModels(): Promise<{
+  default_model_id: string;
+  models: ChatModelOption[];
+}> {
+  return fetchJson("/api/chat/models");
+}
+
 export async function getMessages(conversationId: string): Promise<MessageListResponse> {
   return fetchJson(`/api/conversations/${conversationId}/messages`);
 }
