@@ -179,10 +179,6 @@ export function AppWindow({ href, title, onClose }: { href: string; title: strin
       <section aria-label={title} aria-modal="true" className={styles.appWindow} role="dialog">
         <iframe
           className={styles.windowFrame}
-          onLoad={(event) => {
-            const doc = event.currentTarget.contentDocument;
-            doc?.querySelector<HTMLElement>(".dm-admin-sidebar-drawer")?.style.setProperty("display", "none");
-          }}
           src={`${basePath}${href}`}
           title={title}
         />
