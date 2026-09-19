@@ -71,12 +71,12 @@ export class LlmClaimVerifier implements ClaimVerifier {
       JSON.stringify(input.draft_answer) +
       '\n\nRequired JSON schema: {"premises":["..."]}';
     if (!this.use_consensus) {
-      const raw = await this.client.completeJson<unknown>(prompt, PRIMARY_SYSTEM);
+      const raw = await this.client.completeJsonWithOptions(prompt, PRIMARY_SYSTEM, 0.2, 4096);
       return normalizeVerificationReport(raw);
     }
     const [primaryRaw, inventoryRaw] = await Promise.all([
-      this.client.completeJson<unknown>(prompt, PRIMARY_SYSTEM),
-      this.client.completeJson<unknown>(inventoryPrompt, INVENTORY_SYSTEM),
+      this.client.completeJsonWithOptions(prompt, PRIMARY_SYSTEM, 0.2, 4096),
+      this.client.completeJsonWithOptions(inventoryPrompt, INVENTORY_SYSTEM, 0.2, 4096),
     ]);
     const premisePrompt =
       'Audit this payload:\n' +
@@ -86,7 +86,12 @@ export class LlmClaimVerifier implements ClaimVerifier {
       }) +
       '\n\nRequired JSON schema:\n' +
       REPORT_SCHEMA;
-    const premiseRaw = await this.client.completeJson<unknown>(premisePrompt, PREMISE_SYSTEM);
+    const premiseRaw = await this.client.completeJsonWithOptions(
+      premisePrompt,
+      PREMISE_SYSTEM,
+      0.2,
+      4096,
+    );
     const consensus = consensusReport(
       normalizeVerificationReport(primaryRaw),
       normalizeVerificationReport(premiseRaw),
@@ -100,7 +105,12 @@ export class LlmClaimVerifier implements ClaimVerifier {
       }) +
       '\n\nRequired JSON schema:\n' +
       REPORT_SCHEMA;
-    const refereeRaw = await this.client.completeJson<unknown>(refereePrompt, REFEREE_SYSTEM);
+    const refereeRaw = await this.client.completeJsonWithOptions(
+      refereePrompt,
+      REFEREE_SYSTEM,
+      0.2,
+      4096,
+    );
     return normalizeVerificationReport(refereeRaw);
   }
 
