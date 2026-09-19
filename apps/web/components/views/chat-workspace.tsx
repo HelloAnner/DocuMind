@@ -103,8 +103,8 @@ function ModelPicker({
           <div className="chat-model-list-panel">
             <label className="chat-model-search">
               <Search size={15} aria-hidden="true" />
-              <span className="sr-only">搜索模型</span>
               <input
+                aria-label="搜索模型"
                 autoFocus
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
