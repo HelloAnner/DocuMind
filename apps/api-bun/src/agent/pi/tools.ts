@@ -119,10 +119,17 @@ function textResult(text: string): { type: 'text'; text: string }[] {
 
 function normalizeQueries(raw: string[], maxQueries: number, originalQuery: string): string[] {
   const limit = Math.max(maxQueries, 1);
-  const cleaned = [...new Set(raw.map((query) => query.trim()).filter((query) => query.length > 0))];
+  const generated = [...new Set(raw.map((query) => query.trim()).filter((query) => query.length > 0))];
   const original = originalQuery.trim();
-  if (original.length === 0 || cleaned.includes(original)) return cleaned.slice(0, limit);
-  return [...cleaned.slice(0, limit - 1), original];
+  if (original.length === 0) return generated.slice(0, limit);
+  // ponytail: two literal clauses cover normal comparisons; add query planning if larger lists recur.
+  const literal = [...new Set(original.split(/[;；]+/).map((query) => query.trim()).filter(Boolean))]
+    .slice(0, Math.min(2, limit));
+  const literalSet = new Set(literal);
+  return [
+    ...generated.filter((query) => !literalSet.has(query)).slice(0, limit - literal.length),
+    ...literal,
+  ];
 }
 
 /** knowledge_search：授权范围内的混合检索 + 精排，返回稳定证据编号。 */

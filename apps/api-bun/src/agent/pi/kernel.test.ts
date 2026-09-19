@@ -164,7 +164,7 @@ describe('pi agent kernel', () => {
       fauxAssistantMessage([fauxToolCall('knowledge_search', searchArgs('合同验收条件'))]),
       fauxAssistantMessage('付款和验收条件分别见对应条款。[1][2]'),
     ]);
-    const run = await h.kernel.run(request('付款和验收分别怎么约定？'));
+    const run = await h.kernel.run(request('付款怎么约定；验收怎么约定？'));
     const { answer, citations, confidence } = await collectAnswer(run);
 
     expect(answer).toContain('[1][2]');
@@ -179,7 +179,8 @@ describe('pi agent kernel', () => {
     ]);
     expect(run.trace.react_steps![0]!.queries).toEqual([
       '合同付款条件',
-      '付款和验收分别怎么约定？',
+      '付款怎么约定',
+      '验收怎么约定？',
     ]);
     expect(run.trace.react_steps![0]!.retrieved_chunk_ids).toHaveLength(1);
     expect(run.trace.react_steps![0]!.accepted_chunk_ids).toHaveLength(1);
