@@ -185,7 +185,7 @@ async function uploadSkillHttp(c: Context<AppEnv>) {
   const { sql, actor } = await requestContext(c);
   const form = await c.req.formData();
   const archive = form.get('file');
-  if (!(archive instanceof File)) throw invalidSkill('请选择技能包');
+  if (archive === null || typeof archive === 'string') throw invalidSkill('请选择技能包');
   const input = await parseSkillPackage(new Uint8Array(await archive.arrayBuffer()), archive.name, 'upload');
   return c.json(await saveSkill(sql, actor.tenant_id, actor.user_id, input), 201);
 }
