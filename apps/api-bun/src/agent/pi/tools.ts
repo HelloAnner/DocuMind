@@ -117,9 +117,12 @@ function textResult(text: string): { type: 'text'; text: string }[] {
   return [{ type: 'text', text: text }];
 }
 
-function normalizeQueries(raw: string[], maxQueries: number): string[] {
-  const cleaned = raw.map((query) => query.trim()).filter((query) => query.length > 0);
-  return cleaned.slice(0, Math.max(maxQueries, 1));
+function normalizeQueries(raw: string[], maxQueries: number, originalQuery: string): string[] {
+  const limit = Math.max(maxQueries, 1);
+  const cleaned = [...new Set(raw.map((query) => query.trim()).filter((query) => query.length > 0))];
+  const original = originalQuery.trim();
+  if (original.length === 0 || cleaned.includes(original)) return cleaned.slice(0, limit);
+  return [...cleaned.slice(0, limit - 1), original];
 }
 
 /** knowledge_search：授权范围内的混合检索 + 精排，返回稳定证据编号。 */
@@ -208,11 +211,18 @@ async function runKnowledgeSearch(
   context: ToolRunContext,
 ): Promise<ToolOutcome> {
   const runtime = context.request.options.runtime;
-  const queries = normalizeQueries(params.queries, runtime.max_queries_per_step);
+  const queries = normalizeQueries(
+    params.queries,
+    runtime.max_queries_per_step,
+    context.request.original_query,
+  );
   if (queries.length === 0) {
     throw new Error('knowledge_search requires at least one non-empty query');
   }
-  const rerankQuery = params.rerank_query.trim();
+  const rerankQuery = [...new Set([
+    params.rerank_query.trim(),
+    context.request.original_query.trim(),
+  ].filter((query) => query.length > 0))].join('\n');
   if (rerankQuery.length === 0) {
     throw new Error('knowledge_search requires a non-empty rerank_query');
   }

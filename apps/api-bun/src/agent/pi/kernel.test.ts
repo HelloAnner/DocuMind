@@ -136,7 +136,7 @@ describe('pi agent kernel', () => {
 
     expect(answer).toContain('CLI_PARSE_VERIFY_20260918');
     expect(citations).toHaveLength(1);
-    expect(h.retriever.calls).toEqual([['唯一校验标记']]);
+    expect(h.retriever.calls).toEqual([['唯一校验标记', '唯一校验标记是什么？']]);
     expect(run.trace.stop_reason).toBe('grounded_response');
   });
 
@@ -177,7 +177,10 @@ describe('pi agent kernel', () => {
       'knowledge_search',
       'respond',
     ]);
-    expect(run.trace.react_steps![0]!.queries).toEqual(['合同付款条件']);
+    expect(run.trace.react_steps![0]!.queries).toEqual([
+      '合同付款条件',
+      '付款和验收分别怎么约定？',
+    ]);
     expect(run.trace.react_steps![0]!.retrieved_chunk_ids).toHaveLength(1);
     expect(run.trace.react_steps![0]!.accepted_chunk_ids).toHaveLength(1);
     expect(run.trace.keywords).toEqual(['合同']);
