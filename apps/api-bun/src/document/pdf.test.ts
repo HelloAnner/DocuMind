@@ -57,6 +57,22 @@ function singlePagePdfWithText(
   return buildPdf(objects);
 }
 
+function positionedPdf(
+  entries: Array<{ text: string; x: number; y: number; fontSize?: number }>,
+): Uint8Array {
+  const stream = entries.map((entry) => {
+    const escaped = entry.text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+    return `BT\n/F1 ${entry.fontSize ?? 12} Tf\n${entry.x} ${entry.y} Td\n(${escaped}) Tj\nET`;
+  }).join('\n');
+  return buildPdf([
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+    '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+  ]);
+}
+
 describe('parseDocument (pdf)', () => {
   test('extracts the text layer into paragraph blocks', async () => {
     const bundle = await parseDocument(
@@ -75,9 +91,43 @@ describe('parseDocument (pdf)', () => {
     expect(bundle.parsed.blocks[0]!.page_start).toBe(1);
     expect(bundle.parsed.blocks[0]!.anchor_ids.length).toBe(1);
     expect(bundle.parsed.anchors.length).toBe(1);
-    expect(bundle.parsed.anchors[0]!.anchor_quality).toBe('page');
+    expect(bundle.parsed.anchors[0]!.anchor_quality).toBe('bbox');
+    expect(bundle.parsed.blocks[0]!.bbox).not.toBeNull();
     expect(bundle.chunks.length).toBe(1);
     expect(bundle.chunks[0]!.content).toContain('页码：1');
+  });
+
+  test('recovers aligned PDF rows as a structured table', async () => {
+    const entries = [
+      ['Region', 'Quarter', 'Revenue'],
+      ['East', 'Q1', '1200'],
+      ['West', 'Q1', '900'],
+    ].flatMap((row, rowIndex) => row.map((text, columnIndex) => ({
+      text, x: 60 + columnIndex * 160, y: 700 - rowIndex * 24,
+    })));
+    const bundle = await parseDocument(
+      crypto.randomUUID(), crypto.randomUUID(), 'table.pdf', 'application/pdf',
+      positionedPdf(entries),
+    );
+
+    expect(bundle.parsed.tables).toHaveLength(1);
+    expect(bundle.parsed.tables[0]!.headers).toEqual(['Region', 'Quarter', 'Revenue']);
+    expect(bundle.parsed.tables[0]!.rows[0]).toEqual(['East', 'Q1', '1200']);
+    expect(bundle.parsed.tables[0]!.cells.find((cell) => cell.text === '1200')!.data_type).toBe('number');
+    expect(bundle.parsed.blocks[0]!.block_type).toBe('table');
+    expect(bundle.parsed.anchors[0]!.anchor_quality).toBe('bbox');
+  });
+
+  test('preserves positioned formulas as atomic blocks', async () => {
+    const bundle = await parseDocument(
+      crypto.randomUUID(), crypto.randomUUID(), 'formula.pdf', 'application/pdf',
+      positionedPdf([{ text: 'E = m c^2', x: 120, y: 700 }]),
+    );
+
+    expect(bundle.parsed.blocks).toHaveLength(1);
+    expect(bundle.parsed.blocks[0]!.block_type).toBe('formula');
+    expect(bundle.parsed.blocks[0]!.text).toBe('E = m c^2');
+    expect(bundle.parsed.blocks[0]!.bbox).not.toBeNull();
   });
 
   test('rejects pdf with too many pages', async () => {

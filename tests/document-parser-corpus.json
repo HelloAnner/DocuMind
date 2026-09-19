@@ -6,8 +6,9 @@
       "sha256": "a6db6d2f5e4f97e1e28a5919a875a40b89e38d0229b33cc023ca4d353f3ab3ec",
       "type": "pdf",
       "contains": "Working Papers on Information Systems",
-      "min_blocks": 10,
-      "min_tables": 0
+      "min_blocks": 100,
+      "min_tables": 0,
+      "min_bbox_anchors": 100
     },
     {
       "name": "160F-2019.pdf",
@@ -15,8 +16,10 @@
       "sha256": "f41f0818365ffd14ca4e55c0556355193bd76632b970d60cc2dec554cac6f379",
       "type": "pdf",
       "contains": "Certificat de salaire",
-      "min_blocks": 1,
-      "min_tables": 0
+      "min_blocks": 20,
+      "min_tables": 1,
+      "min_bbox_anchors": 20,
+      "required_block_types": ["table"]
     },
     {
       "name": "TestDocument.docx",

@@ -62,13 +62,14 @@ export function sourceAnchorTableCellRange(
   docId: string, parseJobId: string, tenantId: string, format: string,
   blockId: string, tableId: string, page: number | null, slide: number | null,
   cellRange: CellRange, sourceRef: unknown, text: string,
+  bbox: NormalizedBBox | null = null,
 ): SourceAnchor {
   return {
     anchor_id: newUuid(), doc_id: docId, parse_job_id: parseJobId, tenant_id: tenantId,
     format, kind: 'table_cell_range', page, slide,
     block_id: blockId, table_id: tableId,
-    cell_range: cellRange, char_range: null, bbox: null,
+    cell_range: cellRange, char_range: null, bbox,
     source_ref: sourceRef, text, text_hash: hexHash(text),
-    anchor_quality: 'structural',
+    anchor_quality: bbox ? 'bbox' : 'structural',
   };
 }

@@ -79,11 +79,15 @@ def validate(entries, inspections):
         if "error" in item:
             failures.append(f"{entry['name']}: unexpected parse error: {item['error']}")
             continue
+        required_block_types = entry.get("required_block_types", [])
+        block_types = item.get("block_types", {})
         checks = {
             "file type": item["file_type"] == entry["type"],
             "expected text": entry["contains"].casefold() in item["content"].casefold(),
             "minimum blocks": item["blocks"] >= entry["min_blocks"],
             "minimum tables": item["tables"] >= entry["min_tables"],
+            "minimum bbox anchors": item["bbox_anchors"] >= entry.get("min_bbox_anchors", 0),
+            "required block types": all(block_types.get(kind, 0) > 0 for kind in required_block_types),
             "chunks generated": item["chunks"] > 0,
             "all blocks anchored": item["unanchored_blocks"] == 0,
         }

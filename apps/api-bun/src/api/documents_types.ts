@@ -215,6 +215,8 @@ export interface BlockSummary {
   page_end: number | null;
   slide_index: number | null;
   table_id: string | null;
+  bbox: unknown;
+  metadata: unknown;
 }
 
 export interface CleanedBlockSummary {

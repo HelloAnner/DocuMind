@@ -103,7 +103,9 @@ export async function fetchBlocks(
             (metadata->>'heading_level')::int AS heading_level,
             page_range,
             (metadata->>'slide')::int AS slide_index,
-            (metadata->>'table_id')::uuid AS table_id
+            (metadata->>'table_id')::uuid AS table_id,
+            metadata->'bbox' AS bbox,
+            metadata->'metadata' AS block_metadata
      FROM document_blocks
      WHERE doc_id = \$1 AND parse_job_id = \$2
      ORDER BY block_index
@@ -123,6 +125,8 @@ export async function fetchBlocks(
       page_end: pageRange.length > 0 ? pageRange[pageRange.length - 1]! : null,
       slide_index: row.slide_index == null ? null : Number(row.slide_index),
       table_id: row.table_id == null ? null : String(row.table_id),
+      bbox: row.bbox ?? null,
+      metadata: row.block_metadata ?? {},
     };
   });
 }

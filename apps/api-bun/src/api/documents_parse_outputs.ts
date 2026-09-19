@@ -6,9 +6,7 @@ import { SCHEMA_VERSION, PARSER_VERSION } from '../document/types.ts';
 import type { SourceAnchor } from '../models/source_anchor.ts';
 import { nowRfc3339 } from '../infra/time.ts';
 import type { ParseArtifacts, ParseWriteScope } from './documents_types.ts';
-import {
-  isOcrParserConfig, pageRange, toJson, uuidListFromMetadata,
-} from './documents_support.ts';
+import { pageRange, toJson, uuidListFromMetadata } from './documents_support.ts';
 
 export async function insertParseOutputs(
   tx: TransactionSql, scope: ParseWriteScope, fileType: string, artifacts: ParseArtifacts,
@@ -99,12 +97,17 @@ export async function insertParseOutputs(
     clean_stats: artifacts.bundle.clean_stats,
     file_type: fileType,
   };
-  if (isOcrParserConfig(artifacts.parser_config)) {
+  if (artifacts.parser_config['ocr_status'] === 'completed') {
     documentMetadata['ocr_status'] = 'completed';
     documentMetadata['ocr_completed_at'] = nowRfc3339();
     documentMetadata['ocr_parse_job_id'] = scope.parse_job_id;
-    documentMetadata['ocr_block_count'] = blocks.length;
+    documentMetadata['ocr_block_count'] = blocks.filter(
+      (block) => typeof block.metadata === 'object' && block.metadata !== null
+        && (block.metadata as Record<string, unknown>)['extraction_method'] === 'ocr',
+    ).length;
     documentMetadata['ocr_chunk_count'] = chunks.length;
+    documentMetadata['ocr_mode'] = artifacts.parser_config['ocr_mode'];
+    documentMetadata['ocr_pages'] = artifacts.parser_config['ocr_pages'];
   }
 
   await tx.unsafe(

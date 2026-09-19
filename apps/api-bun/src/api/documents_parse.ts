@@ -20,7 +20,7 @@ import {
   OCR_RENDER_DPI, PARSE_WORKER_CONCURRENCY,
 } from './documents_types.ts';
 import type { ParseArtifacts, ParseJobTask, ParseWriteScope } from './documents_types.ts';
-import { buildOcrBundle } from './documents_ocr.ts';
+import { buildOcrBundle, buildSelectiveOcrBundle } from './documents_ocr.ts';
 import { insertParseOutputs } from './documents_parse_outputs.ts';
 
 // ---------------------------------------------------------------------------
@@ -253,8 +253,25 @@ export async function buildParseArtifacts(task: ParseJobTask): Promise<ParseArti
       throw AppError.badRequest('DOCUMENT_PARSE_FAILED', (error as Error).message);
     }
   }
+  let automaticOcrPages: number[] = [];
+  if (!ocrTask && bundle.file_type === 'pdf') {
+    automaticOcrPages = bundle.parsed.warnings.flatMap((warning) => {
+      const match = /^pdf_page_(\d+)_no_text_layer$/u.exec(warning);
+      return match ? [Number(match[1])] : [];
+    });
+    if (automaticOcrPages.length > 0) {
+      try {
+        bundle = await buildSelectiveOcrBundle(task, bundle, automaticOcrPages);
+      } catch (error) {
+        bundle.parsed.warnings.push(`automatic_ocr_failed:${appErrorDetails(
+          error instanceof AppError ? error : AppError.internal((error as Error).message),
+        )[0]}`);
+      }
+    }
+  }
   bundle.parsed.title = task.title;
   const scannedPdfNoTextLayer = isScannedPdfNoTextLayer(bundle);
+  const ocrEnhanced = ocrTask || bundle.parsed.warnings.some((warning) => warning.startsWith('automatic_ocr_pages:'));
 
   if (bundle.parsed.blocks.length === 0 && !scannedPdfNoTextLayer) {
     throw AppError.badRequest('DOCUMENT_EMPTY', '未能从文档中提取到可检索文本');
@@ -265,7 +282,7 @@ export async function buildParseArtifacts(task: ParseJobTask): Promise<ParseArti
 
   const parseIdentity = task.parse_identity;
   const qualityScore = bundle.parsed.quality_score;
-  let parseStatus = parseStatusForResult(qualityScore, scannedPdfNoTextLayer, ocrTask);
+  let parseStatus = parseStatusForResult(qualityScore, scannedPdfNoTextLayer, ocrEnhanced);
   if (task.force_index && parseStatus === 'parse_low_confidence') {
     if (bundle.chunks.length === 0) {
       throw AppError.invalidState('FORCE_INDEX_UNAVAILABLE', '当前低置信文档没有有效切片，不能强制进入索引');
@@ -282,11 +299,13 @@ export async function buildParseArtifacts(task: ParseJobTask): Promise<ParseArti
     parse_status: parseStatus,
     force_index: task.force_index,
   };
-  if (ocrTask) {
+  if (ocrEnhanced) {
     parserConfig['ocr_status'] = 'completed';
     parserConfig['ocr_engine'] = 'tesseract';
     parserConfig['ocr_render_dpi'] = OCR_RENDER_DPI;
     parserConfig['ocr_page_segmentation_mode'] = 3;
+    parserConfig['ocr_mode'] = ocrTask ? 'manual_full' : 'automatic_missing_pages';
+    parserConfig['ocr_pages'] = automaticOcrPages;
   }
   parserConfig['block_count'] = bundle.parsed.blocks.length;
   parserConfig['cleaned_block_count'] = cleanStats.output_blocks;

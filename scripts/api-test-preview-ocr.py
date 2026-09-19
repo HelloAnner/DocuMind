@@ -379,17 +379,19 @@ def verify_ocr(token, kb_id, tmpdir, marker):
     doc_id = uploaded.get("document_id")
     if not doc_id:
         fail("OCR upload response missing document_id", uploaded)
-    poll_document(doc_id, token, {"parse_low_confidence"})
-    queued = http_json("POST", f"/api/admin/documents/{doc_id}/send-to-ocr", token=token)
-    if queued.get("parse_status") != "ocr_pending":
-        fail("send-to-ocr did not queue OCR", queued)
-    poll_document(doc_id, token, {"indexed"})
+    detail = poll_document(doc_id, token, {"indexed", "parse_low_confidence"})
+    if (detail.get("document") or {}).get("parse_status") == "parse_low_confidence":
+        queued = http_json("POST", f"/api/admin/documents/{doc_id}/send-to-ocr", token=token)
+        if queued.get("parse_status") != "ocr_pending":
+            fail("send-to-ocr did not queue OCR", queued)
+        poll_document(doc_id, token, {"indexed"})
 
     rows = run_pg_query(
         f"""
 SELECT
   d.parse_status,
   d.metadata->>'ocr_status',
+  d.metadata->>'ocr_mode',
   d.chunk_count,
   (SELECT count(*) FROM chunks c WHERE c.doc_id = d.id AND c.content ILIKE '%{marker}%'),
   (SELECT count(*) FROM document_source_anchors a WHERE a.doc_id = d.id AND a.bbox IS NOT NULL)
@@ -399,12 +401,14 @@ WHERE d.id = '{doc_id}';
     ).strip()
     if not rows:
         fail("OCR document missing from PostgreSQL", {"doc_id": doc_id})
-    status, ocr_status, chunk_count, marker_chunks, bbox_anchors = rows.split("|")
+    status, ocr_status, ocr_mode, chunk_count, marker_chunks, bbox_anchors = rows.split("|")
     if status != "indexed" or ocr_status != "completed":
         fail("OCR metadata did not complete", rows)
+    if ocr_mode not in {"automatic_missing_pages", "manual_full"}:
+        fail("OCR mode missing", rows)
     if int(chunk_count) < 1 or int(marker_chunks) < 1 or int(bbox_anchors) < 1:
         fail("OCR chunks or bbox anchors missing", rows)
-    ok("OCR DB outputs include chunks, marker text, and bbox anchors")
+    ok(f"OCR DB outputs include chunks, marker text, bbox anchors, mode={ocr_mode}")
 
     conv = http_json(
         "POST",

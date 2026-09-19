@@ -15,6 +15,7 @@ interface DocumentInspection {
   anchors: number;
   unanchored_blocks: number;
   bbox_anchors: number;
+  block_types: Record<string, number>;
   quality_score: number;
   warnings: string[];
   content: string;
@@ -53,6 +54,10 @@ for (const path of paths) {
     anchors: bundle.parsed.anchors.length,
     unanchored_blocks: bundle.parsed.blocks.filter((block) => block.anchor_ids.length === 0).length,
     bbox_anchors: bundle.parsed.anchors.filter((anchor) => anchor.bbox != null).length,
+    block_types: bundle.parsed.blocks.reduce<Record<string, number>>((counts, block) => {
+      counts[block.block_type] = (counts[block.block_type] ?? 0) + 1;
+      return counts;
+    }, {}),
     quality_score: bundle.parsed.quality_score,
     warnings: bundle.parsed.warnings,
     content: bundle.cleaned_blocks

@@ -75,7 +75,7 @@ export async function documentCommand(
 ): Promise<number> {
   const subcommand = args.positionals[1] ?? "list";
   if (subcommand === "list") return listDocuments(args, api, json);
-  if (["show", "preview", "blocks", "cleaned-blocks", "chunks", "tables"].includes(subcommand)) {
+  if (["show", "preview", "blocks", "cleaned-blocks", "chunks", "tables", "diagnose"].includes(subcommand)) {
     return showDocumentSection(args, api, json, subcommand);
   }
   if (subcommand === "upload" || subcommand === "upload-batch") return uploadDocument(args, api, json);
@@ -124,6 +124,10 @@ async function showDocumentSection(
   if (section === "show") {
     if (json) printJson(detail);
     else printDocumentDetail(detail);
+    return 0;
+  }
+  if (section === "diagnose") {
+    printJson(diagnoseDocument(detail));
     return 0;
   }
   const value = documentSection(detail, section);
@@ -427,6 +431,42 @@ function printDocumentDetail(detail: AdminDocumentDetail): void {
     chunks: detail.chunks.length,
     tables: detail.tables.length,
   });
+}
+
+function diagnoseDocument(detail: AdminDocumentDetail): Record<string, unknown> {
+  let bboxBlocks = 0;
+  let ocrBlocks = 0;
+  let textLayerBlocks = 0;
+  const coveredPages = new Set<number>();
+  const blockTypes: Record<string, number> = {};
+  for (const block of detail.blocks) {
+    if (block.bbox !== null && block.bbox !== undefined) bboxBlocks += 1;
+    if (typeof block.page_start === "number") coveredPages.add(block.page_start);
+    const type = typeof block.block_type === "string" ? block.block_type : "unknown";
+    blockTypes[type] = (blockTypes[type] ?? 0) + 1;
+    const metadata = block.metadata && typeof block.metadata === "object"
+      ? block.metadata as Record<string, unknown>
+      : {};
+    if (metadata.extraction_method === "ocr") ocrBlocks += 1;
+    if (metadata.extraction_method === "text_layer") textLayerBlocks += 1;
+  }
+  const pageCount = detail.document.page_count ?? 0;
+  return {
+    document_id: detail.document.doc_id,
+    parse_status: detail.document.parse_status,
+    quality_score: detail.document.quality_score ?? null,
+    pages: pageCount,
+    covered_pages: coveredPages.size,
+    page_coverage: pageCount > 0 ? coveredPages.size / pageCount : 0,
+    blocks: detail.blocks.length,
+    block_types: blockTypes,
+    bbox_blocks: bboxBlocks,
+    bbox_coverage: detail.blocks.length > 0 ? bboxBlocks / detail.blocks.length : 0,
+    text_layer_blocks: textLayerBlocks,
+    ocr_blocks: ocrBlocks,
+    tables: detail.tables.length,
+    warnings: detail.latest_job?.warnings ?? [],
+  };
 }
 
 function printPreview(detail: AdminDocumentDetail): void {

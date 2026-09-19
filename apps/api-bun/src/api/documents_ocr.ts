@@ -8,13 +8,15 @@ import { cleanBlocks } from '../document/cleaning.ts';
 import type { CleanedBlock, CleanStats } from '../document/cleaning.ts';
 import { chunkBlocks } from '../document/chunking/mod.ts';
 import type { ChunkConfig } from '../document/chunking/mod.ts';
+import { parseTesseractTsv } from '../document/ocr.ts';
+import type { OcrPage } from '../document/ocr.ts';
+import { scoreQuality } from '../document/quality.ts';
 import type { ParsedBlock, ParsedBundle, ParsedDocument } from '../document/types.ts';
 import type { SourceAnchor } from '../models/source_anchor.ts';
 import { sourceAnchorForPdfParagraph } from '../models/source_anchor.ts';
 import { OCR_RENDER_DPI } from './documents_types.ts';
 import type { ParseJobTask } from './documents_types.ts';
 import { currentParserConfig, sha256Hex } from './documents_support.ts';
-import { parseTesseractTsv } from '../document/ocr.ts';
 
 interface SpawnOutput {
   success: boolean;
@@ -80,7 +82,9 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
   } catch (error) {
     throw AppError.internal(`failed to list ocr pages: ${(error as Error).message}`);
   }
-  const pageImages = entries.filter((name) => name.endsWith('.png')).sort();
+  const pageImages = entries
+    .filter((name) => /^page-\d+\.png$/u.test(name))
+    .sort((a, b) => Number(/\d+/u.exec(a)?.[0]) - Number(/\d+/u.exec(b)?.[0]));
   if (pageImages.length === 0) {
     throw AppError.badRequest('OCR_RENDER_EMPTY', 'PDF 未能渲染出可 OCR 的页面');
   }
@@ -101,7 +105,7 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     if (!output.success) {
       throw AppError.badRequest('OCR_ENGINE_FAILED', `Tesseract OCR 失败: ${output.stderr}`);
     }
-    let ocrPage: import('../document/ocr.ts').OcrPage;
+    let ocrPage: OcrPage;
     try {
       ocrPage = parseTesseractTsv(output.stdout);
     } catch (error) {
@@ -118,10 +122,12 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     for (let paragraphIdx = 0; paragraphIdx < ocrPage.blocks.length; paragraphIdx += 1) {
       const ocrBlock = ocrPage.blocks[paragraphIdx]!;
       const blockId = crypto.randomUUID();
+      const sourceRef = { format: 'pdf', page, paragraph: paragraphIdx + 1, source: 'ocr' };
       const anchor = sourceAnchorForPdfParagraph(
         task.doc_id, task.parse_job_id, task.tenant_id, blockId, page,
         ocrBlock.text, ocrBlock.bbox,
       );
+      anchor.source_ref = sourceRef;
       anchors.push(anchor);
       blocks.push({
         block_id: blockId,
@@ -136,9 +142,10 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
         table_id: null,
         bbox: ocrBlock.bbox,
         anchor_ids: [anchor.anchor_id],
-        source_ref: { format: 'pdf', page, paragraph: paragraphIdx + 1, source: 'ocr' },
+        source_ref: sourceRef,
         metadata: {
           layout: 'ocr',
+          extraction_method: 'ocr',
           ocr_engine: 'tesseract',
           ocr_render_dpi: OCR_RENDER_DPI,
           ocr_confidence: ocrBlock.confidence,
@@ -169,6 +176,60 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     warnings,
     quality_score: qualityScore,
   };
+  return rebuildPdfBundle(task, parsed);
+}
+
+export async function buildSelectiveOcrBundle(
+  task: ParseJobTask,
+  base: ParsedBundle,
+  pageNumbers: number[],
+): Promise<ParsedBundle> {
+  const requestedPages = new Set(pageNumbers);
+  if (requestedPages.size === 0) return base;
+  // ponytail: Tesseract still scans every page; switch to per-page rendering if profiling shows this dominates ingestion.
+  const ocr = await buildOcrBundle(task);
+  const replacementBlocks = ocr.parsed.blocks.filter(
+    (block) => block.page_start !== null && requestedPages.has(block.page_start),
+  );
+  if (replacementBlocks.length === 0) return base;
+  const replacedBlockIds = new Set(
+    base.parsed.blocks
+      .filter((block) => block.page_start !== null && requestedPages.has(block.page_start))
+      .map((block) => block.block_id),
+  );
+  const blocks = [
+    ...base.parsed.blocks.filter((block) => !replacedBlockIds.has(block.block_id)),
+    ...replacementBlocks,
+  ].sort((a, b) => (a.page_start ?? 0) - (b.page_start ?? 0) || a.block_index - b.block_index);
+  blocks.forEach((block, index) => { block.block_index = index; });
+  const replacementBlockIds = new Set(replacementBlocks.map((block) => block.block_id));
+  const anchors = [
+    ...base.parsed.anchors.filter((anchor) => anchor.block_id === null || !replacedBlockIds.has(anchor.block_id)),
+    ...ocr.parsed.anchors.filter((anchor) => anchor.block_id !== null && replacementBlockIds.has(anchor.block_id)),
+  ];
+  const replacedPages = new Set(replacementBlocks.map((block) => block.page_start).filter((page) => page !== null));
+  const warnings = base.parsed.warnings.filter((warning) => {
+    if (warning === 'scanned_pdf_no_text_layer') return replacedPages.size !== requestedPages.size;
+    const match = /^pdf_page_(\d+)_no_text_layer$/u.exec(warning);
+    return !match || !replacedPages.has(Number(match[1]));
+  });
+  warnings.push(`automatic_ocr_pages:${[...replacedPages].sort((a, b) => a - b).join(',')}`);
+  warnings.push(...ocr.parsed.warnings.filter((warning) => warning.startsWith('ocr_low_confidence:')));
+  const parsed: ParsedDocument = {
+    ...base.parsed,
+    blocks,
+    tables: base.parsed.tables.filter(
+      (table) => table.page_start === null || !requestedPages.has(table.page_start),
+    ),
+    anchors,
+    warnings: [...new Set(warnings)],
+    quality_score: 0,
+  };
+  parsed.quality_score = Math.min(scoreQuality(parsed), 0.5 + ocr.parsed.quality_score * 0.5);
+  return rebuildPdfBundle(task, parsed);
+}
+
+function rebuildPdfBundle(task: ParseJobTask, parsed: ParsedDocument): ParsedBundle {
   const [cleanedBlocks, cleanStats] = cleanBlocks('pdf', parsed.blocks) as [CleanedBlock[], CleanStats];
   const parserConfig = currentParserConfig();
   const chunkConfig: ChunkConfig = {
@@ -184,7 +245,6 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
   if (chunks.length === 0) {
     throw AppError.badRequest('OCR_EMPTY_CHUNKS', 'OCR 识别成功但没有生成有效切片');
   }
-
   return {
     file_type: 'pdf',
     file_sha256: sha256Hex(task.bytes),

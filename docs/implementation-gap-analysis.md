@@ -63,9 +63,11 @@
 | 文件类型识别 | MIME、扩展名、文件头/zip 结构三方校验 | `detect_file_type` 已校验 PDF 头、Office zip 结构、文本格式 | 已对齐 |
 | DOCX 解析 | paragraph/table/list/heading/header/footer/style/numbering | 已解析 `word/document.xml` 段落、表格、标题样式、编号基础信息 | header/footer、footnote、textbox、复杂列表编号、样式继承仍不完整 |
 | PPTX 解析 | slide 顺序、shape、table、notes、layout/master 噪声 | 已解析 slide XML 文本段落和表格，保留 slide_index | shape id、shape bbox、notes、layout/master 噪声过滤、读取顺序恢复未完整实现 |
-| PDF 解析 | text run、bbox、reading order、table、扫描件 fallback | 纯文本层用 `pdf-extract`，段落 anchor 使用页面垂直分带近似 bbox；扫描件可手动送 OCR | PDF bbox 不是 text-run 精确坐标；表格检测、阅读顺序恢复、自动 OCR 投递未完整实现 |
+| PDF 解析 | text run、bbox、reading order、table、扫描件 fallback | Bun `pdfjs-dist` 已保留 text item 坐标、字号和 run id，恢复行/段落与多栏阅读顺序，输出归一化 bbox；按对齐列启发式生成 PDF 表格，识别文本层公式为原子 block | 复杂无框表格、跨页续表、旋转文字和扫描公式仍需增强解析 Worker |
+| PDF OCR | 扫描页自动识别，混合 PDF 保留原生文本 | 无文本层页面会自动进入 `pdftoppm + Tesseract TSV`，只替换缺失页产物并保留原生文本页；记录 OCR mode/pages/confidence/bbox，失败时安全降级为低置信结果 | 当前执行仍会渲染并识别整份 PDF 后选择缺失页；大文件吞吐达到瓶颈时改为逐页渲染 |
+| 公式 | 公式保真、原子切片和定位 | PDF 文本层数学符号会生成 `formula` block，保留文本与 bbox，不与普通段落混切 | 扫描公式转 LaTeX、DOCX OMML 规范化和复杂公式结构需增强解析 Worker |
 | Markdown/TXT | char offset、heading、table、代码块 | 已生成 char_range anchor；清洗切块可进入检索和 FileView 高亮 | Markdown 专项语法保真、表格结构化和代码块原子切分仍有限 |
-| SourceAnchor | 解析期生成统一 anchor | `models/source_anchor.rs`、`document_source_anchors`、chunk primary anchor、ES anchor 字段已落地 | DOCX/PPTX 视觉 bbox、cell range 到预览坐标映射不足 |
+| SourceAnchor | 解析期生成统一 anchor | PDF paragraph/formula/table 已生成 bbox anchor；`document_source_anchors`、chunk primary anchor、ES anchor 字段已落地 | DOCX/PPTX 视觉 bbox、cell range 到预览坐标映射不足 |
 
 ## 5. 文本清洗
 
@@ -147,20 +149,21 @@
 |---|---|---|---|
 | API 冒烟 | 登录、KB、上传、会话、SSE | `scripts/api-test-conversation.py`、`scripts/api-test-ingest.sh` 已存在；`make release-gate` 已串起核心 API smoke | 仍需接入 CI 或部署流水线自动阻断 |
 | Golden Set | 至少 50 条多格式问题 | `tests/golden/documind_core.json` 与 `scripts/eval-golden.py` 已存在 | 当前覆盖已到 50 条，但仍需扩大 Office、OCR、表格、权限样本 |
-| 指标 | citation、faithfulness、recall、mode selection | golden 脚本已输出 pass/citation/doc hit/no-answer/mode | 缺少自动趋势记录、失败样例归因和发布阻断阈值 |
-| Office/OCR/ops smoke | Office Preview、OCR、FileView anchor、metrics 需要可重复远端验收 | `scripts/api-test-preview-ocr.py` 已固化 DOCX/PPTX `office_pdf` manifest/content/page PDF、短期 `preview_token` URL 匿名访问、OCR chunk/bbox anchor、OCR QA citation anchor；`scripts/browser-test-fileview.sh` 已固化点击 citation 后右侧 FileView 的 canvas、bbox overlay、target/ready page 与精确定位文案断言；`scripts/api-test-metrics.sh` 验证 `/api/metrics` 关键指标；`make release-gate` 统一串行执行这些 smoke | 已覆盖主链路；仍需扩大到移动端、多页 PDF、DOCX/PPTX 引用和跨浏览器截图，并接入 CI/部署流水线 |
+| Parser Corpus | 固定多格式文件验证结构与定位 | `test-document-parser-corpus.py` 校验 PDF bbox、结构化表格、block 类型、anchor 覆盖和 chunk；PDF 单测覆盖坐标定位、表格和公式原子块 | 仍需增加中文多栏、无框/跨页表格、旋转扫描件和公式图片样本 |
+| 指标 | citation、faithfulness、recall、mode selection | golden 脚本已输出 pass/citation/doc hit/no-answer/mode；CLI `documents diagnose` 输出 page/bbox/OCR/table/block-type 诊断 | 缺少自动趋势记录、失败样例归因和发布阻断阈值 |
+| Office/OCR/ops smoke | Office Preview、OCR、FileView anchor、metrics 需要可重复远端验收 | `scripts/api-test-preview-ocr.py` 验证自动 OCR，低置信时兼容人工 OCR fallback，并核验 mode/chunk/bbox/QA citation；`scripts/browser-test-fileview.sh` 验证 FileView bbox；`scripts/api-test-metrics.sh` 验证指标 | 已覆盖主链路；仍需扩大到移动端、多页混合 PDF、DOCX/PPTX 引用和跨浏览器截图 |
 | 前端 E2E | 浏览器截图/交互验收 | `scripts/browser-test-fileview.sh` 通过 agent-browser 访问远端 `/documind/chat?c=...`，点击 citation 并保存 `/tmp/documind-fileview-ocr.png` | 仍需纳入固定发布门禁，并补移动端/权限边界 UI E2E |
 
 ## 14. 优先补齐顺序
 
 按当前差距，后续应优先处理：
 
-1. **解析/OCR 外部任务编排**：Embedding 已完成持久化任务、RabbitMQ 通知、retry/DLX 和补偿扫描；下一步把 parse/OCR 也迁移到同类可独立扩容的 worker。
+1. **增强解析 Worker**：用固定 corpus 在 Docling/MinerU 中只选一个生产引擎，补复杂无框表格、跨页续表和扫描公式；普通 PDF 继续使用轻量 PDF.js 链路。
 2. **Office 精确定位**：建立 DOCX paragraph/table cell、PPTX shape/table cell 到转换 PDF/page preview 的 bbox 映射。
-3. **PDF 精确 bbox**：用 text run/word bbox 替代当前段落垂直分带近似坐标。
+3. **OCR 吞吐优化**：仅当解析耗时指标证明必要时，把当前“整篇 OCR 后选择缺失页”改成逐页渲染和有界并发。
 4. **Claim 级 CitationResolver**：补 claim extractor、数字/日期/实体强校验、引用快照回看核验。
-5. **运维可观测性**：在 `/api/metrics` 基础上继续补 OpenTelemetry、告警、队列积压、preview/render p95、LLM/embedding/rerank 延迟。
-6. **发布门禁**：`make release-gate` 已串起 API 冒烟、golden smoke、Office/OCR/preview-token smoke、metrics smoke、浏览器 FileView 截图验收；下一步接入 CI/部署流水线，并继续扩展移动端和权限样本。
+5. **运维可观测性**：增加不同 extraction_method 的耗时、OCR 页数、bbox 覆盖率、表格/公式计数和失败率。
+6. **发布门禁**：把 parser corpus、自动 OCR smoke 和 `documents diagnose` 阈值接入部署阻断。
 
 ## 15. 文档修订原则
 
