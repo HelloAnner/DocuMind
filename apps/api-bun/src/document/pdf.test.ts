@@ -118,6 +118,32 @@ describe('parseDocument (pdf)', () => {
     expect(bundle.parsed.anchors[0]!.anchor_quality).toBe('bbox');
   });
 
+  test('does not mistake two-column prose for a table', async () => {
+    const entries = [
+      ['Left column line one contains ordinary prose.', 'Right column line one contains ordinary prose.'],
+      ['Left column line two continues the argument.', 'Right column line two continues the argument.'],
+      ['Left column line three concludes the section.', 'Right column line three concludes the section.'],
+    ].flatMap((row, rowIndex) => row.map((text, columnIndex) => ({
+      text, x: 40 + columnIndex * 290, y: 700 - rowIndex * 20,
+    })));
+    const bundle = await parseDocument(
+      crypto.randomUUID(), crypto.randomUUID(), 'columns.pdf', 'application/pdf',
+      positionedPdf(entries),
+    );
+
+    expect(bundle.parsed.tables).toHaveLength(0);
+    expect(bundle.parsed.blocks.map((block) => block.text).join(' ')).toContain('concludes the section');
+  });
+
+  test('does not classify decorative rules as formulas', async () => {
+    const bundle = await parseDocument(
+      crypto.randomUUID(), crypto.randomUUID(), 'rule.pdf', 'application/pdf',
+      positionedPdf([{ text: 'SECURITY AND PRIVACY CONTROLS ____________________', x: 60, y: 700 }]),
+    );
+
+    expect(bundle.parsed.blocks[0]!.block_type).toBe('paragraph');
+  });
+
   test('preserves positioned formulas as atomic blocks', async () => {
     const bundle = await parseDocument(
       crypto.randomUUID(), crypto.randomUUID(), 'formula.pdf', 'application/pdf',

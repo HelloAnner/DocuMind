@@ -290,18 +290,22 @@ function alignedColumns(a: Array<{ x: number }>, b: Array<{ x: number }>, pageWi
   return matches >= Math.min(2, a.length, b.length);
 }
 
-function isTableGroup(group: Array<{ cells: unknown[] }>): boolean {
+function isTableGroup(group: Array<{ cells: Array<{ text: string }> }>): boolean {
   if (group.length < 2) return false;
   const maxColumns = Math.max(...group.map((entry) => entry.cells.length));
-  return group.length >= 3 || maxColumns >= 3;
+  if (maxColumns < 3) return false;
+  return group.length >= 3 || group.some((entry) =>
+    entry.cells.some((cell) => /\d/u.test(cell.text))
+  );
 }
 
 function looksLikeFormula(text: string): boolean {
-  const mathSymbols = text.match(/[=≈≠≤≥±×÷∑∏∫√∞∂∆∇^_{}]/gu)?.length ?? 0;
-  const greek = text.match(/[α-ωΑ-Ω]/gu)?.length ?? 0;
-  const superscript = text.match(/[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/gu)?.length ?? 0;
-  const words = text.match(/[\p{L}]+/gu)?.length ?? 0;
-  return text.length <= 240 && (mathSymbols + greek + superscript >= 2 || (mathSymbols >= 1 && words <= 4));
+  const semanticText = text.replace(/_{4,}/gu, '');
+  const mathSymbols = semanticText.match(/[=≈≠≤≥±×÷∑∏∫√∞∂∆∇^_{}]/gu)?.length ?? 0;
+  const greek = semanticText.match(/[α-ωΑ-Ω]/gu)?.length ?? 0;
+  const superscript = semanticText.match(/[⁰¹²³⁴⁵⁶⁷⁸⁹₀₁₂₃₄₅₆₇₈₉]/gu)?.length ?? 0;
+  const words = semanticText.match(/[\p{L}]+/gu)?.length ?? 0;
+  return semanticText.length <= 240 && (mathSymbols + greek + superscript >= 2 || (mathSymbols >= 1 && words <= 4));
 }
 
 function tableMarkdown(rows: string[][]): string {
