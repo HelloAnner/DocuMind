@@ -65,6 +65,7 @@ export class InMemoryConversationRepository implements ConversationRepository {
         return {
           conversation_id: s.id,
           title: s.title,
+          kb_ids: [...s.kb_ids],
           last_message_preview: preview,
           updated_at: s.updated_at,
         };

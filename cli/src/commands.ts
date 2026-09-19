@@ -570,6 +570,23 @@ async function conversationCommand(
   }
   const id = args.positionals[2] ?? stringOption(args, "conversation");
   if (!id) throw new CliError(`${subcommand} 需要会话 ID`, 2);
+  if (subcommand === "update") {
+    const requestedKbIds = listOption(args, "kb");
+    const selectAll = booleanOption(args, "all");
+    if (requestedKbIds.length > 0 && selectAll) {
+      throw new CliError("conversations update 的 --kb 与 --all 不能同时使用", 2);
+    }
+    if (requestedKbIds.length === 0 && !selectAll) {
+      throw new CliError("conversations update 需要 --kb ID 或 --all", 2);
+    }
+    const kbIds = selectAll
+      ? (await api.listKnowledgeBases()).map((kb) => kb.id)
+      : requestedKbIds;
+    const result = await api.updateConversation(id, { kb_ids: kbIds });
+    if (json) printJson(result);
+    else process.stdout.write(`会话 ${id} 已使用 ${result.kb_ids?.length ?? 0} 个知识库\n`);
+    return 0;
+  }
   if (subcommand === "delete") {
     const result = await api.deleteConversation(id);
     if (json) printJson(result); else process.stdout.write(`已删除会话 ${id}\n`);

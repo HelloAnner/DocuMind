@@ -206,7 +206,7 @@ export class SqlxConversationCore {
   ): Promise<ConversationListResponse> {
     const offset = parseCursorOrZero(cursor);
     const rows = await this.pool`
-      SELECT s.id, s.title, s.updated_at,
+      SELECT s.id, s.title, s.kb_ids, s.updated_at,
              (SELECT m.content FROM conversation_messages m
               WHERE m.conversation_id = s.id AND m.role = 'user' AND m.status = 'completed'
               ORDER BY m.created_at DESC LIMIT 1) as last_preview
@@ -219,6 +219,7 @@ export class SqlxConversationCore {
     const items = rows.map((row) => ({
       conversation_id: strCol(row, 'id'),
       title: strCol(row, 'title'),
+      kb_ids: uuidListOrEmpty(row, 'kb_ids'),
       last_message_preview: strOrNullCol(row, 'last_preview'),
       updated_at: dateCol(row, 'updated_at'),
     }));

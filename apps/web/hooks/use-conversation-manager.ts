@@ -11,6 +11,7 @@ import {
   listConversations,
   listKnowledgeBases,
   renameConversation,
+  updateConversationKnowledgeBases,
   retryMessageStreamUrl,
   sendMessageStreamUrl,
   submitFeedback,
@@ -83,6 +84,9 @@ export function useConversationManager() {
   const [rightOpen, setRightOpen] = useState(false);
   const [availableKbs, setAvailableKbs] = useState<KnowledgeBase[]>([]);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  const [updatingKbSelection, setUpdatingKbSelection] = useState(false);
+  const [kbSelectionError, setKbSelectionError] = useState<string>();
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const requestActiveRef = useRef(false);
@@ -152,11 +156,23 @@ export function useConversationManager() {
 
   const allKbIds = useMemo(() => availableKbs.map((kb) => kb.id), [availableKbs]);
 
+  useEffect(() => {
+    setKbSelectionError(undefined);
+    if (!currentId) {
+      setSelectedKbIds(allKbIds);
+      return;
+    }
+    const conversation = conversations.find((item) => item.conversation_id === currentId);
+    if (conversation) {
+      setSelectedKbIds(conversation.kb_ids.filter((id) => allKbIds.includes(id)));
+    }
+  }, [allKbIds, conversations, currentId]);
+
   const createAndSelect = useCallback(
     async (title?: string) => {
       try {
         const conv = await createConversation({
-          kb_ids: allKbIds,
+          kb_ids: selectedKbIds,
           title,
         });
         setConversations((prev) => [conv, ...prev]);
@@ -169,8 +185,39 @@ export function useConversationManager() {
         return null;
       }
     },
-    [allKbIds, router]
+    [router, selectedKbIds]
   );
+
+  const updateKnowledgeBaseSelection = useCallback(async (kbIds: string[]) => {
+    const next = availableKbs.filter((kb) => kbIds.includes(kb.id)).map((kb) => kb.id);
+    if (next.length === 0) {
+      setKbSelectionError("请至少选择一个知识库");
+      return false;
+    }
+    setKbSelectionError(undefined);
+    if (!currentId) {
+      setSelectedKbIds(next);
+      return true;
+    }
+    setUpdatingKbSelection(true);
+    try {
+      const updated = await updateConversationKnowledgeBases(currentId, next);
+      setSelectedKbIds(updated.kb_ids);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id === currentId
+            ? { ...conversation, kb_ids: updated.kb_ids }
+            : conversation
+        )
+      );
+      return true;
+    } catch (error) {
+      setKbSelectionError(error instanceof Error ? error.message : "知识库范围保存失败");
+      return false;
+    } finally {
+      setUpdatingKbSelection(false);
+    }
+  }, [availableKbs, currentId]);
 
   const updateMessage = useCallback((messageId: string, patch: Partial<Message>) => {
     setMessages((prev) =>
@@ -897,6 +944,10 @@ export function useConversationManager() {
     setRightOpen,
     setCurrentId,
     availableKbs,
+    selectedKbIds,
+    updatingKbSelection,
+    kbSelectionError,
+    updateKnowledgeBaseSelection,
     createAndSelect,
     sendMessage,
     retryMessage,

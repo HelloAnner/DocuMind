@@ -10,7 +10,8 @@ export interface CreateConversationRequest {
   kb_ids: string[]; title?: string | null;
 }
 export interface ConversationListItem {
-  conversation_id: string; title: string; last_message_preview: string | null; updated_at: string;
+  conversation_id: string; title: string; kb_ids: string[];
+  last_message_preview: string | null; updated_at: string;
 }
 export interface ConversationListResponse {
   items: ConversationListItem[]; next_cursor: string | null;

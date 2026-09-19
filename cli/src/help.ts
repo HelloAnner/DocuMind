@@ -14,6 +14,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(INVITATION_HELP);
     return;
   }
+  if (topic === "conversations") {
+    process.stdout.write(CONVERSATIONS_HELP);
+    return;
+  }
   if (topic === "chat") {
     process.stdout.write(CHAT_HELP);
     return;
@@ -63,7 +67,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  models                       列出可选模型与深度思考能力\n` +
   `  chat --interactive           多轮交互 REPL\n` +
   `  run <scenario.json>          运行 JSON 多轮评测场景\n` +
-  `  conversations list|create|show|messages|delete\n` +
+  `  conversations list|create|show|messages|update|delete\n` +
   `  traces show <会话ID> <消息ID>\n\n` +
   `知识与向量\n` +
   `  kb list|show|create|update|delete\n` +
@@ -118,6 +122,15 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --input-json <json|@file|->  用 JSON 提供 content/conversation_id/kb_ids\n` +
   `  --interactive, -i            多轮 REPL\n` +
   `  --quiet, -q                  只输出回答正文\n`;
+
+const CONVERSATIONS_HELP = `用法: documind conversations <subcommand> [options]\n\n` +
+  `  list [--limit N]             列出会话\n` +
+  `  create [--kb ID] [--title T] 创建会话；不传 --kb 时默认全部可访问知识库\n` +
+  `  show <id>                    查看会话、消息与检索轨迹\n` +
+  `  messages <id>                查看会话消息\n` +
+  `  update <id> --kb ID[,ID]     保存该会话使用的知识库组合\n` +
+  `  update <id> --all            恢复为全部可访问知识库\n` +
+  `  delete <id>                  删除会话\n`;
 
 const VECTOR_HELP = `用法: documind vector <subcommand> [options]\n\n` +
   `  indexes                      API 返回的租户向量索引健康统计\n` +

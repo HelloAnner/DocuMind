@@ -330,6 +330,16 @@ export class ApiClient {
     return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`));
   }
 
+  async updateConversation(
+    id: string,
+    input: { title?: string; kb_ids?: string[] },
+  ): Promise<ConversationSummary> {
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`), {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
   async deleteConversation(id: string): Promise<unknown> {
     return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`), {
       method: "DELETE",

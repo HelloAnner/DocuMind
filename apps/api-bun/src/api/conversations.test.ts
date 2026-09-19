@@ -86,16 +86,16 @@ async function seededConversation(repo: InMemoryConversationRepository): Promise
 describe('conversationsRouter', () => {
   test('会话生命周期：创建/列表/详情/改名/删除', async () => {
     const repo = new InMemoryConversationRepository();
-    const app = testApp(repo, testActor());
+    const app = testApp(repo, testActor({ allowed_kb_ids: [KB_ID, OTHER_KB_ID] }));
 
     const created = await app.request('/api/conversations', jsonRequest({
-      kb_ids: [KB_ID], title: '手动标题',
+      kb_ids: [], title: '手动标题',
     }));
     expect(created.status).toBe(200);
     const createdBody = await created.json() as Record<string, any>;
     const conversationId = createdBody.conversation_id as string;
     expect(createdBody.title).toBe('手动标题');
-    expect(createdBody.kb_ids).toEqual([KB_ID]);
+    expect(createdBody.kb_ids).toEqual([KB_ID, OTHER_KB_ID]);
     expect(typeof createdBody.created_at).toBe('string');
 
     const listed = await app.request('/api/conversations');
@@ -105,21 +105,27 @@ describe('conversationsRouter', () => {
     expect(listedBody.next_cursor).toBeNull();
     expect(listedBody.items.length).toBe(1);
     expect(listedBody.items[0]!.conversation_id).toBe(conversationId);
+    expect(listedBody.items[0]!.kb_ids).toEqual([KB_ID, OTHER_KB_ID]);
     expect(listedBody.items[0]!.last_message_preview).toBeNull();
 
     const detail = await app.request('/api/conversations/' + conversationId);
     const detailBody = await detail.json() as Record<string, any>;
     expect(detailBody.conversation_id).toBe(conversationId);
     expect(detailBody.title).toBe('手动标题');
-    expect(detailBody.kb_ids).toEqual([KB_ID]);
+    expect(detailBody.kb_ids).toEqual([KB_ID, OTHER_KB_ID]);
     expect(detailBody.status).toBe('active');
     expect(detailBody.summary).toBeNull();
     expect(detailBody.created_at).toBe(createdBody.created_at);
     expect(detailBody.updated_at).toBeString();
 
     const patched = await app.request(
-      '/api/conversations/' + conversationId, jsonRequest({ title: ' 新标题 ' }, 'PATCH'));
-    expect(await patched.json()).toEqual({ conversation_id: conversationId, title: '新标题' });
+      '/api/conversations/' + conversationId,
+      jsonRequest({ title: ' 新标题 ', kb_ids: [KB_ID] }, 'PATCH'));
+    expect(await patched.json()).toMatchObject({
+      conversation_id: conversationId, title: '新标题', kb_ids: [KB_ID],
+    });
+    const updatedDetail = await app.request('/api/conversations/' + conversationId);
+    expect((await updatedDetail.json() as Record<string, any>).kb_ids).toEqual([KB_ID]);
 
     const empty = await app.request(
       '/api/conversations/' + conversationId, jsonRequest({ title: '   ' }, 'PATCH'));
@@ -147,6 +153,9 @@ describe('conversationsRouter', () => {
     expect(await denied.json()).toEqual({
       code: 'KB_SCOPE_DENIED', message: '请求知识库超出用户权限',
     });
+    const mixed = await app.request(
+      '/api/conversations', jsonRequest({ kb_ids: [KB_ID, OTHER_KB_ID] }));
+    expect(mixed.status).toBe(403);
     const missing = await app.request('/api/conversations', jsonRequest({}));
     expect(missing.status).toBe(400);
     expect((await missing.json() as Record<string, any>).code).toBe('INVALID_REQUEST_BODY');
@@ -158,6 +167,27 @@ describe('conversationsRouter', () => {
     const notFound = await app.request('/api/conversations/' + newUuid());
     expect(notFound.status).toBe(404);
     expect((await notFound.json() as Record<string, any>).code).toBe('CONVERSATION_NOT_FOUND');
+  });
+
+  test('消息请求不能越过会话保存的知识库范围', async () => {
+    const repo = new InMemoryConversationRepository();
+    const app = testApp(repo, testActor({ allowed_kb_ids: [KB_ID, OTHER_KB_ID] }));
+    const conversationId = newUuid();
+    await repo.createSession({
+      id: conversationId, tenant_id: TENANT_ID, user_id: USER_ID, title: '单库会话',
+      kb_ids: [KB_ID], status: 'active', summary: null,
+      created_at: nowRfc3339(), updated_at: nowRfc3339(),
+    });
+    const response = await app.request(
+      `/api/conversations/${conversationId}/messages`,
+      jsonRequest({ content: '尝试跨库', kb_ids: [OTHER_KB_ID] }));
+    expect({
+      status: response.status,
+      body: await response.json(),
+    }).toEqual({
+      status: 403,
+      body: { code: 'KB_SCOPE_DENIED', message: '请求知识库超出用户权限' },
+    });
   });
 
   test('权限不足与 API scope 不足', async () => {

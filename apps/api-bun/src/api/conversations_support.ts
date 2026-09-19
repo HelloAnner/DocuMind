@@ -18,6 +18,12 @@ export function intersectKbIds(left: string[], right: string[]): string[] {
   return left.filter((id) => right.includes(id));
 }
 
+export function requestedKbScope(requestedKbIds: string[], allowedKbIds: string[]): string[] {
+  const requested = [...new Set(requestedKbIds)];
+  if (requested.some((id) => !allowedKbIds.includes(id))) throw AppError.kbScopeDenied();
+  return requested.length === 0 ? [...allowedKbIds] : requested;
+}
+
 /** 对应 Rust owned_session：必须存在且属于当前用户。 */
 export async function ownedSession(
   state: AppState, actor: CurrentActor, conversationId: string,
@@ -29,17 +35,18 @@ export async function ownedSession(
   return session;
 }
 
-/** 对应 Rust resolve_conversation_scope：请求知识库与用户可见范围取交集。 */
+/** 请求范围只能收窄会话创建时保存的知识库范围。 */
 export async function resolveConversationScope(
   state: AppState, actor: CurrentActor, conversationId: string, requestedKbIds: string[],
 ): Promise<{ session: ConversationSession; effectiveKbIds: string[] }> {
   const session = await ownedSession(state, actor, conversationId);
-  const base = requestedKbIds.length === 0 ? session.kb_ids : requestedKbIds;
-  const effective = intersectKbIds(base, actor.allowed_kb_ids);
-  if (base.length > 0 && effective.length === 0) throw AppError.kbScopeDenied();
+  const configured = session.kb_ids.length === 0 ? actor.allowed_kb_ids : session.kb_ids;
+  const sessionScope = intersectKbIds(configured, actor.allowed_kb_ids);
+  const requested = [...new Set(requestedKbIds)];
+  if (requested.some((id) => !sessionScope.includes(id))) throw AppError.kbScopeDenied();
   return {
     session: session,
-    effectiveKbIds: effective.length === 0 ? session.kb_ids : effective,
+    effectiveKbIds: requested.length === 0 ? sessionScope : requested,
   };
 }
 

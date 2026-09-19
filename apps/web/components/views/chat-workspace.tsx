@@ -29,7 +29,7 @@ import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
-import { getChatModels, type ChatModelOption } from "@/lib/api";
+import { getChatModels, type ChatModelOption, type KnowledgeBase } from "@/lib/api";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -157,6 +157,119 @@ function ModelPicker({
   );
 }
 
+function KnowledgeBasePicker({
+  knowledgeBases,
+  value,
+  disabled,
+  error,
+  onChange,
+}: {
+  knowledgeBases: KnowledgeBase[];
+  value: string[];
+  disabled: boolean;
+  error?: string;
+  onChange: (kbIds: string[]) => Promise<boolean>;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const allSelected = knowledgeBases.length > 0
+    && knowledgeBases.every((kb) => value.includes(kb.id));
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  const toggle = (kbId: string) => {
+    const next = value.includes(kbId)
+      ? value.filter((id) => id !== kbId)
+      : [...value, kbId];
+    if (next.length > 0) void onChange(next);
+  };
+
+  return (
+    <div className="chat-kb-picker" ref={rootRef}>
+      <button
+        type="button"
+        className="chat-kb-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={disabled || knowledgeBases.length === 0}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <BookOpen size={14} aria-hidden="true" />
+        <span>
+          {knowledgeBases.length === 0
+            ? "暂无知识库"
+            : allSelected
+              ? `全部知识库 · ${knowledgeBases.length}`
+              : `${value.length} 个知识库`}
+        </span>
+        <ChevronUp size={13} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="chat-kb-menu" role="dialog" aria-label="选择本对话使用的知识库">
+          <div className="chat-kb-menu-heading">
+            <div>
+              <strong>检索范围</strong>
+              <span>为当前对话独立保存</span>
+            </div>
+            <span className="chat-kb-count">{value.length}/{knowledgeBases.length}</span>
+          </div>
+          <button
+            type="button"
+            className={`chat-kb-all${allSelected ? " selected" : ""}`}
+            role="checkbox"
+            aria-checked={allSelected}
+            disabled={disabled}
+            onClick={() => void onChange(knowledgeBases.map((kb) => kb.id))}
+          >
+            <span className="chat-kb-check">{allSelected ? <Check size={13} /> : null}</span>
+            <span>
+              <strong>全部知识库</strong>
+              <small>跨库检索所有当前可访问内容</small>
+            </span>
+          </button>
+          <div className="chat-kb-section-label">按知识库选择</div>
+          <div className="chat-kb-options">
+            {knowledgeBases.map((kb, index) => {
+              const checked = value.includes(kb.id);
+              return (
+                <label className={`chat-kb-option${checked ? " selected" : ""}`} key={kb.id}>
+                  <input
+                    type="checkbox"
+                    checked={checked}
+                    disabled={disabled || (checked && value.length === 1)}
+                    onChange={() => toggle(kb.id)}
+                  />
+                  <span className="chat-kb-check">{checked ? <Check size={13} /> : null}</span>
+                  <span className={`chat-kb-color tone-${index % 6}`} aria-hidden="true" />
+                  <span className="chat-kb-option-copy">
+                    <strong>{kb.name}</strong>
+                    <small>{kb.description || `${kb.doc_count} 个文档`}</small>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          {error ? <p className="chat-kb-error" role="alert">{error}</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function timeGreeting() {
   const hour = new Date().getHours();
   if (hour < 6) return "夜深了";
@@ -178,6 +291,10 @@ export function ChatWorkspace() {
     setRightOpen,
     currentId,
     availableKbs,
+    selectedKbIds,
+    updatingKbSelection,
+    kbSelectionError,
+    updateKnowledgeBaseSelection,
     sendMessage,
     retryMessage,
     cancelMessage,
@@ -200,6 +317,7 @@ export function ChatWorkspace() {
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
+  const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
   const currentFavorite = currentId ? isFavorite(currentId) : false;
   const userName = me?.user.name?.trim() || me?.user.email?.split("@")[0] || "你";
   const filesRefreshKey = messages
@@ -418,16 +536,13 @@ export function ChatWorkspace() {
               </div>
               <div className="dm-composer-toolbar">
                 <div className="dm-composer-tools">
-                  <span
-                    className="dm-composer-context"
-                    title="本次问答覆盖当前有权访问的知识库"
-                    aria-label={`本次问答覆盖${availableKbs.length > 0 ? `${availableKbs.length} 个` : "当前有权访问的"}知识库`}
-                  >
-                    <BookOpen size={14} aria-hidden="true" />
-                    <span className="dm-composer-context-label">
-                      {availableKbs.length > 0 ? `${availableKbs.length} 个知识库` : "知识库问答"}
-                    </span>
-                  </span>
+                  <KnowledgeBasePicker
+                    knowledgeBases={availableKbs}
+                    value={selectedKbIds}
+                    disabled={!!streamingId || updatingKbSelection}
+                    error={kbSelectionError}
+                    onChange={updateKnowledgeBaseSelection}
+                  />
                   {chatModels.length > 0 ? (
                     <>
                       <ModelPicker
@@ -457,6 +572,20 @@ export function ChatWorkspace() {
                         />
                       </label>
                     </>
+                  ) : null}
+                  {selectedKnowledgeBases.length > 0 ? (
+                    <div className="dm-kb-selection-badges" aria-label="当前对话知识库">
+                      {selectedKnowledgeBases.map((kb, index) => (
+                        <span
+                          className={`dm-kb-badge tone-${index % 6}`}
+                          title={kb.name}
+                          key={kb.id}
+                        >
+                          <span aria-hidden="true" />
+                          {kb.name}
+                        </span>
+                      ))}
+                    </div>
                   ) : null}
                 </div>
                 <button

@@ -89,6 +89,16 @@ export async function renameConversation(
   });
 }
 
+export async function updateConversationKnowledgeBases(
+  conversationId: string,
+  kbIds: string[]
+): Promise<{ conversation_id: string; title: string; kb_ids: string[] }> {
+  return fetchJson(`/api/conversations/${conversationId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ kb_ids: kbIds }),
+  });
+}
+
 export async function getMessageTraces(
   conversationId: string,
   messageId: string

@@ -23,8 +23,8 @@ import { SseSink, sendExecutionStarted, type PipelineContext } from './conversat
 import { runAgentPipeline } from './conversations_pipeline.ts';
 import { requireScope } from './external_api.ts';
 import {
-  describeError, intersectKbIds, messageToResponse, ownedSession, resolveConversationScope,
-  uuidParam, validateFeedbackTarget,
+  describeError, intersectKbIds, messageToResponse, ownedSession, requestedKbScope,
+  resolveConversationScope, uuidParam, validateFeedbackTarget,
 } from './conversations_support.ts';
 
 export { externalApiRouter } from './external_routes.ts';
@@ -32,7 +32,7 @@ export { externalApiRouter } from './external_routes.ts';
 const DEFAULT_LIMIT = 20;
 const MAX_TITLE_CHARS = 200;
 
-interface UpdateConversationTitleRequest { title: string; }
+interface UpdateConversationRequest { title?: unknown; kb_ids?: unknown; }
 
 export function conversationsRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();
@@ -40,7 +40,7 @@ export function conversationsRouter(): Hono<AppEnv> {
   router.post('/api/conversations', createConversationHandler);
   router.get('/api/conversations', listConversationsHandler);
   router.get('/api/conversations/:conversation_id', getConversationHandler);
-  router.patch('/api/conversations/:conversation_id', updateConversationTitleHandler);
+  router.patch('/api/conversations/:conversation_id', updateConversationHandler);
   router.delete('/api/conversations/:conversation_id', deleteConversationHandler);
   router.get('/api/conversations/:conversation_id/messages', getMessagesHandler);
   router.post('/api/conversations/:conversation_id/messages', sendMessageHandler);
@@ -71,11 +71,7 @@ export async function createConversationHandler(c: Context<AppEnv>): Promise<Res
     // Rust: CreateConversationRequest.kb_ids 无 serde default，缺字段时 axum 直接 422
     throw AppError.badRequest('INVALID_REQUEST_BODY', 'kb_ids 字段必填');
   }
-  const effectiveKbIds = intersectKbIds(request.kb_ids, actor.allowed_kb_ids);
-  if (request.kb_ids.length > 0 && effectiveKbIds.length === 0) {
-    throw AppError.kbScopeDenied();
-  }
-  const kbIds = effectiveKbIds.length === 0 ? [...actor.allowed_kb_ids] : effectiveKbIds;
+  const kbIds = requestedKbScope(request.kb_ids, actor.allowed_kb_ids);
   const session: ConversationSession = {
     id: newUuid(),
     tenant_id: actor.tenant_id,
@@ -93,6 +89,7 @@ export async function createConversationHandler(c: Context<AppEnv>): Promise<Res
     title: session.title,
     kb_ids: session.kb_ids,
     created_at: session.created_at,
+    updated_at: session.updated_at,
   });
 }
 
@@ -131,25 +128,57 @@ export async function getConversationHandler(c: Context<AppEnv>): Promise<Respon
   });
 }
 
-async function updateConversationTitleHandler(c: Context<AppEnv>): Promise<Response> {
+async function updateConversationHandler(c: Context<AppEnv>): Promise<Response> {
   const state = c.get('appState');
   const actor = c.get('actor');
   const conversationId = uuidParam(c, 'conversation_id');
-  const request = await c.req.json() as UpdateConversationTitleRequest;
-  if (typeof request.title !== 'string') {
-    throw AppError.badRequest('INVALID_REQUEST_BODY', 'title 字段必填');
+  const request = await c.req.json() as UpdateConversationRequest;
+  const hasTitle = request.title !== undefined;
+  const hasKbIds = request.kb_ids !== undefined;
+  if (!hasTitle && !hasKbIds) {
+    throw AppError.badRequest('INVALID_REQUEST_BODY', 'title 或 kb_ids 字段必填');
   }
-  const title = request.title.trim();
-  if (title === '') {
-    throw AppError.badRequest('EMPTY_CONVERSATION_TITLE', '会话标题不能为空');
+
+  let title: string | undefined;
+  if (hasTitle) {
+    if (typeof request.title !== 'string') {
+      throw AppError.badRequest('INVALID_REQUEST_BODY', 'title 必须是字符串');
+    }
+    title = request.title.trim();
+    if (title === '') {
+      throw AppError.badRequest('EMPTY_CONVERSATION_TITLE', '会话标题不能为空');
+    }
+    if ([...title].length > MAX_TITLE_CHARS) {
+      throw AppError.badRequest('CONVERSATION_TITLE_TOO_LONG', '会话标题不能超过 200 个字');
+    }
   }
-  if ([...title].length > MAX_TITLE_CHARS) {
-    throw AppError.badRequest('CONVERSATION_TITLE_TOO_LONG', '会话标题不能超过 200 个字');
+
+  let kbIds: string[] | undefined;
+  if (hasKbIds) {
+    if (!Array.isArray(request.kb_ids)
+      || request.kb_ids.some((id: unknown) => typeof id !== 'string')) {
+      throw AppError.badRequest('INVALID_REQUEST_BODY', 'kb_ids 必须是字符串数组');
+    }
+    kbIds = requestedKbScope(request.kb_ids as string[], actor.allowed_kb_ids);
   }
-  const updated = await state.repository.updateSessionTitle(
-    actor.tenant_id, actor.user_id, conversationId, title, true);
-  if (!updated) throw AppError.conversationNotFound();
-  return c.json({ conversation_id: conversationId, title: title });
+
+  if (title !== undefined) {
+    const updated = await state.repository.updateSessionTitle(
+      actor.tenant_id, actor.user_id, conversationId, title, true);
+    if (!updated) throw AppError.conversationNotFound();
+  }
+  const session = await ownedSession(state, actor, conversationId);
+  if (kbIds !== undefined) {
+    session.kb_ids = kbIds;
+    session.updated_at = nowRfc3339();
+    await state.repository.updateSession(session);
+  }
+  return c.json({
+    conversation_id: conversationId,
+    title: session.title,
+    kb_ids: session.kb_ids,
+    updated_at: session.updated_at,
+  });
 }
 
 async function deleteConversationHandler(c: Context<AppEnv>): Promise<Response> {
@@ -209,6 +238,9 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
   }
   const content = request.content.trim();
   if (content === '') throw AppError.badRequest('EMPTY_MESSAGE', '消息内容不能为空');
+  const scope = await resolveConversationScope(
+    state, actor, conversationId, request.kb_ids ?? []);
+  const session = scope.session;
   const modelSettings = resolveChatModel(
     state.config, request.model_id, request.thinking_enabled);
   const agentKernel = new PiAgentKernel({
@@ -216,10 +248,6 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
     settings: modelSettings,
     streamFn: buildPiStreamFn(modelSettings),
   });
-
-  const scope = await resolveConversationScope(
-    state, actor, conversationId, request.kb_ids ?? []);
-  const session = scope.session;
 
   const clientRequestId = request.client_request_id ?? null;
   if (clientRequestId !== null) {

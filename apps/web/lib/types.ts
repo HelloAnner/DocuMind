@@ -15,6 +15,7 @@ export type FeedbackReason =
 export interface Conversation {
   conversation_id: UUID;
   title: string;
+  kb_ids: UUID[];
   last_message_preview?: string;
   updated_at: string;
 }
