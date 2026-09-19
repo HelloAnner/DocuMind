@@ -19,6 +19,7 @@ function chunk(id: string, title: string, content: string): RetrievedChunk {
     primary_anchor_id: null,
     anchor_quality: 'structural',
     primary_anchor: null,
+    anchors: [],
     metadata: {},
     score: 1.0,
     source: 'dense',

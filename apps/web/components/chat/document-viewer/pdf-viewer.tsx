@@ -1,443 +1,340 @@
 "use client";
 
-import { filePreviewPagePdfUrl } from "@/lib/api";
+import { GlobalWorkerOptions, getDocument, TextLayer } from "pdfjs-dist";
+import type {
+  PDFDocumentLoadingTask,
+  PDFDocumentProxy,
+  PDFPageProxy,
+  PageViewport,
+  RenderTask,
+} from "pdfjs-dist";
+import { ChevronLeft, ChevronRight, Minus, Plus, RefreshCw, Scan } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { filePreviewContentUrl } from "@/lib/api";
 import { getAuthHeaders } from "@/lib/auth";
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist";
 
 interface PdfViewerProps {
   docId: string;
-  cacheKey?: string;
   conversationId?: string;
   initialPage?: number | null;
-  anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
+  anchorBox?: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    unit?: string;
+    rotation?: number;
+  };
   fileName?: string;
   onReady?: () => void;
 }
 
-const pdfCache = new Map<string, Promise<PDFDocumentProxy>>();
-const pageBlobCache = new Map<string, Promise<{ blob: Blob; totalPages?: number }>>();
-const objectUrlCache = new Map<string, string>();
-
-async function getCachedPageBlob(
-  docId: string,
-  pageNumber: number,
-  conversationId?: string
-): Promise<{ blob: Blob; totalPages?: number }> {
-  const key = `${conversationId ?? "direct"}:${docId}:page:${pageNumber}`;
-  const cached = pageBlobCache.get(key);
-  if (cached) return cached;
-
-  const promise = (async () => {
-    const response = await fetch(filePreviewPagePdfUrl(docId, pageNumber, conversationId), {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) {
-      throw new Error(`page ${pageNumber} fetch failed: ${response.status}`);
-    }
-    const totalHeader = response.headers.get("X-Total-Pages");
-    const blob = await response.blob();
-    return {
-      blob,
-      totalPages: totalHeader ? Number(totalHeader) : undefined,
-    };
-  })();
-
-  pageBlobCache.set(key, promise);
-  promise.catch(() => pageBlobCache.delete(key));
-  return promise;
-}
-
-async function getCachedObjectUrl(docId: string, pageNumber: number, blob: Blob): Promise<string> {
-  const key = `${docId}:page:${pageNumber}`;
-  const cached = objectUrlCache.get(key);
-  if (cached) return cached;
-
-  const url = URL.createObjectURL(blob);
-  objectUrlCache.set(key, url);
-  return url;
-}
-
-async function getCachedPdf(sourceKey: string, url: string): Promise<PDFDocumentProxy> {
-  const cached = pdfCache.get(sourceKey);
-  if (cached) return cached;
-
-  const promise = (async () => {
-    const pdfjs = await import("pdfjs-dist");
-    const publicBasePath = process.env.NEXT_PUBLIC_API_BASE ?? "";
-    pdfjs.GlobalWorkerOptions.workerSrc = `${publicBasePath}/vendor/pdf.worker.mjs`;
-    const loadingTask: any = pdfjs.getDocument(url);
-    return loadingTask.promise;
-  })();
-
-  pdfCache.set(sourceKey, promise);
-  promise.catch(() => pdfCache.delete(sourceKey));
-  return promise;
-}
+type ViewerStatus = "loading" | "ready" | "error";
 
 export function PdfViewer({
   docId,
-  cacheKey,
   conversationId,
   initialPage,
   anchorBox,
+  fileName,
   onReady,
 }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const [totalPages, setTotalPages] = useState<number>(0);
-  const [loadedPages, setLoadedPages] = useState<number[]>([]);
-  const [errorMessage, setErrorMessage] = useState<string>("");
-
-  // 先加载目标页拿到总页数，再展开默认范围
-  useEffect(() => {
-    let cancelled = false;
-
-    async function bootstrap() {
-      try {
-        const target = Math.max(1, initialPage ?? 1);
-        const { blob, totalPages: totalHeader } = await getCachedPageBlob(
-          docId,
-          target,
-          conversationId
-        );
-
-        const url = await getCachedObjectUrl(docId, target, blob);
-        const sourceKey = `${cacheKey ?? docId}:page:${target}`;
-        const pdf = await getCachedPdf(sourceKey, url);
-        if (cancelled) return;
-
-        const pageCount = totalHeader && totalHeader > 0 ? totalHeader : pdf.numPages;
-        setTotalPages(pageCount);
-
-        setLoadedPages([target]);
-        onReady?.();
-      } catch (error) {
-        console.error(`[PdfViewer] bootstrap error:`, error);
-        if (!cancelled) {
-          setErrorMessage(error instanceof Error ? error.message : "PDF 加载失败");
-        }
-      }
-    }
-
-    bootstrap();
-    return () => {
-      cancelled = true;
-    };
-  }, [docId, cacheKey, initialPage, onReady, conversationId]);
-
-  // 滚动懒加载：只加载进入可视区域的 skeleton 及其相邻 1 页
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container || totalPages === 0) return;
-
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (!entry.isIntersecting) return;
-          const pageAttr = (entry.target as HTMLElement).dataset.page;
-          if (!pageAttr) return;
-          const page = Number(pageAttr);
-          setLoadedPages((prev) => {
-            if (prev.includes(page)) return prev;
-            const next = new Set(prev);
-            for (let p = page - 1; p <= page + 1; p += 1) {
-              if (p >= 1 && p <= totalPages) next.add(p);
-            }
-            return Array.from(next).sort((a, b) => a - b);
-          });
-        });
-      },
-      { root: container, rootMargin: "0px", threshold: 0 }
-    );
-
-    container.querySelectorAll<HTMLElement>(".dm-pdf-page-skeleton").forEach((el) => {
-      observer.observe(el);
-    });
-
-    return () => observer.disconnect();
-  }, [totalPages, loadedPages]);
-
-  const allPages = useMemo(() => {
-    const pages: number[] = [];
-    for (let p = 1; p <= totalPages; p += 1) {
-      pages.push(p);
-    }
-    return pages;
-  }, [totalPages]);
-
-  const targetScrolledRef = useRef(false);
-
-  return (
-    <div ref={containerRef} className="dm-pdf-viewer">
-      {errorMessage && <div className="dm-document-error">{errorMessage}</div>}
-      {totalPages === 0 && !errorMessage && (
-        <div className="dm-document-loading">正在打开原文…</div>
-      )}
-      {allPages.map((pageNumber) => {
-        const isLoaded = loadedPages.includes(pageNumber);
-        const isTarget = pageNumber === (initialPage ?? 1);
-        return (
-          <div
-            key={pageNumber}
-            data-page={pageNumber}
-            className={`dm-pdf-page-wrapper ${isLoaded ? "is-loaded" : "dm-pdf-page-skeleton"}`}
-          >
-            {isLoaded ? (
-              <SinglePdfPage
-                docId={docId}
-                cacheKey={cacheKey}
-                conversationId={conversationId}
-                pageNumber={pageNumber}
-                totalPages={totalPages}
-                isTarget={isTarget}
-                anchorBox={isTarget ? anchorBox : undefined}
-                onRender={
-                  isTarget
-                    ? () => {
-                        if (targetScrolledRef.current) return;
-                        targetScrolledRef.current = true;
-                        const container = containerRef.current;
-                        const target = container?.querySelector<HTMLElement>(
-                          `.dm-pdf-page-wrapper[data-page="${initialPage ?? 1}"]`
-                        );
-                        if (container && target) {
-                          container.scrollTo({
-                            top: target.offsetTop - container.offsetTop,
-                            behavior: "smooth",
-                          });
-                        }
-                      }
-                    : undefined
-                }
-              />
-            ) : (
-              <div className="dm-pdf-skeleton">
-                <span>第 {pageNumber} / {totalPages} 页</span>
-              </div>
-            )}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-interface SinglePdfPageProps {
-  docId: string;
-  cacheKey?: string;
-  conversationId?: string;
-  pageNumber: number;
-  totalPages: number;
-  isTarget: boolean;
-  anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
-  onRender?: () => void;
-}
-
-interface PageSize {
-  width: number;
-  height: number;
-  cssWidth: number;
-  cssHeight: number;
-  scale: number;
-}
-
-function SinglePdfPage({
-  docId,
-  cacheKey,
-  conversationId,
-  pageNumber,
-  totalPages,
-  isTarget,
-  anchorBox,
-  onRender,
-}: SinglePdfPageProps) {
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
-  const pageRef = useRef<PDFPageProxy | null>(null);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [size, setSize] = useState<PageSize | null>(null);
+  const onReadyRef = useRef(onReady);
+  const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
+  const [status, setStatus] = useState<ViewerStatus>("loading");
+  const [errorMessage, setErrorMessage] = useState("");
+  const [slow, setSlow] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [pageNumber, setPageNumber] = useState(Math.max(1, initialPage ?? 1));
+  const [totalPages, setTotalPages] = useState(0);
+  const [fitWidth, setFitWidth] = useState(true);
+  const [zoom, setZoom] = useState(1);
+  const [containerWidth, setContainerWidth] = useState(0);
 
-  // 加载单页 PDF 并计算 canvas 尺寸
+  useEffect(() => {
+    onReadyRef.current = onReady;
+  }, [onReady]);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setContainerWidth(entry.contentRect.width);
+    });
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
+    let loadingTask: PDFDocumentLoadingTask | null = null;
+    let timedOut = false;
+    setPdf(null);
+    setStatus("loading");
+    setErrorMessage("");
+    setSlow(false);
+    setTotalPages(0);
 
-    async function prepare() {
+    const slowTimer = window.setTimeout(() => setSlow(true), 5_000);
+    const timeoutTimer = window.setTimeout(() => {
+      timedOut = true;
+      void loadingTask?.destroy();
+      if (!cancelled) {
+        setStatus("error");
+        setErrorMessage("原文加载超时，请重试或下载原文查看。");
+      }
+    }, 15_000);
+
+    void (async () => {
       try {
-        const { blob } = await getCachedPageBlob(docId, pageNumber, conversationId);
-        const url = await getCachedObjectUrl(docId, pageNumber, blob);
-        const sourceKey = `${cacheKey ?? docId}:page:${pageNumber}`;
-        const pdf = await getCachedPdf(sourceKey, url);
-        if (cancelled) return;
-
-        const page = await pdf.getPage(1);
-        if (cancelled) {
-          page.cleanup();
+        const publicBasePath = process.env.NEXT_PUBLIC_API_BASE ?? "";
+        GlobalWorkerOptions.workerSrc = `${publicBasePath}/vendor/pdf.worker.mjs`;
+        loadingTask = getDocument({
+          url: filePreviewContentUrl(docId, conversationId),
+          httpHeaders: getAuthHeaders(),
+          rangeChunkSize: 128 * 1024,
+        });
+        const document = await loadingTask.promise;
+        if (cancelled || timedOut) {
+          await document.destroy();
           return;
         }
-        pageRef.current = page;
-
-        const wrapper = wrapperRef.current;
-        const containerWidth = wrapper?.clientWidth || 620;
-        const baseViewport = page.getViewport({ scale: 1 });
-        const horizontalPadding = 32;
-        const scale = Math.min(
-          1.5,
-          Math.max(0.5, (containerWidth - horizontalPadding) / baseViewport.width)
-        );
-        const viewport = page.getViewport({ scale });
-        const dpr = window.devicePixelRatio || 1;
-
-        setSize({
-          width: Math.floor(viewport.width * dpr),
-          height: Math.floor(viewport.height * dpr),
-          cssWidth: Math.floor(viewport.width),
-          cssHeight: Math.floor(viewport.height),
-          scale,
-        });
+        const target = Math.min(Math.max(1, initialPage ?? 1), document.numPages);
+        setPdf(document);
+        setTotalPages(document.numPages);
+        setPageNumber(target);
         setStatus("ready");
-        onRender?.();
       } catch (error) {
-        console.error(`[SinglePdfPage] page ${pageNumber} error:`, error);
-        if (!cancelled) {
+        if (!cancelled && !timedOut) {
           setStatus("error");
+          setErrorMessage(error instanceof Error ? error.message : "PDF 加载失败");
         }
-      }
-    }
-
-    prepare();
-    return () => {
-      cancelled = true;
-      pageRef.current?.cleanup();
-      pageRef.current = null;
-    };
-  }, [docId, cacheKey, pageNumber, conversationId]);
-
-  // canvas 尺寸确定后绘制页面与可选文本层
-  useEffect(() => {
-    if (!size || !canvasRef.current || !pageRef.current) return;
-    const canvas = canvasRef.current;
-    const page = pageRef.current;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    const dpr = window.devicePixelRatio || 1;
-    ctx.scale(dpr, dpr);
-
-    const viewport = page.getViewport({ scale: size.scale });
-    const task = page.render({ canvasContext: ctx, viewport });
-
-    let textLayerTask: { cancel: () => void } | undefined;
-    (async () => {
-      try {
-        const textLayerDiv = textLayerRef.current;
-        if (!textLayerDiv) return;
-        textLayerDiv.innerHTML = "";
-        const pdfjs = await import("pdfjs-dist");
-        const textLayer = new pdfjs.TextLayer({
-          textContentSource: page.streamTextContent(),
-          container: textLayerDiv,
-          viewport,
-        });
-        textLayerTask = textLayer;
-        await textLayer.render();
-        renderAnchorBoxOverlay(overlayRef.current, anchorBox, size, isTarget);
-      } catch {
-        // text layer 是可选能力，失败不影响阅读
+      } finally {
+        window.clearTimeout(slowTimer);
+        window.clearTimeout(timeoutTimer);
+        if (!cancelled) setSlow(false);
       }
     })();
 
     return () => {
-      task.cancel?.();
-      textLayerTask?.cancel();
+      cancelled = true;
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(timeoutTimer);
+      void loadingTask?.destroy();
     };
-  }, [size, anchorBox, isTarget]);
+  }, [conversationId, docId, reloadKey]);
+
+  useEffect(() => {
+    if (!pdf) return;
+    setPageNumber(Math.min(Math.max(1, initialPage ?? 1), pdf.numPages));
+  }, [initialPage, pdf]);
+
+  useEffect(() => {
+    if (!pdf || !canvasRef.current || !containerRef.current || containerWidth === 0) return;
+    let cancelled = false;
+    let page: PDFPageProxy | null = null;
+    let renderTask: RenderTask | null = null;
+    let textLayerTask: TextLayer | null = null;
+
+    void (async () => {
+      try {
+        page = await pdf.getPage(pageNumber);
+        if (cancelled) return;
+        const baseViewport = page.getViewport({ scale: 1 });
+        const availableWidth = Math.max(280, containerWidth - 32);
+        const scale = fitWidth
+          ? Math.min(2, Math.max(0.35, availableWidth / baseViewport.width))
+          : zoom;
+        const viewport = page.getViewport({ scale });
+        const canvas = canvasRef.current;
+        const textLayerNode = textLayerRef.current;
+        const overlay = overlayRef.current;
+        if (!canvas || !textLayerNode || !overlay) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = Math.floor(viewport.width * dpr);
+        canvas.height = Math.floor(viewport.height * dpr);
+        canvas.style.width = `${viewport.width}px`;
+        canvas.style.height = `${viewport.height}px`;
+        textLayerNode.style.width = `${viewport.width}px`;
+        textLayerNode.style.height = `${viewport.height}px`;
+        overlay.style.width = `${viewport.width}px`;
+        overlay.style.height = `${viewport.height}px`;
+        textLayerNode.innerHTML = "";
+        overlay.innerHTML = "";
+
+        const context = canvas.getContext("2d");
+        if (!context) throw new Error("浏览器无法创建 PDF 画布");
+        renderTask = page.render({
+          canvasContext: context,
+          viewport,
+          transform: dpr === 1 ? undefined : [dpr, 0, 0, dpr, 0, 0],
+        });
+        await renderTask.promise;
+        if (cancelled) return;
+
+        textLayerTask = new TextLayer({
+          textContentSource: page.streamTextContent(),
+          container: textLayerNode,
+          viewport,
+        });
+        await textLayerTask.render();
+        if (cancelled) return;
+        renderAnchorBox(overlay, anchorBox, page, viewport, pageNumber === (initialPage ?? 1));
+        onReadyRef.current?.();
+      } catch (error) {
+        if (!cancelled && (!(error instanceof Error) || error.name !== "RenderingCancelledException")) {
+          setStatus("error");
+          setErrorMessage(error instanceof Error ? error.message : "PDF 页面渲染失败");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+      textLayerTask?.cancel();
+      page?.cleanup();
+    };
+  }, [anchorBox, containerWidth, fitWidth, initialPage, pageNumber, pdf, zoom]);
+
+  const changePage = (next: number) => {
+    if (totalPages === 0) return;
+    setPageNumber(Math.min(Math.max(1, next), totalPages));
+  };
 
   return (
-    <div
-      ref={wrapperRef}
-      className={`dm-pdf-single-page ${isTarget ? "is-target" : ""} ${
-        status === "ready" ? "is-ready" : ""
-      }`}
-    >
-      {status === "loading" && (
-        <div className="dm-pdf-skeleton">
-          <span>第 {pageNumber} / {totalPages} 页</span>
+    <div className="dm-pdf-viewer-shell" aria-label={fileName ? `${fileName} PDF 预览` : "PDF 预览"}>
+      <div className="dm-pdf-toolbar">
+        <div className="dm-pdf-page-controls">
+          <button
+            aria-label="上一页"
+            disabled={pageNumber <= 1 || status !== "ready"}
+            onClick={() => changePage(pageNumber - 1)}
+            type="button"
+          >
+            <ChevronLeft size={16} />
+          </button>
+          <label>
+            <span className="sr-only">页码</span>
+            <input
+              aria-label="页码"
+              disabled={status !== "ready"}
+              max={Math.max(1, totalPages)}
+              min={1}
+              onChange={(event) => changePage(Number(event.target.value))}
+              type="number"
+              value={pageNumber}
+            />
+          </label>
+          <span>/ {totalPages || "—"}</span>
+          <button
+            aria-label="下一页"
+            disabled={pageNumber >= totalPages || status !== "ready"}
+            onClick={() => changePage(pageNumber + 1)}
+            type="button"
+          >
+            <ChevronRight size={16} />
+          </button>
         </div>
-      )}
-      {status === "error" && (
-        <div className="dm-pdf-skeleton dm-pdf-skeleton-error">第 {pageNumber} 页加载失败</div>
-      )}
-      {status === "ready" && size && (
-        <div className="dm-pdf-page">
-          <canvas
-            ref={canvasRef}
-            width={size.width}
-            height={size.height}
-            style={{ width: size.cssWidth, height: size.cssHeight }}
-          />
-          <div
-            ref={textLayerRef}
-            className="dm-pdf-text-layer"
-            style={{ width: size.cssWidth, height: size.cssHeight }}
-          />
-          <div
-            ref={overlayRef}
-            className="dm-pdf-anchor-overlay"
-            style={{ width: size.cssWidth, height: size.cssHeight }}
-          />
+        <div className="dm-pdf-zoom-controls">
+          <button
+            aria-label="缩小"
+            disabled={status !== "ready" || (!fitWidth && zoom <= 0.5)}
+            onClick={() => {
+              setFitWidth(false);
+              setZoom((value) => Math.max(0.5, value - 0.15));
+            }}
+            type="button"
+          >
+            <Minus size={15} />
+          </button>
+          <button
+            aria-label="适合宽度"
+            className={fitWidth ? "is-active" : ""}
+            disabled={status !== "ready"}
+            onClick={() => setFitWidth(true)}
+            type="button"
+          >
+            <Scan size={15} />
+            <span>适宽</span>
+          </button>
+          <button
+            aria-label="放大"
+            disabled={status !== "ready" || (!fitWidth && zoom >= 2.5)}
+            onClick={() => {
+              setFitWidth(false);
+              setZoom((value) => Math.min(2.5, value + 0.15));
+            }}
+            type="button"
+          >
+            <Plus size={15} />
+          </button>
         </div>
-      )}
+      </div>
+
+      <div ref={containerRef} className="dm-pdf-viewer">
+        {status === "loading" ? (
+          <div className="dm-document-loading" role="status">
+            <span>正在打开原文…</span>
+            {slow ? <small>文件较大，仍在加载</small> : null}
+          </div>
+        ) : null}
+        {status === "error" ? (
+          <div className="dm-document-error" role="alert">
+            <strong>PDF 预览失败</strong>
+            <span>{errorMessage}</span>
+            <button onClick={() => setReloadKey((value) => value + 1)} type="button">
+              <RefreshCw size={15} />
+              重试
+            </button>
+          </div>
+        ) : null}
+        {status === "ready" ? (
+          <div className="dm-pdf-page" data-page={pageNumber}>
+            <canvas ref={canvasRef} />
+            <div ref={textLayerRef} className="dm-pdf-text-layer" />
+            <div ref={overlayRef} className="dm-pdf-anchor-overlay" />
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function renderAnchorBoxOverlay(
-  overlay: HTMLDivElement | null,
-  anchorBox: SinglePdfPageProps["anchorBox"],
-  size: PageSize | null,
+function renderAnchorBox(
+  overlay: HTMLDivElement,
+  anchorBox: PdfViewerProps["anchorBox"],
+  page: PDFPageProxy,
+  viewport: PageViewport,
   isTarget: boolean
 ) {
-  if (!overlay || !anchorBox || !size || !isTarget) {
-    if (overlay) overlay.innerHTML = "";
-    return;
-  }
   overlay.innerHTML = "";
-  const rotation = anchorBox.rotation ?? 0;
-  const effectiveRotation = ((rotation % 360) + 360) % 360;
-  let left = anchorBox.x0 * size.cssWidth;
-  let top = anchorBox.y0 * size.cssHeight;
-  let width = (anchorBox.x1 - anchorBox.x0) * size.cssWidth;
-  let height = (anchorBox.y1 - anchorBox.y0) * size.cssHeight;
+  if (!anchorBox || !isTarget) return;
 
-  // PDF 用户坐标原点在左下角；渲染容器原点在左上角，因此垂直翻转。
-  top = size.cssHeight - top - height;
-
-  // 处理 90/180/270 简单旋转：交换宽高并重新映射左上角。
-  if (effectiveRotation === 90 || effectiveRotation === 270) {
-    const tmp = width;
-    width = height;
-    height = tmp;
-  }
-  if (effectiveRotation === 90) {
-    left = anchorBox.y0 * size.cssWidth;
-    top = (1.0 - anchorBox.x1) * size.cssHeight;
-  } else if (effectiveRotation === 180) {
-    left = (1.0 - anchorBox.x1) * size.cssWidth;
-    top = anchorBox.y0 * size.cssHeight;
-  } else if (effectiveRotation === 270) {
-    left = (1.0 - anchorBox.y1) * size.cssWidth;
-    top = anchorBox.x0 * size.cssHeight;
-  }
-
+  const [xMin, yMin, xMax, yMax] = page.view;
+  const source = [
+    xMin + anchorBox.x0 * (xMax - xMin),
+    yMin + anchorBox.y0 * (yMax - yMin),
+    xMin + anchorBox.x1 * (xMax - xMin),
+    yMin + anchorBox.y1 * (yMax - yMin),
+  ];
+  const [leftA, topA, leftB, topB] = viewport.convertToViewportRectangle(source);
+  const left = Math.max(0, Math.min(leftA, leftB));
+  const top = Math.max(0, Math.min(topA, topB));
+  const width = Math.min(viewport.width - left, Math.abs(leftB - leftA));
+  const height = Math.min(viewport.height - top, Math.abs(topB - topA));
   if (width <= 0 || height <= 0) return;
 
   const box = document.createElement("div");
   box.className = "dm-anchor-box";
-  box.style.left = `${Math.max(0, left)}px`;
-  box.style.top = `${Math.max(0, top)}px`;
-  box.style.width = `${Math.min(width, size.cssWidth - left)}px`;
-  box.style.height = `${Math.min(height, size.cssHeight - top)}px`;
+  box.style.left = `${left}px`;
+  box.style.top = `${top}px`;
+  box.style.width = `${width}px`;
+  box.style.height = `${height}px`;
   overlay.appendChild(box);
 }

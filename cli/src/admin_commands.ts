@@ -14,6 +14,7 @@ import type {
   AdminDocument,
   AdminDocumentDetail,
   DocumentJob,
+  FilePreviewTransport,
   KnowledgeBase,
   KnowledgeBaseUpsert,
 } from "./types.ts";
@@ -78,6 +79,7 @@ export async function documentCommand(
   if (["show", "preview", "blocks", "cleaned-blocks", "chunks", "tables", "diagnose"].includes(subcommand)) {
     return showDocumentSection(args, api, json, subcommand);
   }
+  if (subcommand === "preview-file") return showFilePreviewTransport(args, api, json);
   if (subcommand === "upload" || subcommand === "upload-batch") return uploadDocument(args, api, json);
   if (subcommand === "jobs") return listDocumentJobs(args, api, json);
   if (subcommand === "job" || subcommand === "job-wait") return showDocumentJob(args, api, json, subcommand === "job-wait");
@@ -135,6 +137,51 @@ async function showDocumentSection(
   else if (section === "chunks") printChunks(detail);
   else if (section === "preview") printPreview(detail);
   else printJson(value);
+  return 0;
+}
+
+/** 原文预览传输契约：完整 PDF 必须支持字节范围，PDF.js 才能按需翻页。 */
+export function assertRangedPreview(transport: FilePreviewTransport): void {
+  const { status, accept_ranges, content_range, byte_length } = transport.range;
+  if (status !== 206 || !accept_ranges.toLowerCase().includes("bytes") || !content_range.startsWith("bytes 0-")) {
+    throw new CliError(
+      `原文预览不支持字节范围: status=${status} accept-ranges=${accept_ranges || "-"}` +
+      ` content-range=${content_range || "-"}`,
+      1,
+    );
+  }
+  if (byte_length === 0) throw new CliError("原文预览字节范围返回空内容", 1);
+}
+
+async function showFilePreviewTransport(
+  args: ParsedArgs,
+  api: ApiClient,
+  json: boolean,
+): Promise<number> {
+  const id = requiredPositional(args, 2, "documents preview-file 需要文档 ID");
+  const transport = await api.filePreviewTransport(id);
+  assertRangedPreview(transport);
+  if (json) {
+    printJson(transport);
+    return 0;
+  }
+  const { preview, manifest, signed, range } = transport;
+  const pageCount = manifest["page_count"];
+  process.stdout.write(`${String(preview["file_name"] ?? id)}\n`);
+  process.stdout.write(
+    `格式 ${String(preview["format"] ?? "-")} · 预览类型 ${String(preview["preview_type"] ?? "-")}` +
+    ` · 来源 ${String(preview["source_status"] ?? "-")}\n`,
+  );
+  process.stdout.write(
+    `转换 ${String(manifest["conversion_status"] ?? "-")}` +
+    ` · 文本层 ${manifest["text_layer_available"] === true ? "有" : "无"}` +
+    ` · 页数 ${pageCount == null ? "未知（由 PDF.js 读取）" : String(pageCount)}\n`,
+  );
+  process.stdout.write(`签名 URL 有效期 ${String(signed["expires_in_seconds"] ?? "-")} 秒\n`);
+  process.stdout.write(
+    `字节范围 ${range.status} ${range.content_range} · ${range.byte_length} bytes` +
+    ` · head=${JSON.stringify(range.head)}\n`,
+  );
   return 0;
 }
 

@@ -4,21 +4,17 @@ import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { requirePermission } from '../auth/permissions.ts';
 import {
-  contextualPreviewUrl, fetchDocument, fetchPreviewDocument, fetchReadableDocument, requiredSql,
+  contextualPreviewUrl, fetchPreviewDocument, fetchReadableDocument, requiredSql,
   signedPreviewUrl, encodePreviewAccessToken,
 } from './documents_access.ts';
-import { pathParam } from './documents_support.ts';
+import { downloadDocumentContent, downloadOfficePreviewPdf, ensureOfficePreviewPdf } from './documents_office.ts';
 import {
-  downloadDocumentContent, downloadOfficePdfPageFromDocument, downloadOfficePreviewPdf,
-  downloadPdfPageFromDocument, fetchPreviewPageCount,
-} from './documents_office.ts';
-import {
-  isOfficePreviewType, parseByteRange, previewTypeFor, sanitizeFileName, sourceStatusFor,
+  isOfficePreviewType, parseByteRange, pathParam, previewTypeFor, rangeNotSatisfiable,
+  sanitizeFileName, sourceStatusFor,
 } from './documents_support.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import type {
-  FilePreviewManifest, FilePreviewManifestPage, FilePreviewResponse, FilePreviewUrlResponse,
-  PreviewAccessQuery,
+  FilePreviewManifest, FilePreviewResponse, FilePreviewUrlResponse, PreviewAccessQuery,
 } from './documents_types.ts';
 
 function bodyOf(bytes: Uint8Array): ArrayBuffer {
@@ -70,9 +66,11 @@ export async function downloadOriginal(c: Context<AppEnv>): Promise<Response> {
         'Content-Type': 'application/octet-stream',
         'Accept-Ranges': 'bytes',
         'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
+        'Content-Length': String(end - start),
       });
       return new Response(bodyOf(bytes), { status: 206, headers });
     }
+    return rangeNotSatisfiable(totalSize);
   }
 
   const bytes = await state.storage.get(storageKey);
@@ -80,6 +78,7 @@ export async function downloadOriginal(c: Context<AppEnv>): Promise<Response> {
     'Content-Type': 'application/octet-stream',
     'Accept-Ranges': 'bytes',
     'Content-Disposition': `attachment; filename="${sanitizeFileName(fileName)}"`,
+    'Content-Length': String(totalSize),
   });
   return new Response(bodyOf(bytes), { status: 200, headers });
 }
@@ -125,7 +124,6 @@ export async function getFilePreviewUrl(c: Context<AppEnv>): Promise<Response> {
     expires_in_seconds: expiresInSeconds,
     preview_url: signedPreviewUrl(`/api/files/${docId}/preview/content`, token),
     manifest_url: signedPreviewUrl(`/api/files/${docId}/preview/manifest`, token),
-    page_pdf_url_template: signedPreviewUrl(`/api/files/${docId}/preview/pages/{page}/pdf`, token),
   };
   return c.json(body);
 }
@@ -138,16 +136,19 @@ export async function getFilePreviewManifest(c: Context<AppEnv>): Promise<Respon
   const doc = await fetchPreviewDocument(
     state, c.req.raw.headers, docId, query.preview_token, query.conversation_id,
   );
-  const pageCount = await fetchPreviewPageCount(state, doc);
-  const textLayerAvailable = ['pdf', 'txt', 'md'].includes(doc.file_type);
-  const pages: FilePreviewManifestPage[] = [];
-  if (pageCount !== null && pageCount > 0) {
-    for (let page = 1; page <= pageCount; page += 1) {
-      pages.push({
-        page, width: 595.28, height: 841.89, rotation: 0, text_layer_available: textLayerAvailable,
-      });
-    }
+  let pageCount: number | null = null;
+  if (state.sql !== null && doc.latest_parse_job_id !== null) {
+    const rows = await state.sql.unsafe(
+      `SELECT (parser_config->>'page_count')::int AS page_count
+       FROM document_parse_jobs WHERE parse_job_id = \$1`,
+      [doc.latest_parse_job_id],
+    );
+    const value = rows[0]?.page_count;
+    if (value != null) pageCount = Number(value);
   }
+  if (isOfficePreviewType(doc.file_type)) await ensureOfficePreviewPdf(state, doc);
+  const textLayerAvailable = ['pdf', 'txt', 'md'].includes(doc.file_type);
+  const pages: FilePreviewManifest['pages'] = [];
   const body: FilePreviewManifest = {
     doc_id: doc.id,
     parse_job_id: doc.latest_parse_job_id,
@@ -162,42 +163,6 @@ export async function getFilePreviewManifest(c: Context<AppEnv>): Promise<Respon
   return c.json(body);
 }
 
-/** Rust: download_file_preview_page_pdf */
-export async function downloadFilePreviewPagePdf(c: Context<AppEnv>): Promise<Response> {
-  const state = c.get('appState');
-  const query = previewAccessQuery(c);
-  const docId = pathParam(c, 'doc_id');
-  const rawPage = pathParam(c, 'page');
-  if (!/^\d+$/.test(rawPage)) {
-    throw AppError.badRequest('PREVIEW_PAGE_UNSUPPORTED', '页码无效');
-  }
-  const page = Number.parseInt(rawPage, 10);
-  const doc = await fetchPreviewDocument(
-    state, c.req.raw.headers, docId, query.preview_token, query.conversation_id,
-  );
-  if (doc.file_type === 'pdf') {
-    return downloadPdfPageFromDocument(state, doc, page);
-  }
-  if (isOfficePreviewType(doc.file_type)) {
-    return downloadOfficePdfPageFromDocument(state, doc, page);
-  }
-  throw AppError.badRequest('PREVIEW_PAGE_UNSUPPORTED', '当前文件类型不支持按页预览');
-}
-
-/** Rust: download_page_pdf —— /api/admin/documents/:doc_id/pages/:page/pdf */
-export async function downloadDocumentPagePdf(c: Context<AppEnv>): Promise<Response> {
-  const state = c.get('appState');
-  const actor = c.get('actor');
-  requirePermission(actor, 'document.upload');
-  const sql = requiredSql(state, '文档页预览需要启用 PostgreSQL 数据库连接');
-  const docId = pathParam(c, 'doc_id');
-  const rawPage = pathParam(c, 'page');
-  if (!/^\d+$/.test(rawPage)) {
-    throw AppError.badRequest('PREVIEW_PAGE_UNSUPPORTED', '页码无效');
-  }
-  const doc = await fetchDocument(sql, actor.tenant_id, docId);
-  return downloadPdfPageFromDocument(state, doc, Number.parseInt(rawPage, 10));
-}
 
 /** Rust: download_file_preview_content */
 export async function downloadFilePreviewContent(c: Context<AppEnv>): Promise<Response> {
@@ -208,7 +173,7 @@ export async function downloadFilePreviewContent(c: Context<AppEnv>): Promise<Re
     state, c.req.raw.headers, docId, query.preview_token, query.conversation_id,
   );
   if (isOfficePreviewType(doc.file_type)) {
-    return downloadOfficePreviewPdf(state, doc);
+    return downloadOfficePreviewPdf(state, doc, c.req.raw.headers);
   }
   return downloadDocumentContent(state, doc, c.req.raw.headers, true);
 }

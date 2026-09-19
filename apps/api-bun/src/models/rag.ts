@@ -1,11 +1,12 @@
 // 移植自 apps/api-rs/src/models/rag.rs
 import type { RetrievalSource } from './trace.ts';
+import type { SourceAnchor } from './source_anchor.ts';
 
 export interface RetrievedChunk {
   chunk_id: string; doc_id: string; doc_title: string; file_type: string; content: string;
   heading_path: string[]; page_range: number[]; block_ids: string[]; table_ids: string[];
   anchor_ids: string[]; primary_anchor_id: string | null; anchor_quality: string;
-  primary_anchor: unknown | null; metadata: Record<string, unknown>;
+  primary_anchor: SourceAnchor | null; anchors: SourceAnchor[]; metadata: Record<string, unknown>;
   score: number; source: RetrievalSource;
 }
 export interface RerankedChunk { chunk: RetrievedChunk; score: number; rank: number; }

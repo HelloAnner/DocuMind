@@ -67,6 +67,12 @@ export function mergeSmallAdjacentChunks(chunks: ChunkDraft[], cfg: ChunkConfig)
 
 function compatible(left: ChunkDraft, right: ChunkDraft): boolean {
   if (left.source_type === 'table' || right.source_type === 'table') return false;
+  if (
+    left.metadata['format'] === 'pdf'
+    && left.page_end !== null
+    && right.page_start !== null
+    && left.page_end !== right.page_start
+  ) return false;
   if (left.slide_end !== null && right.slide_start !== null && left.slide_end !== right.slide_start) {
     return false;
   }

@@ -11,7 +11,7 @@ import {
 import { moveDocument, sendToOcr } from './documents_move_ocr.ts';
 import {
   downloadOriginal, getFilePreview, getFilePreviewUrl, getFilePreviewManifest,
-  downloadFilePreviewPagePdf, downloadFilePreviewContent, downloadDocumentPagePdf,
+  downloadFilePreviewContent,
 } from './documents_files.ts';
 import { documentJobsRouter } from './document_jobs_router.ts';
 
@@ -28,7 +28,6 @@ export function documentsRouter(): Hono<AppEnv> {
   router.delete('/api/admin/documents/:doc_id', deleteDocument);
   router.post('/api/admin/documents/:doc_id', reprocessDocument);
   router.get('/api/admin/documents/:doc_id/original', downloadOriginal);
-  router.get('/api/admin/documents/:doc_id/pages/:page/pdf', downloadDocumentPagePdf);
   router.post('/api/admin/documents/:doc_id/move', moveDocument);
   router.post('/api/admin/documents/:doc_id/retry', retryParse);
   router.post('/api/admin/documents/:doc_id/force-index', forceIndexDocument);
@@ -40,7 +39,6 @@ export function documentsRouter(): Hono<AppEnv> {
   router.get('/api/files/:doc_id/preview-url', getFilePreviewUrl);
   router.get('/api/files/:doc_id/preview/manifest', getFilePreviewManifest);
   router.get('/api/files/:doc_id/preview/content', downloadFilePreviewContent);
-  router.get('/api/files/:doc_id/preview/pages/:page/pdf', downloadFilePreviewPagePdf);
 
   router.route('/', documentJobsRouter());
 

@@ -423,6 +423,22 @@ export interface DocumentChunk {
   token_count: number;
 }
 
+export interface FilePreviewRange {
+  status: number;
+  content_type: string;
+  content_range: string;
+  accept_ranges: string;
+  byte_length: number;
+  head: string;
+}
+
+export interface FilePreviewTransport {
+  preview: JsonObject;
+  manifest: JsonObject;
+  signed: JsonObject;
+  range: FilePreviewRange;
+}
+
 export interface AdminDocumentDetail {
   document: AdminDocument;
   latest_job?: JsonObject | null;

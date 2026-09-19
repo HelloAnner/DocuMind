@@ -193,21 +193,19 @@ open_documind "$BASE_URL/documind/"
 agent-browser eval "localStorage.setItem('documind-auth', JSON.stringify($auth_json))"
 open_documind "$BASE_URL/documind/chat?c=$conv_id"
 agent-browser wait --text "$marker"
-agent-browser eval 'document.querySelector(".dm-citation-card,.dm-citation-chip")?.click()'
+agent-browser eval 'document.querySelector(".dm-citation-chip")?.click()'
 agent-browser wait 5000
 
 agent-browser eval '
 const result = {
   url: location.href,
   hasExactStatus: document.body.innerText.includes("精确定位"),
-  hasExactCopy: document.body.innerText.includes("已按原文锚点定位并高亮"),
   pdfCanvas: document.querySelectorAll("canvas").length,
   overlay: document.querySelectorAll(".dm-pdf-anchor-overlay").length,
   overlayChildren: Array.from(document.querySelectorAll(".dm-pdf-anchor-overlay")).map((node) => node.children.length),
-  targetPages: document.querySelectorAll(".dm-pdf-single-page.is-target").length,
-  readyPages: document.querySelectorAll(".dm-pdf-single-page.is-ready").length,
+  renderedPages: document.querySelectorAll(".dm-pdf-page[data-page]").length,
 };
-if (!result.hasExactStatus || !result.hasExactCopy || result.pdfCanvas < 1 || result.overlay < 1 || !result.overlayChildren.some((count) => count > 0) || result.targetPages < 1 || result.readyPages < 1) {
+if (!result.hasExactStatus || result.pdfCanvas !== 1 || result.overlay !== 1 || !result.overlayChildren.some((count) => count > 0) || result.renderedPages !== 1) {
   throw new Error(JSON.stringify(result));
 }
 JSON.stringify(result);

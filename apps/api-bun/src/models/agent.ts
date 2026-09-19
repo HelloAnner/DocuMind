@@ -65,8 +65,9 @@ export function defaultRetrievalRuntimeOptions(): RetrievalRuntimeOptions {
 }
 
 export interface CitationOutput {
-  index: number; chunk_id: string; doc_id: string; doc_title: string; page_range: number[];
-  quote: string; score: number; source_status: string; anchor?: CitationAnchor | null;
+  citation_id: string; index: number; chunk_id: string; doc_id: string; doc_title: string;
+  page_range: number[]; quote: string; score: number; source_status: string;
+  anchor?: CitationAnchor | null;
 }
 
 export type AnswerStreamItem =

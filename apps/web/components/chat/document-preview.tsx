@@ -1,8 +1,12 @@
 "use client";
 
+import { Download, ExternalLink, Quote, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { FileText } from "lucide-react";
-import { fetchFilePreviewBlob, getFilePreview } from "@/lib/api";
+import {
+  fetchFilePreviewBlob,
+  getFilePreview,
+  getFilePreviewUrl,
+} from "@/lib/api";
 import type { Citation } from "@/lib/types";
 import { ErrorBoundary } from "@/components/error-boundary";
 import { DocumentViewer } from "./document-viewer";
@@ -19,6 +23,9 @@ export interface DocumentPreviewTarget {
   page_range?: number[];
   source_status?: "available" | "deleted" | string;
   anchor?: Citation["anchor"];
+  citation_id?: string;
+  index?: number;
+  quote?: string;
 }
 
 export function previewTargetFromCitation(citation: Citation): DocumentPreviewTarget {
@@ -28,16 +35,21 @@ export function previewTargetFromCitation(citation: Citation): DocumentPreviewTa
     page_range: citation.page_range,
     source_status: citation.source_status,
     anchor: citation.anchor,
+    citation_id: citation.citation_id,
+    index: citation.index,
+    quote: citation.quote,
   };
 }
 
 type PreviewState =
-  | { status: "loading"; blobUrl?: undefined; error?: undefined; mimeType?: undefined }
+  | { status: "loading" }
   | {
       status: "ready";
       blobUrl: string;
       mimeType: string;
       fileName: string;
+      parseJobId?: string;
+      sourceUrl: string;
     }
   | { status: "failed"; error: string };
 
@@ -53,9 +65,7 @@ function fileType(target: DocumentPreviewTarget) {
 }
 
 function mimeTypeFromType(type: string, blob: Blob): string {
-  if (blob.type && blob.type !== "application/octet-stream") {
-    return blob.type;
-  }
+  if (blob.type && blob.type !== "application/octet-stream") return blob.type;
   if (type === "pdf") return "application/pdf";
   if (type === "docx") {
     return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -67,167 +77,207 @@ function mimeTypeFromType(type: string, blob: Blob): string {
   return "application/octet-stream";
 }
 
-function targetPage(target: DocumentPreviewTarget) {
+export function previewTargetPage(target: DocumentPreviewTarget) {
   return target.anchor?.page ?? target.anchor?.slide ?? target.page_range?.[0] ?? null;
 }
 
-function locationStatus(target: DocumentPreviewTarget) {
+function targetLocationStatus(target: DocumentPreviewTarget) {
   if (target.source_status === "deleted") return "unavailable";
-  if (target.anchor?.location_status) return target.anchor.location_status;
-  if (targetPage(target)) return "page_only";
-  return "available";
+  if (target.anchor?.location_status === "structural_only") return "file_only";
+  return target.anchor?.location_status ?? (previewTargetPage(target) ? "page_only" : "file_only");
 }
 
 function locationStatusCopy(status: string) {
   switch (status) {
     case "exact":
-      return {
-        label: "精确定位",
-        detail: "已按原文锚点定位并高亮。",
-      };
-    case "structural_only":
-      return {
-        label: "结构定位",
-        detail: "",
-      };
+      return { label: "精确定位", detail: "已按原文证据定位并高亮" };
     case "page_only":
-      return {
-        label: "仅页码",
-        detail: "只能打开对应页，未获得可高亮的原文坐标。",
-      };
+      return { label: "页码定位", detail: "已打开对应页面，当前解析结果没有高亮坐标" };
     case "slide_only":
-      return {
-        label: "仅幻灯片",
-        detail: "只能打开对应幻灯片，未获得可高亮的原文坐标。",
-      };
-    case "available":
-      return {
-        label: "完整文件",
-        detail: "从文件开头打开真实原文。",
-      };
+      return { label: "幻灯片定位", detail: "已打开对应幻灯片，当前解析结果没有高亮坐标" };
+    case "file_only":
+      return { label: "原文文件", detail: "当前文档只能打开原文，不能精确定位" };
     default:
-      return {
-        label: "不可定位",
-        detail: "原文已删除、无权限或解析版本不可用。",
-      };
+      return { label: "来源不可用", detail: "原文已删除、无权限或解析版本不可用" };
   }
-}
-
-function citationAnchorBox(target: DocumentPreviewTarget) {
-  return target.anchor?.bbox ?? null;
-}
-
-function citationCharRange(target: DocumentPreviewTarget) {
-  return target.anchor?.char_range ?? null;
 }
 
 export function DocumentPreview({ target, conversationId }: DocumentPreviewProps) {
   const [state, setState] = useState<PreviewState>({ status: "loading" });
+  const [slow, setSlow] = useState(false);
+  const [retryToken, setRetryToken] = useState(0);
+  const [downloading, setDownloading] = useState(false);
+  const [actionError, setActionError] = useState("");
   const type = fileType(target);
-  const page = targetPage(target);
-  const status = locationStatus(target);
-  const statusCopy = locationStatusCopy(status);
-  const anchorBox = useMemo(() => citationAnchorBox(target), [target]);
-  const exactAnchorBox = status === "exact" ? anchorBox : null;
-  const charRange = useMemo(() => citationCharRange(target), [target]);
-  const canOpenSource = status !== "unavailable";
+  const page = previewTargetPage(target);
+  const requestedStatus = targetLocationStatus(target);
 
   useEffect(() => {
-    let revoked = false;
+    const controller = new AbortController();
     let currentBlobUrl: string | undefined;
+    let timedOut = false;
     setState({ status: "loading" });
+    setSlow(false);
+    setActionError("");
 
-    if (!canOpenSource) {
-      setState({ status: "failed", error: statusCopy.detail });
-      return () => {
-        revoked = true;
-      };
+    if (requestedStatus === "unavailable") {
+      setState({ status: "failed", error: locationStatusCopy(requestedStatus).detail });
+      return () => controller.abort();
     }
 
-    getFilePreview(target.doc_id, conversationId)
-      .then((preview) => {
-        if (revoked) return;
-        if (preview.source_status === "unavailable") {
-          throw new Error("来源不可用");
-        }
-        if (type === "pdf" || preview.preview_type === "office_pdf") {
-          setState({
-            status: "ready",
+    const slowTimer = window.setTimeout(() => setSlow(true), 5_000);
+    const timeoutTimer = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      setState({ status: "failed", error: "原文加载超时，请重试。" });
+    }, 15_000);
+
+    void Promise.all([
+      getFilePreview(target.doc_id, conversationId, controller.signal),
+      getFilePreviewUrl(target.doc_id, conversationId, controller.signal),
+    ])
+      .then(async ([preview, signed]) => {
+        if (preview.source_status === "unavailable") throw new Error("来源不可用");
+        const pdfPreview = type === "pdf" || preview.preview_type === "office_pdf";
+        if (pdfPreview) {
+          return {
             blobUrl: "",
             mimeType: "application/pdf",
             fileName: preview.file_name || target.doc_title,
-          });
-          return null;
+            parseJobId: preview.parse_job_id,
+            sourceUrl: signed.preview_url,
+          };
         }
-        return fetchFilePreviewBlob(target.doc_id, conversationId).then((blob) => ({
-          blob,
-          preview,
-        }));
-      })
-      .then((result) => {
-        if (revoked || result == null) return;
-        const { blob, preview } = result;
+        const blob = await fetchFilePreviewBlob(target.doc_id, conversationId, controller.signal);
         const mime = mimeTypeFromType(type, blob);
-        const typedBlob = new Blob([blob], { type: mime });
-        currentBlobUrl = URL.createObjectURL(typedBlob);
-        setState({
-          status: "ready",
+        currentBlobUrl = URL.createObjectURL(new Blob([blob], { type: mime }));
+        return {
           blobUrl: currentBlobUrl,
           mimeType: mime,
           fileName: preview.file_name || target.doc_title,
-        });
+          parseJobId: preview.parse_job_id,
+          sourceUrl: signed.preview_url,
+        };
+      })
+      .then((ready) => {
+        if (!controller.signal.aborted) setState({ status: "ready", ...ready });
       })
       .catch((error: unknown) => {
-        if (!revoked) {
-          setState({
-            status: "failed",
-            error: error instanceof Error ? error.message : "原文文件加载失败",
-          });
-        }
+        if (controller.signal.aborted || timedOut) return;
+        console.error("[DocumentPreview] load failed", error);
+        setState({ status: "failed", error: "原文加载失败，请重试或下载原文查看。" });
+      })
+      .finally(() => {
+        window.clearTimeout(slowTimer);
+        window.clearTimeout(timeoutTimer);
+        if (!controller.signal.aborted) setSlow(false);
       });
 
     return () => {
-      revoked = true;
+      controller.abort();
+      window.clearTimeout(slowTimer);
+      window.clearTimeout(timeoutTimer);
       if (currentBlobUrl) URL.revokeObjectURL(currentBlobUrl);
     };
-  }, [
-    target.doc_id,
-    type,
-    target.doc_title,
-    canOpenSource,
-    statusCopy.detail,
-    conversationId,
-  ]);
+  }, [conversationId, requestedStatus, retryToken, target.doc_id, target.doc_title, type]);
+
+  const versionMatches = state.status !== "ready"
+    || !target.anchor?.parse_job_id
+    || !state.parseJobId
+    || target.anchor.parse_job_id === state.parseJobId;
+  const effectiveStatus = requestedStatus === "exact" && !versionMatches
+    ? page
+      ? "page_only"
+      : "file_only"
+    : requestedStatus;
+  const statusCopy = locationStatusCopy(effectiveStatus);
+  const exactAnchorBox = effectiveStatus === "exact" ? target.anchor?.bbox : undefined;
+  const charRange = effectiveStatus === "exact" ? target.anchor?.char_range : undefined;
+  const quote = target.quote?.trim();
+
+  const locationLabel = useMemo(() => {
+    if (page && target.anchor?.slide) return `第 ${page} 张`;
+    if (page) return `第 ${page} 页`;
+    return "原文";
+  }, [page, target.anchor?.slide]);
+
+  const download = async () => {
+    if (downloading) return;
+    setDownloading(true);
+    setActionError("");
+    try {
+      const blob = await fetchFilePreviewBlob(target.doc_id, conversationId);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = state.status === "ready" ? state.fileName : target.doc_title;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setActionError("原文下载失败，请重试");
+    } finally {
+      setDownloading(false);
+    }
+  };
 
   return (
     <div className="dm-original-document-preview">
-      <div className="dm-document-preview-header">
-        <div className="dm-document-preview-title">
-          <FileText className="dm-document-preview-icon" size={18} />
-          <div className="dm-document-preview-meta">
-            <strong>{target.doc_title}</strong>
-            {page ? <span>第 {page} 页</span> : null}
+      <section className="dm-document-context" aria-label="引用依据">
+        <div className="dm-document-context-meta">
+          <span className={`dm-location-status dm-location-status-${effectiveStatus}`}>
+            <strong>{statusCopy.label}</strong>
+          </span>
+          <span>{locationLabel}</span>
+          {target.index ? <span>引用 [{target.index}]</span> : null}
+        </div>
+        {quote ? (
+          <blockquote>
+            <Quote size={14} aria-hidden="true" />
+            <span>{quote}</span>
+          </blockquote>
+        ) : null}
+        <div className="dm-document-context-footer">
+          <span>{statusCopy.detail}</span>
+          <div className="dm-document-context-actions">
+            <button disabled={downloading} onClick={() => void download()} type="button">
+              <Download size={14} />
+              {downloading ? "下载中…" : "下载"}
+            </button>
+            {state.status === "ready" ? (
+              <a href={state.sourceUrl} rel="noreferrer" target="_blank">
+                <ExternalLink size={14} />
+                新窗口
+              </a>
+            ) : null}
           </div>
         </div>
-        <div className={`dm-location-status dm-location-status-${status}`}>
-          <strong>{statusCopy.label}</strong>
-          {statusCopy.detail ? <span>{statusCopy.detail}</span> : null}
-        </div>
-      </div>
+        {actionError ? <span className="dm-document-action-error" role="alert">{actionError}</span> : null}
+      </section>
 
       <div className="dm-document-preview-body">
-        {state.status === "loading" && (
-          <div className="dm-document-loading">正在打开原文…</div>
-        )}
-        {state.status === "failed" && (
-          <div className="dm-document-error">{state.error || "原始文件暂不可预览。"}</div>
-        )}
-        {state.status === "ready" && (
+        {state.status === "loading" ? (
+          <div className="dm-document-loading" role="status">
+            <span>正在打开原文…</span>
+            {slow ? <small>文件较大，仍在加载</small> : null}
+          </div>
+        ) : null}
+        {state.status === "failed" ? (
+          <div className="dm-document-error" role="alert">
+            <strong>无法打开原文</strong>
+            <span>{state.error}</span>
+            <button onClick={() => setRetryToken((value) => value + 1)} type="button">
+              <RefreshCw size={15} />
+              重试
+            </button>
+          </div>
+        ) : null}
+        {state.status === "ready" ? (
           <ErrorBoundary>
             <DocumentViewer
               blobUrl={state.blobUrl}
               docId={state.mimeType === "application/pdf" ? target.doc_id : undefined}
-              cacheKey={target.doc_id}
               conversationId={conversationId}
               mimeType={state.mimeType}
               fileName={state.fileName}
@@ -236,7 +286,7 @@ export function DocumentPreview({ target, conversationId }: DocumentPreviewProps
               charRange={charRange ?? undefined}
             />
           </ErrorBoundary>
-        )}
+        ) : null}
       </div>
     </div>
   );

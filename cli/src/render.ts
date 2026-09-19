@@ -2,6 +2,7 @@ import type {
   AdminDocument,
   AssertionResult,
   ChatRunReport,
+  Citation,
   Identity,
   KnowledgeBase,
   ObservedEvent,
@@ -134,10 +135,24 @@ export function printChatReport(report: ChatRunReport, options: HumanChatOptions
     const pages = citation.page_range.length ? ` · p.${citation.page_range.join("-")}` : "";
     const score = citation.score === undefined ? "" : ` · score=${citation.score.toFixed(4)}`;
     process.stdout.write(
-      `[${citation.index}] ${citation.doc_title}${pages}${score} · doc=${citation.doc_id} · chunk=${citation.chunk_id}\n`,
+      `[${citation.index}] ${citation.doc_title}${pages}${score}${citationLocationSuffix(citation)}` +
+      ` · doc=${citation.doc_id} · chunk=${citation.chunk_id}\n`,
     );
     process.stdout.write(`  ${truncate(citation.quote.replaceAll(/\s+/g, " "), 260)}\n`);
   }
+}
+
+/** 引用定位能力：CLI 直接暴露锚点定位等级与可用定位数据。 */
+export function citationLocationSuffix(citation: Citation): string {
+  const anchor = citation.anchor;
+  if (!anchor) return "";
+  const parts: string[] = [];
+  if (anchor.location_status) parts.push(`locate=${anchor.location_status}`);
+  if (anchor.page) parts.push(`page=${anchor.page}`);
+  else if (anchor.slide) parts.push(`slide=${anchor.slide}`);
+  if (anchor.bbox) parts.push("bbox");
+  if (anchor.char_range) parts.push("text");
+  return parts.length === 0 ? "" : ` · ${parts.join(" ")}`;
 }
 
 export function printIdentity(identity: Identity): void {

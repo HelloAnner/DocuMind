@@ -1,4 +1,8 @@
 import { createHash } from 'node:crypto';
+import { setDefaultResultOrder } from 'node:dns';
+
+// ponytail: 服务器 IPv6 出网不可达，Bun fetch 默认 verbatim 会先试 IPv6 导致 10s 超时
+setDefaultResultOrder('ipv4first');
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import JSZip from 'jszip';
@@ -327,20 +331,23 @@ async function parseSkillPackage(
     const limit = entry === manifest ? MAX_CONTENT_BYTES : MAX_REFERENCE_BYTES;
     const chunks: Uint8Array[] = [];
     let size = 0;
-    try {
-      for await (const chunk of entry.nodeStream()) {
-        if (typeof chunk === 'string') throw invalidSkill(`ZIP 文件损坏: ${path}`);
-        size += chunk.byteLength;
-        totalBytes += chunk.byteLength;
-        if (size > limit || totalBytes > MAX_ARCHIVE_BYTES) {
-          throw invalidSkill(`文件或解压总大小超出限制: ${path}`);
-        }
-        chunks.push(chunk);
+    const { promise, resolve, reject } = Promise.withResolvers<void>();
+    const stream = entry.nodeStream();
+    stream.on('data', (raw: string | Buffer) => {
+      if (typeof raw === 'string') { stream.pause(); reject(invalidSkill(`ZIP 文件损坏: ${path}`)); return; }
+      size += raw.byteLength;
+      totalBytes += raw.byteLength;
+      if (size > limit || totalBytes > MAX_ARCHIVE_BYTES) {
+        stream.pause();
+        reject(invalidSkill(`文件或解压总大小超出限制: ${path}`));
+        return;
       }
-    } catch (error) {
-      if (error instanceof AppError) throw error;
-      throw invalidSkill(`ZIP 文件损坏: ${path}`);
-    }
+      chunks.push(raw);
+    });
+    stream.on('error', () => reject(invalidSkill(`ZIP 文件损坏: ${path}`)));
+    stream.on('end', () => resolve());
+    stream.resume();
+    await promise;
     const data = new Uint8Array(size);
     let offset = 0;
     for (const chunk of chunks) { data.set(chunk, offset); offset += chunk.byteLength; }

@@ -214,7 +214,7 @@ async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<voi
   await repo.saveAgentTrace(options.assistantMessageId, trace);
 
   const citationModels: Citation[] = citations.map((citation) => ({
-    id: newUuid(),
+    id: citation.citation_id,
     assistant_message_id: options.assistantMessageId,
     index: citation.index,
     chunk_id: citation.chunk_id,

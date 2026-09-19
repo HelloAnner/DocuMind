@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { MutableRefObject } from "react";
+import { useEffect, useRef, useState, type MutableRefObject } from "react";
 
 interface TextViewerProps {
   blobUrl: string;
@@ -14,28 +13,28 @@ export function TextViewer({ blobUrl, charRange }: TextViewerProps) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    fetch(blobUrl)
+    const controller = new AbortController();
+    setError(false);
+    setText("");
+    fetch(blobUrl, { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("加载失败");
         return response.text();
       })
-      .then((value) => {
-        if (!cancelled) setText(value);
-      })
-      .catch(() => {
-        if (!cancelled) setError(true);
+      .then(setText)
+      .catch((fetchError: unknown) => {
+        if (!(fetchError instanceof DOMException && fetchError.name === "AbortError")) {
+          setError(true);
+        }
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => controller.abort();
   }, [blobUrl]);
 
   useEffect(() => {
-    highlightRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+    highlightRef.current?.scrollIntoView({ block: "center", behavior: "auto" });
   }, [text, charRange?.start, charRange?.end]);
 
-  if (error) return <div className="dm-document-error">文本加载失败</div>;
+  if (error) return <div className="dm-document-error" role="alert">文本加载失败</div>;
 
   return (
     <pre className="dm-text-viewer">

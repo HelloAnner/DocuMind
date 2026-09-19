@@ -1,12 +1,12 @@
-// 移植自 apps/api-rs/src/api/documents.rs —— 文件内容/按页预览（含 Office 转 PDF、Range、预览缓存）
+// 文件内容预览：Office 转 PDF 缓存与原文 Range 响应。
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppError } from '../errors.ts';
 import type { AppState } from '../state.ts';
-import { extractSinglePagePdf, pdfPageCount } from './documents_pdf_page.ts';
 import {
-  isOfficePreviewType, mimeTypeForDocument, parseByteRange, sanitizeFileName, sha256Hex,
+  isOfficePreviewType, mimeTypeForDocument, parseByteRange, rangeNotSatisfiable,
+  sanitizeFileName,
 } from './documents_support.ts';
 import { OFFICE_CONVERSION_TIMEOUT_SECONDS } from './documents_types.ts';
 import type { DocumentRecord } from './documents_types.ts';
@@ -29,11 +29,6 @@ export function previewCacheRoot(state: AppState): string {
 /** Rust: preview_cache_version */
 export function previewCacheVersion(doc: DocumentRecord): string {
   return doc.latest_parse_job_id ?? doc.file_sha256;
-}
-
-/** Rust: source_file_hash */
-function sourceFileHash(path: string): string {
-  return sha256Hex(path).slice(0, 16);
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +103,7 @@ async function convertOfficeToPdf(inputPath: string, outputDir: string): Promise
 }
 
 /** Rust: ensure_office_preview_pdf */
-async function ensureOfficePreviewPdf(state: AppState, doc: DocumentRecord): Promise<string> {
+export async function ensureOfficePreviewPdf(state: AppState, doc: DocumentRecord): Promise<string> {
   if (!isOfficePreviewType(doc.file_type)) {
     throw AppError.badRequest('OFFICE_PREVIEW_UNSUPPORTED', '当前文件类型不支持 Office PDF 预览');
   }
@@ -142,175 +137,41 @@ async function ensureOfficePreviewPdf(state: AppState, doc: DocumentRecord): Pro
   return pdfPath;
 }
 
-/** Rust: office_preview_page_count */
-async function officePreviewPageCount(state: AppState, doc: DocumentRecord): Promise<number | null> {
-  if (!isOfficePreviewType(doc.file_type)) return null;
-  const pdfPath = await ensureOfficePreviewPdf(state, doc);
-  let pdfBytes: Uint8Array;
-  try {
-    pdfBytes = new Uint8Array(await readFile(pdfPath));
-  } catch (error) {
-    throw internalError('failed to read office preview pdf', error);
-  }
-  return pdfPageCount(pdfBytes);
-}
-
-// ---------------------------------------------------------------------------
-// 单页 PDF
-// ---------------------------------------------------------------------------
-
-/** Rust: download_pdf_page_from_path */
-async function downloadPdfPageFromPath(
-  state: AppState, doc: DocumentRecord, page: number, pdfPath: string,
-): Promise<Response> {
-  const cacheDir = join(
-    previewCacheRoot(state), 'page_pdfs', doc.id, previewCacheVersion(doc), sourceFileHash(pdfPath),
-  );
-  const cachePath = join(cacheDir, `${page}.pdf`);
-  const totalPath = join(cacheDir, 'total_pages.txt');
-
-  if (!existsSync(cachePath)) {
-    try {
-      await mkdir(cacheDir, { recursive: true });
-    } catch (error) {
-      throw internalError('failed to create page pdf cache dir', error);
-    }
-
-    let pdfBytes: Uint8Array;
-    try {
-      pdfBytes = new Uint8Array(await readFile(pdfPath));
-    } catch (error) {
-      throw internalError('failed to read source preview pdf', error);
-    }
-    let singlePage: Uint8Array;
-    let totalPages: number;
-    try {
-      const result = extractSinglePagePdf(pdfBytes, page);
-      singlePage = result.bytes;
-      totalPages = result.totalPages;
-    } catch (error) {
-      throw AppError.internal((error as Error).message);
-    }
-
-    const tmpPath = cachePath.replace(/\.pdf$/, '.tmp');
-    try {
-      await writeFile(tmpPath, singlePage);
-      await rename(tmpPath, cachePath);
-      await writeFile(totalPath, String(totalPages));
-    } catch (error) {
-      throw internalError('failed to finalize page pdf', error);
-    }
-  }
-
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await readFile(cachePath));
-  } catch (error) {
-    throw internalError('failed to read cached page pdf', error);
-  }
-  let totalPages = 0;
-  try {
-    const raw = await readFile(totalPath, 'utf8');
-    const parsed = Number.parseInt(raw.trim(), 10);
-    totalPages = Number.isNaN(parsed) ? 0 : parsed;
-  } catch {
-    totalPages = 0;
-  }
-
-  const headers = new Headers({
-    'Content-Type': 'application/pdf',
-    'Cache-Control': 'public, max-age=86400',
-    'Access-Control-Expose-Headers': 'X-Total-Pages',
-  });
-  if (totalPages > 0) headers.set('X-Total-Pages', String(totalPages));
-  return new Response(bodyOf(bytes), { status: 200, headers });
-}
-
-/** Rust: download_office_preview_pdf */
+/** Serve the cached Office conversion directly; PDF.js performs byte-range reads. */
 export async function downloadOfficePreviewPdf(
-  state: AppState, doc: DocumentRecord,
+  state: AppState, doc: DocumentRecord, reqHeaders: Headers,
 ): Promise<Response> {
   const pdfPath = await ensureOfficePreviewPdf(state, doc);
-  let bytes: Uint8Array;
-  try {
-    bytes = new Uint8Array(await readFile(pdfPath));
-  } catch (error) {
-    throw internalError('failed to read office preview pdf', error);
+  const file = Bun.file(pdfPath);
+  const totalSize = file.size;
+  const range = reqHeaders.get('range');
+  if (range !== null) {
+    const parsed = parseByteRange(range, totalSize);
+    if (parsed !== null) {
+      const [start, end] = parsed;
+      return new Response(await file.slice(start, end).arrayBuffer(), {
+        status: 206,
+        headers: {
+          'Content-Type': 'application/pdf',
+          'Accept-Ranges': 'bytes',
+          'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
+          'Content-Length': String(end - start),
+          'Cache-Control': 'private, max-age=86400',
+        },
+      });
+    }
+    return rangeNotSatisfiable(totalSize);
   }
-  const headers = new Headers({
-    'Content-Type': 'application/pdf',
-    'Accept-Ranges': 'bytes',
-    'Content-Disposition': `inline; filename="${sanitizeFileName(doc.title)}.pdf"`,
+  return new Response(file, {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Accept-Ranges': 'bytes',
+      'Content-Length': String(totalSize),
+      'Cache-Control': 'private, max-age=86400',
+      'Content-Disposition': `inline; filename="${sanitizeFileName(doc.title)}.pdf"`,
+    },
   });
-  return new Response(bodyOf(bytes), { status: 200, headers });
-}
-
-/** Rust: download_pdf_page_from_document */
-export async function downloadPdfPageFromDocument(
-  state: AppState, doc: DocumentRecord, page: number,
-): Promise<Response> {
-  if (doc.file_type !== 'pdf') {
-    throw AppError.badRequest('PREVIEW_PAGE_UNSUPPORTED', '只有 PDF 原文支持按页预览');
-  }
-  const pdfPath = join(state.config.blobStorageDir, doc.storage_key);
-  if (existsSync(pdfPath)) {
-    return downloadPdfPageFromPath(state, doc, page, pdfPath);
-  }
-
-  const cacheDir = join(previewCacheRoot(state), 'source_pdfs', doc.id, previewCacheVersion(doc));
-  const sourcePath = join(cacheDir, 'source.pdf');
-  if (!existsSync(sourcePath)) {
-    try {
-      await mkdir(cacheDir, { recursive: true });
-    } catch (error) {
-      throw internalError('failed to create source pdf cache dir', error);
-    }
-    const bytes = await state.storage.get(doc.storage_key);
-    const tmpPath = sourcePath.replace(/\.pdf$/, '.tmp');
-    try {
-      await writeFile(tmpPath, bytes);
-      await rename(tmpPath, sourcePath);
-    } catch (error) {
-      throw internalError('failed to finalize source pdf', error);
-    }
-  }
-  return downloadPdfPageFromPath(state, doc, page, sourcePath);
-}
-
-/** Rust: download_office_pdf_page_from_document */
-export async function downloadOfficePdfPageFromDocument(
-  state: AppState, doc: DocumentRecord, page: number,
-): Promise<Response> {
-  const pdfPath = await ensureOfficePreviewPdf(state, doc);
-  return downloadPdfPageFromPath(state, doc, page, pdfPath);
-}
-
-/** Rust: fetch_preview_page_count */
-export async function fetchPreviewPageCount(
-  state: AppState, doc: DocumentRecord,
-): Promise<number | null> {
-  if (isOfficePreviewType(doc.file_type)) {
-    return officePreviewPageCount(state, doc);
-  }
-
-  const sql = state.sql;
-  if (sql !== null && doc.latest_parse_job_id !== null) {
-    const rows = await sql.unsafe(
-      `SELECT COALESCE((parser_config->>'page_count')::int, NULL)::int AS page_count
-       FROM document_parse_jobs
-       WHERE parse_job_id = \$1`,
-      [doc.latest_parse_job_id],
-    );
-    const value = rows[0]?.page_count;
-    if (value != null) return Number(value);
-  }
-
-  if (doc.file_type === 'pdf') {
-    const pdfBytes = await state.storage.get(doc.storage_key);
-    return pdfPageCount(pdfBytes);
-  }
-
-  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -334,9 +195,11 @@ export async function downloadDocumentContent(
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
         'Content-Range': `bytes ${start}-${end - 1}/${totalSize}`,
+        'Content-Length': String(end - start),
       });
       return new Response(bodyOf(bytes), { status: 206, headers });
     }
+    return rangeNotSatisfiable(totalSize);
   }
 
   const bytes = await state.storage.get(doc.storage_key);
@@ -345,6 +208,7 @@ export async function downloadDocumentContent(
     'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
     'Content-Disposition': `${disposition}; filename="${sanitizeFileName(doc.file_name)}"`,
+    'Content-Length': String(totalSize),
   });
   return new Response(bodyOf(bytes), { status: 200, headers });
 }

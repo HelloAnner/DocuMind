@@ -36,6 +36,12 @@ Thumbs.db
 
 # ── Build ──
 /dist/
+/apps/api-bun/dist/
+/apps/api-bun/src/generated/
+
+# ── Python ──
+__pycache__/
+*.pyc
 
 # ── Data ──
 /data/uploads/*

@@ -13,7 +13,6 @@ export interface DocumentViewerProps {
   anchorBox?: { x0: number; y0: number; x1: number; y1: number; unit?: string; rotation?: number };
   charRange?: { start: number; end: number };
   docId?: string;
-  cacheKey?: string;
   conversationId?: string;
   onReady?: () => void;
 }
@@ -26,7 +25,6 @@ export function DocumentViewer({
   anchorBox,
   charRange,
   docId,
-  cacheKey,
   conversationId,
   onReady,
 }: DocumentViewerProps) {
@@ -34,7 +32,6 @@ export function DocumentViewer({
     return (
       <PdfViewer
         docId={docId}
-        cacheKey={cacheKey}
         conversationId={conversationId}
         initialPage={initialPage}
         anchorBox={anchorBox}
@@ -45,7 +42,7 @@ export function DocumentViewer({
   }
 
   if (mimeType.startsWith("image/")) {
-    return <ImageViewer blobUrl={blobUrl} fileName={fileName} />;
+    return <ImageViewer key={blobUrl} blobUrl={blobUrl} fileName={fileName} />;
   }
 
   if (mimeType.startsWith("text/") || mimeType === "application/markdown") {

@@ -165,7 +165,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       dimension: envNum(['EMBED_DIM', 'EMBEDDING_DIM'], 1024),
       retryMax: envNum(['EMBED_RETRY_MAX', 'EMBEDDING_RETRY_MAX'], 3),
       workerPollMs: envNum(['EMBED_WORKER_POLL_MS'], 1000),
-      indexSchemaVersion: envNum(['ES_INDEX_SCHEMA_VERSION'], 2),
+      indexSchemaVersion: envNum(['ES_INDEX_SCHEMA_VERSION'], 3),
       indexName: envStr('ES_INDEX_CHUNKS') ?? 'chunks',
       indexAlias: envStr('ES_INDEX_ALIAS') ?? 'chunks_search',
       enabled: envBool('EMBED_ENABLED', true),

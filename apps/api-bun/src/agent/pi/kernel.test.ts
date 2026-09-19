@@ -353,6 +353,7 @@ function testChunk(number: number): RetrievedChunk {
     primary_anchor_id: null,
     anchor_quality: 'structural',
     primary_anchor: null,
+    anchors: [],
     metadata: {},
     score: 0.8,
     source: 'rrf',

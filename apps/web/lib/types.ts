@@ -23,6 +23,7 @@ export interface Conversation {
 }
 
 export interface Citation {
+  citation_id: UUID;
   index: number;
   doc_id: UUID;
   chunk_id: UUID;
@@ -55,7 +56,7 @@ export interface CitationAnchor {
     unit?: string;
     rotation?: number;
   };
-  location_status?: "exact" | "structural_only" | "page_only" | "slide_only" | "unavailable" | string;
+  location_status?: "exact" | "structural_only" | "page_only" | "slide_only" | "file_only" | "unavailable" | string;
 }
 
 export interface ConversationFile {

@@ -220,6 +220,7 @@ function toIndexedChunk(
     anchor_char_range: chunk.anchorCharRange,
     anchor_bbox: chunk.anchorBBox,
     anchor_text: chunk.anchorText ?? '',
+    anchors: chunk.anchors,
     embedding_model: config.model,
     embedding: embedding.vector,
     metadata: chunk.metadata,

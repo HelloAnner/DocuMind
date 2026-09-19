@@ -210,7 +210,8 @@ const DOCUMENTS_HELP = `用法: documind documents <subcommand> [options]\n\n` +
   `  list [--kb ID] [--status S] [--query Q] [--page N] [--page-size N]\n` +
   `  show <doc-id>                文档、解析任务和各内容区段摘要\n` +
   `  preview|blocks|cleaned-blocks|chunks|tables <doc-id>\n` +
-  `  diagnose <doc-id>            布局、bbox、OCR、表格和告警诊断\n\n` +
+  `  diagnose <doc-id>            布局、bbox、OCR、表格和告警诊断\n` +
+  `  preview-file <doc-id>        验证原文预览传输：manifest、签名 URL 与字节范围\n\n` +
   `文件与知识库管理:\n` +
   `  upload <file...> --kb ID     批量上传文件（最多 50 个，并发 3）\n` +
   `  upload-batch <file...> --kb ID  upload 的显式批量别名\n` +

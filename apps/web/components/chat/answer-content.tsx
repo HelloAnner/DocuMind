@@ -44,17 +44,19 @@ function renderCitationText(
   onCitationClick?: (index: number) => void,
   displayCitationIndex?: (index: number) => number
 ) {
-  return text.split(/(\[\d+\])/g).map((part, index) => {
-    const match = part.match(/^\[(\d+)\]$/);
-    if (!match) return part;
-    const citationIndex = Number(match[1]);
-    return (
-      <CitationBadge
-        key={`${citationIndex}-${index}`}
-        index={displayCitationIndex?.(citationIndex) ?? citationIndex}
-        onClick={() => onCitationClick?.(citationIndex)}
-      />
-    );
+  return text.split(/(\[\d+(?:\s*,\s*\d+)*\])/g).map((part, index) => {
+    if (!/^\[\d+(?:\s*,\s*\d+)*\]$/.test(part)) return part;
+    return part
+      .slice(1, -1)
+      .split(",")
+      .map((value) => Number(value.trim()))
+      .map((citationIndex, markerIndex) => (
+        <CitationBadge
+          key={`${citationIndex}-${index}-${markerIndex}`}
+          index={displayCitationIndex?.(citationIndex) ?? citationIndex}
+          onClick={() => onCitationClick?.(citationIndex)}
+        />
+      ));
   });
 }
 

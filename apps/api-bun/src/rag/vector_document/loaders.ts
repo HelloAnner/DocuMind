@@ -1,6 +1,6 @@
 // 移植自 apps/api-rs/src/rag/vector_document.rs —— 文档 / chunk / 既有 embedding 的 SQL 加载
 import type { Sql } from 'postgres';
-import type { CharRange, NormalizedBBox } from '../../models/source_anchor.ts';
+import type { CellRange, CharRange, NormalizedBBox, SourceAnchor } from '../../models/source_anchor.ts';
 
 export interface DocumentScope {
   tenantId: string;
@@ -33,6 +33,7 @@ export interface StoredChunk {
   anchorCharRange: CharRange | null;
   anchorBBox: NormalizedBBox | null;
   anchorText: string | null;
+  anchors: SourceAnchor[];
 }
 
 export interface StoredEmbedding {
@@ -102,6 +103,15 @@ function parseCharRange(record: Record<string, unknown>): CharRange | null {
   if (typeof start !== 'number' || typeof end !== 'number') return null;
   return { start, end };
 }
+function parseCellRange(record: Record<string, unknown>): CellRange | null {
+  const { row_start, row_end, col_start, col_end } = record;
+  if (
+    typeof row_start !== 'number' || typeof row_end !== 'number'
+    || typeof col_start !== 'number' || typeof col_end !== 'number'
+  ) return null;
+  return { row_start, row_end, col_start, col_end };
+}
+
 
 function parseNormalizedBBox(record: Record<string, unknown>): NormalizedBBox | null {
   const { x0, y0, x1, y1 } = record;
@@ -112,6 +122,45 @@ function parseNormalizedBBox(record: Record<string, unknown>): NormalizedBBox | 
   const rotation = typeof record.rotation === 'number' ? record.rotation : 0;
   return { x0, y0, x1, y1, unit, rotation };
 }
+function parseSourceAnchor(value: unknown): SourceAnchor | null {
+  const row = asRecord(value);
+  if (row === null) return null;
+  const anchorId = asNullableString(row.anchor_id);
+  const docId = asNullableString(row.doc_id);
+  const parseJobId = asNullableString(row.parse_job_id);
+  const tenantId = asNullableString(row.tenant_id);
+  const format = asNullableString(row.format);
+  const kind = asNullableString(row.kind);
+  if (
+    anchorId === null || docId === null || parseJobId === null || tenantId === null
+    || format === null || kind === null
+  ) return null;
+  return {
+    anchor_id: anchorId,
+    doc_id: docId,
+    parse_job_id: parseJobId,
+    tenant_id: tenantId,
+    format,
+    kind,
+    page: asNullableNumber(row.page),
+    slide: asNullableNumber(row.slide),
+    block_id: asNullableString(row.block_id),
+    table_id: asNullableString(row.table_id),
+    cell_range: jsonColumn(row, 'cell_range', parseCellRange),
+    char_range: jsonColumn(row, 'char_range', parseCharRange),
+    bbox: jsonColumn(row, 'bbox', parseNormalizedBBox),
+    source_ref: row.source_ref ?? {},
+    text: asNullableString(row.text) ?? '',
+    text_hash: asNullableString(row.text_hash),
+    anchor_quality: asNullableString(row.anchor_quality) ?? 'unknown',
+  };
+}
+
+function parseSourceAnchors(value: unknown): SourceAnchor[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(parseSourceAnchor).filter((anchor): anchor is SourceAnchor => anchor !== null);
+}
+
 
 export async function loadDocument(sql: Sql, docId: string): Promise<DocumentScope> {
   const rows = await sql.unsafe(
@@ -140,7 +189,22 @@ export async function loadChunks(
     `SELECT c.id, c.chunk_index, c.source_type, c.content, c.heading_path,
             c.page_range, c.token_count, c.block_ids, c.table_ids, c.anchor_ids,
             c.primary_anchor_id, c.anchor_quality, c.metadata, c.created_at,
-            a.format, a.kind, a.page, a.slide, a.char_range, a.bbox, a.text AS anchor_text
+            a.format, a.kind, a.page, a.slide, a.char_range, a.bbox, a.text AS anchor_text,
+            COALESCE((
+              SELECT jsonb_agg(jsonb_build_object(
+                'anchor_id', candidate.id, 'doc_id', candidate.doc_id,
+                'parse_job_id', candidate.parse_job_id, 'tenant_id', candidate.tenant_id,
+                'format', candidate.format, 'kind', candidate.kind,
+                'page', candidate.page, 'slide', candidate.slide,
+                'block_id', candidate.block_id, 'table_id', candidate.table_id,
+                'cell_range', candidate.cell_range, 'char_range', candidate.char_range,
+                'bbox', candidate.bbox, 'source_ref', candidate.source_ref,
+                'text', candidate.text, 'text_hash', candidate.text_hash,
+                'anchor_quality', candidate.anchor_quality
+              ) ORDER BY anchor_ref.ordinality)
+              FROM unnest(c.anchor_ids) WITH ORDINALITY AS anchor_ref(anchor_id, ordinality)
+              JOIN document_source_anchors candidate ON candidate.id = anchor_ref.anchor_id
+            ), '[]'::jsonb) AS anchors
      FROM chunks c
      LEFT JOIN document_source_anchors a ON a.id = c.primary_anchor_id
      WHERE c.doc_id = \$1 AND c.parse_job_id = \$2
@@ -171,6 +235,7 @@ export async function loadChunks(
       anchorCharRange: jsonColumn(row, 'char_range', parseCharRange),
       anchorBBox: jsonColumn(row, 'bbox', parseNormalizedBBox),
       anchorText: asNullableString(row.anchor_text),
+      anchors: parseSourceAnchors(row.anchors),
     } satisfies StoredChunk;
   });
 }

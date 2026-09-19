@@ -22,8 +22,9 @@ function recordingContext(protocol: 'legacy' | 'atom'): {
 }
 
 const citation = {
-  index: 1, chunk_id: 'chunk-1', doc_id: 'doc-1', doc_title: '手册.pdf',
-  page_range: [1, 2], quote: '引用片段', score: 0.9, source_status: 'available',
+  citation_id: 'citation-1', index: 1, chunk_id: 'chunk-1', doc_id: 'doc-1',
+  doc_title: '手册.pdf', page_range: [1, 2], quote: '引用片段', score: 0.9,
+  source_status: 'available',
 };
 
 describe('legacy 协议', () => {

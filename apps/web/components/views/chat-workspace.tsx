@@ -312,6 +312,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const previousMessageCountRef = useRef(0);
   const followStreamRef = useRef(true);
   const [previewTarget, setPreviewTarget] = useState<DocumentPreviewTarget | null>(null);
+  const previewTriggerRef = useRef<HTMLElement | null>(null);
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [thinkingEnabled, setThinkingEnabled] = useState(false);
@@ -417,9 +418,17 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     }
   };
 
-  const handleCitationClick = (c: Citation) => {
-    setPreviewTarget(previewTargetFromCitation(c));
+  const handleCitationClick = (citation: Citation) => {
+    previewTriggerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setPreviewTarget(previewTargetFromCitation(citation));
     setRightOpen(true);
+  };
+
+  const closeFilesPanel = () => {
+    setRightOpen(false);
+    window.requestAnimationFrame(() => previewTriggerRef.current?.focus());
   };
 
   const renderEmpty = () => (
@@ -498,10 +507,11 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
               <IconButton
                 aria-label={rightOpen ? "关闭会话文件" : "打开会话文件"}
                 className={`dm-file-preview-toggle ${rightOpen ? "active" : ""}`}
-                onClick={() => {
+                onClick={(event) => {
                   if (rightOpen) {
-                    setRightOpen(false);
+                    closeFilesPanel();
                   } else {
+                    previewTriggerRef.current = event.currentTarget;
                     setPreviewTarget(null);
                     setRightOpen(true);
                   }
@@ -608,7 +618,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
           previewTarget={previewTarget}
           refreshKey={filesRefreshKey}
           onPreviewTargetChange={setPreviewTarget}
-          onClose={() => setRightOpen(false)}
+          onClose={closeFilesPanel}
         />
       </div>
 

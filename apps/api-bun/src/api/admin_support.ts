@@ -11,7 +11,7 @@ export interface KnowledgeBaseUpsert {
   tags?: string[] | null;
 }
 
-export const CHUNKER_VERSION = 'documind-chunker@0.2.0';
+export const CHUNKER_VERSION = 'documind-chunker@0.3.0';
 
 // Rust document::ChunkConfig::default() 的默认值；api-bun 的 config.ts 暂未暴露 chunk 配置项。
 export const DEFAULT_CHUNK_CONFIG = {

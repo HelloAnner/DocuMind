@@ -151,7 +151,6 @@ export interface FilePreviewUrlResponse {
   expires_in_seconds: number;
   preview_url: string;
   manifest_url: string;
-  page_pdf_url_template: string;
 }
 
 export interface FilePreviewAccessClaims {

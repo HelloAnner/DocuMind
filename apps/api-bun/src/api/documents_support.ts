@@ -26,7 +26,7 @@ export function pathParam(c: Context<AppEnv>, name: string): string {
 }
 
 /** Rust: ingest::CHUNKER_VERSION（document/chunking.rs 尚未移植，常量值与 Rust 对齐） */
-export const CHUNKER_VERSION = 'documind-chunker@0.2.0';
+export const CHUNKER_VERSION = 'documind-chunker@0.3.0';
 
 // ---------------------------------------------------------------------------
 // 状态判定（与 Rust matches! 列表逐字一致）
@@ -226,29 +226,43 @@ export function titleFromFileName(fileName: string): string {
 
 /** Rust: parse_byte_range —— 返回 [start, end) 半开区间 */
 export function parseByteRange(range: string, totalSize: number): [number, number] | null {
-  if (!range.startsWith('bytes=')) return null;
+  if (!range.startsWith('bytes=') || totalSize <= 0) return null;
   const body = range.slice('bytes='.length);
+  if (body.includes(',')) return null;
   const dash = body.indexOf('-');
   if (dash < 0) return null;
   const startStr = body.slice(0, dash);
   const endStr = body.slice(dash + 1);
+  const digits = /^\d+$/;
 
   if (startStr === '') {
-    const suffix = Number.parseInt(endStr, 10);
-    if (Number.isNaN(suffix)) return null;
+    if (!digits.test(endStr)) return null;
+    const suffix = Number(endStr);
+    if (suffix <= 0) return null;
     return [Math.max(0, totalSize - suffix), totalSize];
   }
 
-  const start = Number.parseInt(startStr, 10);
-  if (Number.isNaN(start)) return null;
+  if (!digits.test(startStr)) return null;
+  const start = Number(startStr);
   let end = totalSize;
   if (endStr !== '') {
-    const parsed = Number.parseInt(endStr, 10);
-    if (Number.isNaN(parsed)) return null;
-    end = Math.min(parsed, totalSize);
+    if (!digits.test(endStr)) return null;
+    end = Math.min(Number(endStr) + 1, totalSize);
   }
-  if (start >= end || start >= totalSize) return null;
+  if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start >= end || start >= totalSize) {
+    return null;
+  }
   return [start, end];
+}
+
+export function rangeNotSatisfiable(totalSize: number): Response {
+  return new Response(null, {
+    status: 416,
+    headers: {
+      'Accept-Ranges': 'bytes',
+      'Content-Range': `bytes */${totalSize}`,
+    },
+  });
 }
 
 /** Rust: append_preview_text —— 按字符（Unicode scalar）截断，返回是否完整写入 */

@@ -85,6 +85,19 @@ def http_bytes(path, token=None, timeout=120):
         return resp.read(), resp.headers.get("Content-Type", "")
 
 
+def http_range_bytes(path, start, end, token=None, timeout=120):
+    headers = {"Accept": "*/*", "Range": f"bytes={start}-{end}"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    req = urllib.request.Request(f"{BASE_URL}{path}", headers=headers, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        return (
+            resp.status,
+            resp.read(),
+            resp.headers.get("Content-Type", ""),
+            resp.headers.get("Content-Range", ""),
+        )
+
 def http_json_url(url, timeout=120):
     req = urllib.request.Request(f"{BASE_URL}{url}", headers={"Accept": "application/json"}, method="GET")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -340,14 +353,26 @@ def verify_office_preview(doc_id, token, expected_format):
         fail("office manifest preview_type mismatch", manifest)
     if manifest.get("conversion_status") != "converted":
         fail("office preview was not converted", manifest)
-    if not manifest.get("page_count") or manifest.get("page_count") < 1:
-        fail("office preview page_count missing", manifest)
+    if manifest.get("page_count") is not None and manifest["page_count"] < 1:
+        fail("office preview page_count invalid", manifest)
     data, content_type = http_bytes(f"/api/files/{doc_id}/preview/content", token=token)
     assert_pdf_bytes(f"{expected_format} preview content", data, content_type)
-    page, page_type = http_bytes(f"/api/files/{doc_id}/preview/pages/1/pdf", token=token)
-    assert_pdf_bytes(f"{expected_format} preview page", page, page_type)
+    range_status, range_data, range_type, content_range = http_range_bytes(
+        f"/api/files/{doc_id}/preview/content", 0, 63, token=token
+    )
+    if range_status != 206 or range_data != data[:64] or not content_range.startswith("bytes 0-63/"):
+        fail(
+            f"{expected_format} preview byte range mismatch",
+            {
+                "status": range_status,
+                "content_type": range_type,
+                "content_range": content_range,
+                "bytes": len(range_data),
+            },
+        )
+    ok(f"{expected_format} preview supports byte ranges")
     signed = http_json("GET", f"/api/files/{doc_id}/preview-url", token=token)
-    for field in ("expires_at", "preview_url", "manifest_url", "page_pdf_url_template"):
+    for field in ("expires_at", "preview_url", "manifest_url"):
         if not signed.get(field):
             fail("preview-url response missing field", signed)
     signed_manifest = http_json_url(signed["manifest_url"], timeout=180)
@@ -355,9 +380,6 @@ def verify_office_preview(doc_id, token, expected_format):
         fail("signed preview manifest mismatch", signed_manifest)
     signed_content, signed_content_type = http_bytes_url(signed["preview_url"])
     assert_pdf_bytes(f"{expected_format} signed preview content", signed_content, signed_content_type)
-    signed_page_url = signed["page_pdf_url_template"].replace("{page}", "1")
-    signed_page, signed_page_type = http_bytes_url(signed_page_url)
-    assert_pdf_bytes(f"{expected_format} signed preview page", signed_page, signed_page_type)
     ok(f"{expected_format} office preview manifest is converted")
 
 

@@ -5,7 +5,7 @@
 import type { SourceAnchor } from '../models/source_anchor.ts';
 import type { CleanStats, CleanedBlock } from './cleaning.ts';
 
-export const PARSER_VERSION = 'documind-parser@0.5.0';
+export const PARSER_VERSION = 'documind-parser@0.6.0';
 export const SCHEMA_VERSION = 'parsed-document-v1';
 export const MAX_OFFICE_ZIP_ENTRIES = 10_000;
 export const MAX_OFFICE_UNCOMPRESSED_BYTES = 500 * 1024 * 1024;

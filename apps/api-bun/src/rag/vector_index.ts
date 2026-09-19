@@ -1,5 +1,5 @@
 // 移植自 apps/api-rs/src/rag/vector_index.rs —— ElasticsearchChunkIndexer：索引生命周期 + bulk + scroll
-import type { CharRange, NormalizedBBox } from '../models/source_anchor.ts';
+import type { CharRange, NormalizedBBox, SourceAnchor } from '../models/source_anchor.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import { indexDefinition } from './vector_index/schema.ts';
 
@@ -44,6 +44,7 @@ export interface IndexedChunk {
   anchor_char_range: CharRange | null;
   anchor_bbox: NormalizedBBox | null;
   anchor_text: string;
+  anchors: SourceAnchor[];
   embedding_model: string;
   embedding: number[];
   metadata: Record<string, unknown>;
@@ -82,6 +83,7 @@ export function indexedChunkToJson(chunk: IndexedChunk): Record<string, unknown>
     anchor_char_range: chunk.anchor_char_range,
     anchor_bbox: chunk.anchor_bbox,
     anchor_text: chunk.anchor_text,
+    anchors: chunk.anchors,
     embedding_model: chunk.embedding_model,
     embedding: chunk.embedding,
     metadata: chunk.metadata,

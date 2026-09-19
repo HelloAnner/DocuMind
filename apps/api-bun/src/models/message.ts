@@ -21,14 +21,14 @@ export interface ConversationMessage {
 }
 
 export interface CitationResponse {
-  index: number; doc_id: string; chunk_id: string; doc_title: string; page_range: number[];
-  quote: string; source_status: string; anchor?: CitationAnchor | null;
+  citation_id: string; index: number; doc_id: string; chunk_id: string; doc_title: string;
+  page_range: number[]; quote: string; source_status: string; anchor?: CitationAnchor | null;
 }
 export function citationToResponse(citation: Citation): CitationResponse {
   const response: CitationResponse = {
-    index: citation.index, doc_id: citation.doc_id, chunk_id: citation.chunk_id,
-    doc_title: citation.doc_title, page_range: citation.page_range, quote: citation.quote,
-    source_status: citation.source_status,
+    citation_id: citation.id, index: citation.index, doc_id: citation.doc_id,
+    chunk_id: citation.chunk_id, doc_title: citation.doc_title, page_range: citation.page_range,
+    quote: citation.quote, source_status: citation.source_status,
   };
   // Rust: #[serde(skip_serializing_if = "Option::is_none")] —— 无 anchor 时省略该键
   if (citation.anchor !== null) response.anchor = citation.anchor;

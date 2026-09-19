@@ -133,9 +133,9 @@ BASE_URL=http://123.57.255.204:8089 make release-gate
 该脚本会真实打远端服务器：
 
 1. 动态生成 DOCX / PPTX，上传并等待 `indexed`。
-2. 调用 `/api/files/{doc_id}/preview/manifest`，验证 `preview_type=office_pdf`、`conversion_status=converted`、`page_count >= 1`。
-3. 调用 `/api/files/{doc_id}/preview/content` 与 `/api/files/{doc_id}/preview/pages/1/pdf`，验证返回 PDF bytes。
-4. 调用 `/api/files/{doc_id}/preview-url`，验证带 `preview_token` 的短期 manifest/content/page PDF URL 可在不带 Authorization header 时访问。
+2. 调用 `/api/files/{doc_id}/preview/manifest`，验证 `preview_type=office_pdf`、`conversion_status=converted`；页数未知时返回 null，由 PDF.js 读取真实页数，不伪造页面尺寸。
+3. 调用 `/api/files/{doc_id}/preview/content`，验证完整 PDF bytes，并用 `Range` 请求验证返回 `206` 和正确的 `Content-Range`。
+4. 调用 `/api/files/{doc_id}/preview-url`，验证带 `preview_token` 的短期 manifest/content URL 可在不带 Authorization header 时访问。
 5. 动态生成 image-only scanned PDF，上传后验证初始状态为 `parse_low_confidence`。
 6. 调用 `/api/admin/documents/{doc_id}/send-to-ocr`，等待 OCR 后进入 `indexed`。
 7. 查询 PostgreSQL，验证 OCR chunk、marker 文本和 bbox anchor 已落库。

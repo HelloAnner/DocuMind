@@ -51,6 +51,7 @@ export function indexDefinition(dims: number): Record<string, unknown> {
         anchor_char_range: { type: 'object' },
         anchor_bbox: { type: 'object' },
         anchor_text: { type: 'text', index: false },
+        anchors: { type: 'object', enabled: false },
         embedding_model: { type: 'keyword' },
         embedding: {
           type: 'dense_vector',

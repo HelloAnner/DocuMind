@@ -2,20 +2,15 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
-  BadgeCheck,
   Check,
   Copy,
+  FileText,
   RefreshCw,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
 } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  citationLocationStatus,
-  citationLocationStatusLabel,
-  isCitationDeleted,
-} from "./citation-card";
 import { AnswerContent } from "./answer-content";
 import { ReasoningTrace } from "./reasoning-trace";
 import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
@@ -23,40 +18,63 @@ import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
 import { SkillCard } from "./skill-card";
-const DOWN_REASON_OPTIONS: Array<{ value: FeedbackReason; label: string }> = [
-  { value: "wrong_answer", label: "内容不正确" },
-  { value: "not_helpful", label: "没有回答问题" },
-  { value: "missing_source", label: "缺少依据" },
-  { value: "outdated", label: "内容已过期" },
-  { value: "other", label: "其他" },
-];
+
+function isCitationDeleted(citation: Citation) {
+  return citation.source_status === "deleted";
+}
+
+function citationLocationStatus(citation: Citation) {
+  if (isCitationDeleted(citation)) return "unavailable";
+  const status = citation.anchor?.location_status;
+  return status === "structural_only" ? "file_only" : status ?? "file_only";
+}
+
+function citationLocationStatusLabel(citation: Citation) {
+  switch (citationLocationStatus(citation)) {
+    case "exact":
+      return "精确定位";
+    case "page_only":
+      return "页码定位";
+    case "slide_only":
+      return "幻灯片定位";
+    case "file_only":
+      return "打开原文";
+    default:
+      return "来源不可用";
+  }
+}
 
 function CitationChip({
   citation,
+  compact = false,
   onClick,
 }: {
   citation: Citation;
+  compact?: boolean;
   onClick: (c: Citation) => void;
 }) {
   const deleted = isCitationDeleted(citation);
   const locationStatus = citationLocationStatus(citation);
+  const pages = citation.page_range.length > 0
+    ? `第 ${citation.page_range.join("-")} 页`
+    : citation.anchor?.slide
+      ? `第 ${citation.anchor.slide} 张`
+      : "原文";
   return (
     <button
+      aria-label={`引用 ${citation.index}，${citation.doc_title}，${pages}`}
       type="button"
-      className={`dm-citation-chip ${deleted ? "deleted" : ""}`}
+      className={`dm-citation-chip ${compact ? "compact" : ""} ${deleted ? "deleted" : ""}`}
+      disabled={deleted}
       onClick={() => onClick(citation)}
     >
       <span className="dm-citation-chip-index">[{citation.index}]</span>
-      <span className="dm-citation-chip-doc">{citation.doc_title}</span>
-      {citation.page_range.length > 0 && (
-        <span className="dm-citation-chip-page">
-          · 第 {citation.page_range.join("-")} 页
-        </span>
-      )}
+      {!compact ? <span className="dm-citation-chip-doc">{citation.doc_title}</span> : null}
+      <span className="dm-citation-chip-page">{compact ? pages : `· ${pages}`}</span>
       <span className={`dm-location-badge dm-location-badge-${locationStatus}`}>
         {citationLocationStatusLabel(citation)}
       </span>
-      {deleted && <span className="dm-deleted-source-badge">原文已删除</span>}
+      {deleted ? <span className="dm-deleted-source-badge">原文已删除</span> : null}
     </button>
   );
 }
@@ -75,37 +93,6 @@ function formatRelativeTime(value: string) {
   return new Date(timestamp).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
 }
 
-function citationDedupKey(citation: Citation) {
-  return citation.doc_id || citation.doc_title;
-}
-
-function uniqueCitations(citations: Citation[]) {
-  const seen = new Set<string>();
-  const unique: Citation[] = [];
-
-  for (const citation of citations) {
-    const key = citationDedupKey(citation);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    unique.push(citation);
-  }
-
-  return unique;
-}
-
-function citationByDisplayedSource(citations: Citation[]) {
-  const byOriginalIndex = new Map<number, Citation>();
-  const byKey = new Map<string, Citation>();
-
-  for (const citation of citations) {
-    const key = citationDedupKey(citation);
-    const displayed = byKey.get(key) ?? citation;
-    if (!byKey.has(key)) byKey.set(key, citation);
-    byOriginalIndex.set(citation.index, displayed);
-  }
-
-  return byOriginalIndex;
-}
 
 interface MessageRowProps {
   message: Message;
@@ -133,8 +120,7 @@ function AgentMeta({
   deletedAll: boolean;
 }) {
   const meta = [
-    message.answer_source === "manual_correction" ? "租户标准答案" : "",
-    hasCitations ? `基于 ${message.citations.length} 个来源` : "",
+    hasCitations ? `基于 ${message.citations.length} 处原文` : "",
     deletedAll ? "来源已删除" : "",
   ].filter(Boolean);
 
@@ -148,12 +134,6 @@ function AgentMeta({
       <div className="dm-answer-head-copy">
         <div className="dm-message-identity">
           <strong>DocuMind</strong>
-          {message.answer_source === "manual_correction" ? (
-            <span className="dm-standard-answer-badge">
-              <BadgeCheck size={13} aria-hidden="true" />
-              管理员已校正
-            </span>
-          ) : null}
           {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
         </div>
         {meta.length > 0 ? <p>{meta.join(" · ")}</p> : null}
@@ -205,13 +185,7 @@ export function MessageRow({
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
   const [downPanelOpen, setDownPanelOpen] = useState(false);
-  const [downReason, setDownReason] = useState<FeedbackReason>(
-    message.feedback?.reason ?? "wrong_answer"
-  );
-  const [downComment, setDownComment] = useState(message.feedback?.comment ?? "");
-  const [suggestedCorrection, setSuggestedCorrection] = useState(
-    message.feedback?.correction ?? ""
-  );
+  const [downReason, setDownReason] = useState(message.feedback?.comment ?? "");
 
   const handleCopy = async () => {
     if (await copyToClipboard(message.content)) {
@@ -222,25 +196,17 @@ export function MessageRow({
 
   useEffect(() => {
     setFeedbackRating(message.feedback?.rating ?? null);
-    setDownReason(message.feedback?.reason ?? "wrong_answer");
-    setDownComment(message.feedback?.comment ?? "");
-    setSuggestedCorrection(message.feedback?.correction ?? "");
+    setDownReason(message.feedback?.comment ?? "");
     setDownPanelOpen(false);
     setFeedbackError("");
-  }, [
-    message.feedback?.comment,
-    message.feedback?.correction,
-    message.feedback?.rating,
-    message.feedback?.reason,
-    message.message_id,
-  ]);
+  }, [message.feedback?.comment, message.feedback?.rating, message.message_id]);
 
   useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
+
   const saveFeedback = async (
     rating: Rating,
     reason?: FeedbackReason,
-    comment?: string,
-    correction?: string
+    comment?: string
   ) => {
     if (feedbackSaving) return;
     const previous = feedbackRating;
@@ -251,8 +217,7 @@ export function MessageRow({
       message.message_id,
       rating,
       reason,
-      comment,
-      correction
+      comment
     );
     if (saved) {
       setDownPanelOpen(false);
@@ -272,9 +237,7 @@ export function MessageRow({
     const cleared = await onClearFeedback(message.message_id);
     if (cleared) {
       setDownPanelOpen(false);
-      setDownReason("wrong_answer");
-      setDownComment("");
-      setSuggestedCorrection("");
+      setDownReason("");
     } else {
       setFeedbackRating(previous);
       setFeedbackError("取消反馈失败，请重试");
@@ -282,6 +245,20 @@ export function MessageRow({
     setFeedbackSaving(false);
   };
 
+  const displayCitations = message.citations;
+  const citationLookup = useMemo(
+    () => new Map(message.citations.map((citation) => [citation.index, citation])),
+    [message.citations]
+  );
+  const citationGroups = useMemo(() => {
+    const groups = new Map<string, Citation[]>();
+    for (const citation of displayCitations) {
+      const group = groups.get(citation.doc_id);
+      if (group) group.push(citation);
+      else groups.set(citation.doc_id, [citation]);
+    }
+    return Array.from(groups.values());
+  }, [displayCitations]);
   if (message.role === "user") {
     const userLabel = me?.user.name?.trim() || me?.user.email?.split("@")[0] || "你";
     const initials = userLabel.slice(0, 1).toUpperCase();
@@ -309,13 +286,10 @@ export function MessageRow({
     );
   }
 
-  const hasCitations = message.citations.length > 0;
-  const displayCitations = useMemo(() => uniqueCitations(message.citations), [message.citations]);
-  const citationLookup = useMemo(() => citationByDisplayedSource(message.citations), [message.citations]);
   const hasDisplayCitations = displayCitations.length > 0;
   const failed = message.status === "failed";
   const cancelled = message.status === "cancelled";
-  const deletedAll = hasCitations && message.citations.every(isCitationDeleted);
+  const deletedAll = hasDisplayCitations && message.citations.every(isCitationDeleted);
   const hasContent = message.content.trim().length > 0;
 
   return (
@@ -359,19 +333,29 @@ export function MessageRow({
 
       <FollowUpQuestions questions={message.follow_up_questions} onClick={onFollowUp} />
 
-      {hasDisplayCitations && (
+      {hasDisplayCitations ? (
         <div className="dm-answer-citations">
-          <div className="dm-answer-citations-row">
-            {displayCitations.map((citation) => (
-              <CitationChip
-                key={citation.index}
-                citation={citation}
-                onClick={onCitationClick}
-              />
-            ))}
-          </div>
+          {citationGroups.map((citations) => (
+            <section className="dm-citation-source-group" key={citations[0].doc_id}>
+              <div className="dm-citation-source-heading">
+                <FileText size={14} aria-hidden="true" />
+                <strong title={citations[0].doc_title}>{citations[0].doc_title}</strong>
+                <span>{citations.length} 处</span>
+              </div>
+              <div className="dm-answer-citations-row">
+                {citations.map((citation) => (
+                  <CitationChip
+                    compact
+                    key={citation.citation_id}
+                    citation={citation}
+                    onClick={onCitationClick}
+                  />
+                ))}
+              </div>
+            </section>
+          ))}
         </div>
-      )}
+      ) : null}
 
       {!isStreaming ? (
         <div className="dm-answer-actions">
@@ -431,56 +415,20 @@ export function MessageRow({
             id={`feedback-panel-${message.message_id}`}
             onSubmit={(event) => {
               event.preventDefault();
-              void saveFeedback(
-                "down",
-                downReason,
-                downComment.trim() || undefined,
-                suggestedCorrection.trim() || undefined
-              );
+              const comment = downReason.trim() || undefined;
+              void saveFeedback("down", "not_helpful", comment);
             }}
           >
-            <fieldset className="dm-feedback-reasons">
-              <legend>这条回复哪里不对？</legend>
-              <div className="dm-feedback-reason-grid">
-                {DOWN_REASON_OPTIONS.map((option) => (
-                  <label
-                    className={downReason === option.value ? "is-selected" : ""}
-                    key={option.value}
-                  >
-                    <input
-                      checked={downReason === option.value}
-                      name={`feedback-reason-${message.message_id}`}
-                      onChange={() => setDownReason(option.value)}
-                      type="radio"
-                      value={option.value}
-                    />
-                    <span>{option.label}</span>
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <label htmlFor={`feedback-comment-${message.message_id}`}>
-              具体说明 <small>可选</small>
+            <label htmlFor={`feedback-reason-${message.message_id}`}>
+              这条回复哪里不对？
             </label>
             <textarea
               autoFocus
-              id={`feedback-comment-${message.message_id}`}
-              maxLength={4000}
-              onChange={(event) => setDownComment(event.target.value)}
-              placeholder="例如：审批人不是财务负责人"
-              rows={2}
-              value={downComment}
-            />
-            <label htmlFor={`feedback-correction-${message.message_id}`}>
-              我认为正确答案是 <small>可选，提交后由管理员审核</small>
-            </label>
-            <textarea
-              id={`feedback-correction-${message.message_id}`}
-              maxLength={20000}
-              onChange={(event) => setSuggestedCorrection(event.target.value)}
-              placeholder="如果你知道正确答案，可以填写在这里"
+              id={`feedback-reason-${message.message_id}`}
+              onChange={(event) => setDownReason(event.target.value)}
+              placeholder="可以简单说下原因"
               rows={3}
-              value={suggestedCorrection}
+              value={downReason}
             />
             {feedbackError ? (
               <p className="dm-feedback-error" role="alert">

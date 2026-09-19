@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ChevronRight,
   FileText,
   FolderOpen,
+  Maximize2,
+  Minimize2,
   Quote,
   RefreshCw,
   X,
 } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
-import { DocumentPreview, type DocumentPreviewTarget } from "./document-preview";
+import {
+  DocumentPreview,
+  previewTargetPage,
+  type DocumentPreviewTarget,
+} from "./document-preview";
 import { getConversationFiles } from "@/lib/api";
 import type { ConversationFile } from "@/lib/types";
 
@@ -38,6 +44,7 @@ function previewTargetFromFile(file: ConversationFile): DocumentPreviewTarget {
     page_range: file.preview_page_range,
     source_status: file.source_status,
     anchor: file.preview_anchor,
+    quote: file.preview_quote,
   };
 }
 
@@ -56,15 +63,41 @@ export function ConversationFilesPanel({
 }: ConversationFilesPanelProps) {
   const [state, setState] = useState<FileListState>({ status: "idle", files: [] });
   const [retryToken, setRetryToken] = useState(0);
+  const [maximized, setMaximized] = useState(false);
+  const panelRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     setState({ status: "idle", files: [] });
   }, [conversationId]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setMaximized(false);
+      return;
+    }
+    const panel = panelRef.current;
+    panel?.querySelector<HTMLElement>("[data-preview-initial-focus]")?.focus();
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab" || !window.matchMedia("(max-width: 1024px)").matches) return;
+      const focusable = Array.from(
+        panel?.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), a[href], input:not(:disabled), [tabindex]:not([tabindex="-1"])'
+        ) ?? []
+      ).filter((element) => !element.hidden);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
@@ -100,14 +133,16 @@ export function ConversationFilesPanel({
     () => state.files.filter((file) => file.citation_count > 0).length,
     [state.files]
   );
+  const targetPage = previewTarget ? previewTargetPage(previewTarget) : null;
 
   return (
     <aside
       aria-hidden={!open}
       aria-label="会话文件"
-      className={`dm-right-rail ${open ? "open" : ""}`}
+      className={`dm-right-rail ${open ? "open" : ""} ${maximized ? "maximized" : ""}`}
       data-view={previewTarget ? "preview" : "list"}
       inert={!open}
+      ref={panelRef}
     >
       <div className="dm-right-rail-inner">
         <div className="dm-conversation-files-header">
@@ -126,19 +161,39 @@ export function ConversationFilesPanel({
               </span>
             )}
             <div>
-              <strong>{previewTarget ? "文件预览" : "会话文件"}</strong>
+              <strong title={previewTarget?.doc_title}>
+                {previewTarget?.doc_title ?? "会话文件"}
+              </strong>
               <span>
                 {previewTarget
-                  ? "真实原文"
+                  ? targetPage
+                    ? `第 ${targetPage} ${previewTarget.anchor?.slide ? "张" : "页"}`
+                    : "原文依据"
                   : state.files.length > 0
                     ? `${state.files.length} 个引用文件`
                     : "正文引用的文件"}
               </span>
             </div>
           </div>
-          <IconButton aria-label="关闭会话文件" className="dm-right-rail-close" onClick={onClose}>
-            <X size={17} />
-          </IconButton>
+          <div className="dm-right-rail-actions">
+            {previewTarget ? (
+              <IconButton
+                aria-label={maximized ? "还原预览面板" : "最大化预览面板"}
+                className="dm-right-rail-maximize"
+                onClick={() => setMaximized((current) => !current)}
+              >
+                {maximized ? <Minimize2 size={17} /> : <Maximize2 size={17} />}
+              </IconButton>
+            ) : null}
+            <IconButton
+              aria-label="关闭会话文件"
+              className="dm-right-rail-close"
+              data-preview-initial-focus
+              onClick={onClose}
+            >
+              <X size={17} />
+            </IconButton>
+          </div>
         </div>
 
         <div className="dm-right-rail-body">

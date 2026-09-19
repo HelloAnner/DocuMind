@@ -21,6 +21,7 @@ import { verifyExternalApi } from "./external_verify.ts";
 import { printHelp } from "./help.ts";
 import { adminCommand, invitationCommand, systemCommand } from "./management_commands.ts";
 import {
+  citationLocationSuffix,
   LiveChatRenderer,
   printChatReport,
   printIdentity,
@@ -749,7 +750,10 @@ function printConversation(
     process.stdout.write(`\n${message.role === "user" ? "USER" : "ASSISTANT"} ${message.message_id} [${message.status}]\n`);
     process.stdout.write(`${message.content}\n`);
     for (const citation of message.citations) {
-      process.stdout.write(`  [${citation.index}] ${citation.doc_title} · ${citation.chunk_id}\n`);
+      process.stdout.write(
+        `  [${citation.index}] ${citation.doc_title} · ${citation.chunk_id}` +
+        `${citationLocationSuffix(citation)}\n`,
+      );
     }
     const trace = traces.find((item) => item.message_id === message.message_id);
     if (trace) {

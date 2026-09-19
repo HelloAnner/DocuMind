@@ -81,6 +81,22 @@ describe('chunking', () => {
     expect(chunks.length).toBe(1);
   });
 
+  test('pdf chunks and overlap never cross page boundaries', () => {
+    const cfg = config(200, 40);
+    cfg.min_chunk_tokens = 50;
+    const first = cleanedBlock('paragraph', null, '第一页证据');
+    const second = cleanedBlock('paragraph', null, '第二页证据');
+    second.block.page_start = 2;
+    second.block.page_end = 2;
+
+    const chunks = chunkBlocks('pdf', NIL_UUID, crypto.randomUUID(), [first, second], cfg);
+
+    expect(chunks).toHaveLength(2);
+    expect(chunks.map((chunk) => [chunk.page_start, chunk.page_end])).toEqual([[1, 1], [2, 2]]);
+    expect(chunks.every((chunk) => !chunk.content.includes('【上文】')
+      && !chunk.content.includes('【下文】'))).toBe(true);
+  });
+
   test('overlap keeps final chunks below the configured maximum', () => {
     const cfg = config(200, 40);
     const blocks = [cleanedBlock('paragraph', null, '正文内容'.repeat(180))];
@@ -101,7 +117,7 @@ describe('chunking', () => {
 
     chunks.forEach((chunk, index) => {
       expect(chunk.chunk_index).toBe(index);
-      expect(chunk.metadata['chunker_version']).toBe('documind-chunker@0.2.0');
+      expect(chunk.metadata['chunker_version']).toBe('documind-chunker@0.3.0');
       expect(chunk.metadata['format']).toBe('txt');
     });
   });

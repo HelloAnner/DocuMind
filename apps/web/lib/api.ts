@@ -744,7 +744,6 @@ export interface FilePreviewUrlResponse {
   expires_in_seconds: number;
   preview_url: string;
   manifest_url: string;
-  page_pdf_url_template: string;
 }
 
 export interface AdminDocumentDetail {
@@ -858,9 +857,6 @@ export function adminDocumentOriginalUrl(docId: string): string {
   return `${BASE}/api/admin/documents/${docId}/original`;
 }
 
-export function adminDocumentPagePdfUrl(docId: string, page: number): string {
-  return `${BASE}/api/admin/documents/${docId}/pages/${page}/pdf`;
-}
 
 function withConversationContext(path: string, conversationId?: string): string {
   if (!conversationId) return path;
@@ -868,16 +864,6 @@ function withConversationContext(path: string, conversationId?: string): string 
   return `${path}${separator}conversation_id=${encodeURIComponent(conversationId)}`;
 }
 
-export function filePreviewPagePdfUrl(
-  docId: string,
-  page: number,
-  conversationId?: string
-): string {
-  return withConversationContext(
-    `${BASE}/api/files/${docId}/preview/pages/${page}/pdf`,
-    conversationId
-  );
-}
 
 export function filePreviewContentUrl(docId: string, conversationId?: string): string {
   return withConversationContext(`${BASE}/api/files/${docId}/preview/content`, conversationId);
@@ -885,19 +871,23 @@ export function filePreviewContentUrl(docId: string, conversationId?: string): s
 
 export async function getFilePreview(
   docId: string,
-  conversationId?: string
+  conversationId?: string,
+  signal?: AbortSignal
 ): Promise<FilePreviewResponse> {
   return fetchJson(
-    withConversationContext(`/api/files/${docId}/preview`, conversationId)
+    withConversationContext(`/api/files/${docId}/preview`, conversationId),
+    { signal }
   );
 }
 
 export async function getFilePreviewUrl(
   docId: string,
-  conversationId?: string
+  conversationId?: string,
+  signal?: AbortSignal
 ): Promise<FilePreviewUrlResponse> {
   return fetchJson(
-    withConversationContext(`/api/files/${docId}/preview-url`, conversationId)
+    withConversationContext(`/api/files/${docId}/preview-url`, conversationId),
+    { signal }
   );
 }
 
@@ -911,7 +901,6 @@ export async function getFilePreviewManifest(
 }
 
 const originalBlobCache = new Map<string, Promise<Blob>>();
-const filePreviewBlobCache = new Map<string, Promise<Blob>>();
 
 export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blob> {
   const cached = originalBlobCache.get(docId);
@@ -938,29 +927,18 @@ export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blo
 
 export async function fetchFilePreviewBlob(
   docId: string,
-  conversationId?: string
+  conversationId?: string,
+  signal?: AbortSignal
 ): Promise<Blob> {
-  const cacheKey = `${conversationId ?? "direct"}:${docId}`;
-  const cached = filePreviewBlobCache.get(cacheKey);
-  if (cached) return cached;
-
-  const promise = (async () => {
-    const response = await fetch(filePreviewContentUrl(docId, conversationId), {
-      headers: getAuthHeaders(),
-    });
-    if (!response.ok) {
-      const text = await response.text().catch(() => "Unknown error");
-      throw new Error(`API error ${response.status}: ${text}`);
-    }
-    return response.blob();
-  })();
-
-  filePreviewBlobCache.set(cacheKey, promise);
-  promise.catch(() => {
-    filePreviewBlobCache.delete(cacheKey);
+  const response = await fetch(filePreviewContentUrl(docId, conversationId), {
+    headers: getAuthHeaders(),
+    signal,
   });
-
-  return promise;
+  if (!response.ok) {
+    const text = await response.text().catch(() => "Unknown error");
+    throw new Error(`API error ${response.status}: ${text}`);
+  }
+  return response.blob();
 }
 
 export async function downloadAdminDocumentOriginal(docId: string, fileName: string): Promise<void> {

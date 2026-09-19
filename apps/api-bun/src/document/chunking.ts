@@ -11,7 +11,7 @@ import { splitTableGroup } from './chunking/table.ts';
 import { estimateTokens, trimRust } from './text_utils.ts';
 import type { ChunkDraft, FileType } from './types.ts';
 
-export const CHUNKER_VERSION = 'documind-chunker@0.2.0';
+export const CHUNKER_VERSION = 'documind-chunker@0.3.0';
 
 /** 与 Rust 一致的 serde 字段名（snake_case） */
 export interface ChunkConfig {
@@ -143,6 +143,11 @@ export function singleBlockGroup(block: CleanedBlock): BlockGroup {
 
 function isHardBoundary(fileType: FileType, block: CleanedBlock, current: BlockGroup): boolean {
   if (current.isEmpty()) return false;
+  if (fileType === 'pdf') {
+    const currentPage = current.blocks[current.blocks.length - 1]?.block.page_start ?? null;
+    const nextPage = block.block.page_start;
+    if (currentPage !== null && nextPage !== null && currentPage !== nextPage) return true;
+  }
   if (block.block.block_type === 'table' || block.block.block_type === 'code') return true;
   // PDF 解析器只有启发式标题、没有可靠标题路径：若把每条短行都当 H1 会把长 PDF 切碎
   if (fileType !== 'pdf' && block.block.heading_level === 1) return true;

@@ -70,6 +70,12 @@ function runtimeStepNumber(value: unknown) {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
 }
 
+function mergeCitations(current: Citation[], incoming: Citation[]) {
+  const merged = new Map(current.map((citation) => [citation.citation_id, citation]));
+  for (const citation of incoming) merged.set(citation.citation_id, citation);
+  return [...merged.values()];
+}
+
 export function useConversationManager() {
   const router = useRouter();
   const favoriteStorageKey = useMemo(
@@ -542,7 +548,7 @@ export function useConversationManager() {
               queueMessageUpdate((prev) =>
                 prev.map((m) =>
                   m.message_id === messageId || m.message_id === assistantTempId
-                    ? { ...m, citations: [...m.citations, ...citations] }
+                    ? { ...m, citations: mergeCitations(m.citations, citations) }
                     : m
                 )
               );
@@ -705,7 +711,7 @@ export function useConversationManager() {
             queueMessageUpdate((prev) =>
               prev.map((m) =>
                 m.message_id === data.message_id || m.message_id === assistantTempId
-                  ? { ...m, citations: [...m.citations, data.citation] }
+                  ? { ...m, citations: mergeCitations(m.citations, [data.citation]) }
                   : m
               )
             );

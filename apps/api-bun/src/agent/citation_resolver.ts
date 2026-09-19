@@ -1,87 +1,94 @@
 // 移植自 apps/api-rs/src/agent/citation_resolver.rs
 import type { CitationOutput } from '../models/agent.ts';
 import type { CitationAnchor } from '../models/citation.ts';
-import type { NormalizedBBox, CharRange } from '../models/source_anchor.ts';
+import type { CharRange, NormalizedBBox, SourceAnchor } from '../models/source_anchor.ts';
 import type { EvidencePack, RerankedChunk, RetrievedChunk } from '../models/rag.ts';
+import { newUuid } from '../infra/uuid.ts';
 
-const MAX_QUOTE_CHARS = 180;
-const MAX_CITATIONS = 6;
+const MAX_QUOTE_CHARS = 300;
 
 export function resolveCitations(answer: string, evidence: EvidencePack): CitationOutput[] {
-  const citedIndexes = citedEvidenceIndexes(answer);
-  if (citedIndexes.length === 0) return [];
-  const cited = new Set(citedIndexes);
-  const selected: Array<{ oneBased: number; chunk: RerankedChunk }> = [];
-  evidence.chunks.forEach((chunk, evidenceIndex) => {
-    const oneBased = evidenceIndex + 1;
-    if (!cited.has(oneBased)) return;
-    selected.push({ oneBased, chunk });
-  });
-
-  const seenDocs = new Set<string>();
-  const output: CitationOutput[] = [];
-  for (const { oneBased, chunk } of selected) {
-    if (seenDocs.has(chunk.chunk.doc_id)) continue;
-    seenDocs.add(chunk.chunk.doc_id);
-    if (output.length >= MAX_CITATIONS) break;
-    output.push({
-      index: oneBased,
+  return citationPlan(answer, evidence).citations.map(
+    ({ displayIndex, chunk, sourceAnchor }) => ({
+      citation_id: newUuid(),
+      index: displayIndex,
       chunk_id: chunk.chunk.chunk_id,
       doc_id: chunk.chunk.doc_id,
       doc_title: chunk.chunk.doc_title,
       page_range: [...chunk.chunk.page_range],
-      quote: compactQuote(chunk.chunk.content),
+      quote: compactQuote(sourceAnchor?.text || chunk.chunk.content),
       score: chunk.score,
       source_status: 'available',
-      anchor: anchorForChunk(chunk),
-    });
-  }
-  return output;
+      anchor: anchorForChunk(chunk, sourceAnchor),
+    }),
+  );
 }
 
 export function canonicalizeCitationMarkers(answer: string, evidence: EvidencePack): string {
-  const cited = citedEvidenceIndexes(answer);
-  const firstByDoc = new Map<string, number>();
-  const replacements = new Map<number, number>();
-  for (const index of cited) {
-    const chunk = evidence.chunks[index - 1];
-    if (!chunk) continue;
-    const docId = chunk.chunk.doc_id;
-    const canonical = firstByDoc.has(docId) ? firstByDoc.get(docId)! : index;
-    if (!firstByDoc.has(docId)) firstByDoc.set(docId, index);
-    replacements.set(index, canonical);
+  const markers = citationPlan(answer, evidence).markerDisplays;
+  const rewritten = answer.replace(/\[([^\]]+)\]/g, (marker, _body: string, offset: number) => {
+    const displays = markers.get(offset);
+    return displays === undefined || displays.length === 0
+      ? marker
+      : `[${displays.join(',')}]`;
+  });
+  return rewritten.replace(/(\[\d+(?:,\d+)*\])(?:[ \t]*\1)+/g, '$1');
+}
+
+interface PlannedCitation {
+  displayIndex: number;
+  chunk: RerankedChunk;
+  sourceAnchor: SourceAnchor | null;
+}
+
+interface CitationPlan {
+  citations: PlannedCitation[];
+  markerDisplays: Map<number, number[]>;
+}
+
+function citationPlan(answer: string, evidence: EvidencePack): CitationPlan {
+  const citations: PlannedCitation[] = [];
+  const markerDisplays = new Map<number, number[]>();
+  const displayByLocation = new Map<string, number>();
+
+  for (const match of answer.matchAll(/\[([^\]]+)\]/g)) {
+    const offset = match.index ?? 0;
+    const values = match[1]!.split(',').map((part) => parseI32Strict(part.trim()));
+    if (values.some((value) => value === null)) continue;
+    const displays: number[] = [];
+    const claim = claimBeforeMarker(answer, offset);
+    for (const evidenceIndex of values as number[]) {
+      const chunk = evidence.chunks[evidenceIndex - 1];
+      if (!chunk) continue;
+      const sourceAnchor = selectedAnchorForChunk(chunk.chunk, claim);
+      const key = citationLocationKey(chunk.chunk, sourceAnchor);
+      let displayIndex = displayByLocation.get(key);
+      if (displayIndex === undefined) {
+        displayIndex = citations.length + 1;
+        displayByLocation.set(key, displayIndex);
+        citations.push({ displayIndex, chunk, sourceAnchor });
+      }
+      if (!displays.includes(displayIndex)) displays.push(displayIndex);
+    }
+    markerDisplays.set(offset, displays);
   }
 
-  let result = '';
-  let rest = answer;
-  for (;;) {
-    const start = rest.indexOf('[');
-    if (start === -1) break;
-    result += rest.slice(0, start);
-    const marker = rest.slice(start);
-    const end = marker.indexOf(']');
-    if (end === -1) {
-      result += marker;
-      return result;
-    }
-    const values = marker
-      .slice(1, end)
-      .split(',')
-      .map((part) => parseI32Strict(part.trim()));
-    if (values.every((value) => value !== null)) {
-      const canonical: number[] = [];
-      for (const value of values as number[]) {
-        const mapped = replacements.has(value) ? replacements.get(value)! : value;
-        if (!canonical.includes(mapped)) canonical.push(mapped);
-      }
-      result += '[' + canonical.join(',') + ']';
-    } else {
-      result += marker.slice(0, end + 1);
-    }
-    rest = marker.slice(end + 1);
-  }
-  result += rest;
-  return result;
+  return { citations, markerDisplays };
+}
+
+function claimBeforeMarker(answer: string, offset: number): string {
+  const prefix = answer.slice(Math.max(0, offset - 300), offset);
+  const boundary = Math.max(
+    prefix.lastIndexOf('。'),
+    prefix.lastIndexOf('！'),
+    prefix.lastIndexOf('？'),
+    prefix.lastIndexOf('\n'),
+  );
+  return prefix.slice(boundary + 1).trim();
+}
+
+function citationLocationKey(chunk: RetrievedChunk, anchor: SourceAnchor | null): string {
+  return `${chunk.doc_id}:${chunk.chunk_id}:${anchor?.anchor_id ?? ''}:${anchor?.page ?? ''}`;
 }
 
 export function citedEvidenceIndexes(answer: string): number[] {
@@ -109,76 +116,77 @@ export function citedEvidenceIndexes(answer: string): number[] {
       if (parsed !== null && parsed > 0) indexes.add(parsed);
     }
   }
-  return [...indexes].sort((a, b) => a - b);
+  return [...indexes];
 }
 
-interface PrimaryAnchorShape {
-  anchor_id?: unknown;
-  parse_job_id?: unknown;
-  format?: unknown;
-  kind?: unknown;
-  page?: unknown;
-  slide?: unknown;
-  bbox?: unknown;
-  char_range?: unknown;
+function selectedAnchorForChunk(chunk: RetrievedChunk, claim: string): SourceAnchor | null {
+  const candidates = chunk.anchors.length > 0
+    ? chunk.anchors
+    : chunk.primary_anchor === null
+      ? []
+      : [chunk.primary_anchor];
+  if (candidates.length === 0) return null;
+
+  let best = chunk.primary_anchor ?? candidates[0]!;
+  let bestScore = textOverlapScore(claim, best.text);
+  for (const candidate of candidates) {
+    const score = textOverlapScore(claim, candidate.text);
+    if (score > bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return best;
 }
 
-function primaryAnchorOf(chunk: RetrievedChunk): PrimaryAnchorShape | null {
-  const anchor = chunk.primary_anchor;
-  if (typeof anchor !== 'object' || anchor === null) return null;
-  return anchor as PrimaryAnchorShape;
+function textOverlapScore(left: string, right: string): number {
+  const target = Array.from(left.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''));
+  const source = right.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  if (target.length < 2) return source.includes(target.join('')) ? target.length : 0;
+  const grams = new Set<string>();
+  for (let index = 0; index < target.length - 1; index += 1) {
+    grams.add(target[index]! + target[index + 1]!);
+  }
+  let score = 0;
+  for (const gram of grams) if (source.includes(gram)) score += 1;
+  return score;
 }
 
-function anchorForChunk(chunk: RerankedChunk): CitationAnchor {
-  const primary = primaryAnchorOf(chunk.chunk);
-  const page =
-    primary && typeof primary.page === 'number'
-      ? primary.page
-      : chunk.chunk.page_range.length > 0
-        ? chunk.chunk.page_range[0]
-        : null;
-  const slide =
-    primary && typeof primary.slide === 'number'
-      ? primary.slide
-      : metadataI32(chunk.chunk.metadata, 'slide_start') ??
-        metadataI32(chunk.chunk.metadata, 'slide') ??
-        metadataI32(chunk.chunk.metadata, 'slide_end');
-  const kind =
-    primary && typeof primary.kind === 'string'
-      ? primary.kind
-      : chunk.chunk.table_ids.length > 0 || sourceType(chunk.chunk) === 'table'
-        ? 'table_region'
-        : slide !== null && slide !== undefined
-          ? 'slide_shape'
-          : 'paragraph';
-  const bbox = primary && isBBox(primary.bbox) ? primary.bbox : null;
-  const charRange = primary && isCharRange(primary.char_range) ? primary.char_range : null;
-  const anchorId = primary && typeof primary.anchor_id === 'string' ? primary.anchor_id : null;
-  const parseJobId =
-    primary && typeof primary.parse_job_id === 'string' ? primary.parse_job_id : null;
-
+function anchorForChunk(chunk: RerankedChunk, sourceAnchor: SourceAnchor | null): CitationAnchor {
+  const page = sourceAnchor?.page
+    ?? (chunk.chunk.page_range.length > 0 ? chunk.chunk.page_range[0]! : null);
+  const slide = sourceAnchor?.slide
+    ?? metadataI32(chunk.chunk.metadata, 'slide_start')
+    ?? metadataI32(chunk.chunk.metadata, 'slide')
+    ?? metadataI32(chunk.chunk.metadata, 'slide_end')
+    ?? null;
+  const bbox = sourceAnchor?.bbox ?? null;
+  const charRange = sourceAnchor?.char_range ?? null;
   const locationStatus =
     bbox !== null || charRange !== null
       ? 'exact'
-      : chunk.chunk.block_ids.length > 0 || chunk.chunk.table_ids.length > 0
-        ? 'structural_only'
-        : slide !== null && slide !== undefined
+      : page !== null
+        ? 'page_only'
+        : slide !== null
           ? 'slide_only'
-          : page !== null
-            ? 'page_only'
-            : 'unavailable';
+          : 'file_only';
 
   return {
-    anchor_id: anchorId,
-    parse_job_id: parseJobId,
-    format: primary && typeof primary.format === 'string' ? primary.format : chunk.chunk.file_type,
-    kind: kind,
-    page: page ?? null,
-    slide: slide ?? null,
+    anchor_id: sourceAnchor?.anchor_id ?? null,
+    parse_job_id: sourceAnchor?.parse_job_id ?? null,
+    format: sourceAnchor?.format ?? chunk.chunk.file_type,
+    kind: sourceAnchor?.kind
+      ?? (chunk.chunk.table_ids.length > 0 || sourceType(chunk.chunk) === 'table'
+        ? 'table_region'
+        : slide !== null
+          ? 'slide_shape'
+          : 'paragraph'),
+    page,
+    slide,
     block_ids: [...chunk.chunk.block_ids],
     table_ids: [...chunk.chunk.table_ids],
     char_range: charRange,
-    bbox: bbox,
+    bbox,
     location_status: locationStatus,
   };
 }

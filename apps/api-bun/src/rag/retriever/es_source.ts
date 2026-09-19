@@ -31,27 +31,30 @@ export function chunkFromEsSource(
   const pageRange =
     pageRangeFromEs(source.page_range) ??
     (anchorPage !== null ? [anchorPage] : []);
-  const primaryAnchor: SourceAnchor | null = primaryAnchorId === null
-    ? null
-    : {
-        anchor_id: primaryAnchorId,
-        doc_id: docId,
-        parse_job_id: uuidValue(source.parse_job_id) ?? NIL_UUID,
-        tenant_id: uuidValue(source.tenant_id) ?? NIL_UUID,
-        format: stringValue(source.anchor_format) ?? fileType,
-        kind: stringValue(source.anchor_kind) ?? 'paragraph',
-        page: anchorPage,
-        slide: i32Value(source.anchor_slide),
-        block_id: blockIds.length > 0 ? blockIds[0]! : null,
-        table_id: tableIds.length > 0 ? tableIds[0]! : null,
-        cell_range: null,
-        char_range: parseJsonAs(source.anchor_char_range, parseCharRange),
-        bbox: parseJsonAs(source.anchor_bbox, parseNormalizedBBox),
-        source_ref: source.anchor_source_ref ?? { source: 'elasticsearch' },
-        text: stringValue(source.anchor_text) ?? '',
-        text_hash: stringValue(source.anchor_text_hash),
-        anchor_quality: anchorQuality,
-      };
+  const anchors = sourceAnchorVec(source.anchors, docId, fileType);
+  const primaryAnchor: SourceAnchor | null =
+    anchors.find((anchor) => anchor.anchor_id === primaryAnchorId)
+    ?? (primaryAnchorId === null
+      ? null
+      : {
+          anchor_id: primaryAnchorId,
+          doc_id: docId,
+          parse_job_id: uuidValue(source.parse_job_id) ?? NIL_UUID,
+          tenant_id: uuidValue(source.tenant_id) ?? NIL_UUID,
+          format: stringValue(source.anchor_format) ?? fileType,
+          kind: stringValue(source.anchor_kind) ?? 'paragraph',
+          page: anchorPage,
+          slide: i32Value(source.anchor_slide),
+          block_id: blockIds.length > 0 ? blockIds[0]! : null,
+          table_id: tableIds.length > 0 ? tableIds[0]! : null,
+          cell_range: null,
+          char_range: parseJsonAs(source.anchor_char_range, parseCharRange),
+          bbox: parseJsonAs(source.anchor_bbox, parseNormalizedBBox),
+          source_ref: source.anchor_source_ref ?? { source: 'elasticsearch' },
+          text: stringValue(source.anchor_text) ?? '',
+          text_hash: stringValue(source.anchor_text_hash),
+          anchor_quality: anchorQuality,
+        });
 
   return {
     chunk_id: chunkId,
@@ -67,6 +70,7 @@ export function chunkFromEsSource(
     primary_anchor_id: primaryAnchorId,
     anchor_quality: anchorQuality,
     primary_anchor: primaryAnchor,
+    anchors,
     metadata,
     score,
     source: retrievalSource,
@@ -141,6 +145,15 @@ function parseCharRange(record: Record<string, unknown>): CharRange | null {
   if (start === null || end === null) return null;
   return { start, end };
 }
+function parseCellRange(record: Record<string, unknown>) {
+  const rowStart = i32Value(record.row_start);
+  const rowEnd = i32Value(record.row_end);
+  const colStart = i32Value(record.col_start);
+  const colEnd = i32Value(record.col_end);
+  if (rowStart === null || rowEnd === null || colStart === null || colEnd === null) return null;
+  return { row_start: rowStart, row_end: rowEnd, col_start: colStart, col_end: colEnd };
+}
+
 
 function parseNormalizedBBox(record: Record<string, unknown>): NormalizedBBox | null {
   const nums = [record.x0, record.y0, record.x1, record.y1];
@@ -155,4 +168,35 @@ function parseNormalizedBBox(record: Record<string, unknown>): NormalizedBBox | 
     unit,
     rotation,
   };
+}
+
+function sourceAnchorVec(value: unknown, docId: string, fileType: string): SourceAnchor[] {
+  if (!Array.isArray(value)) return [];
+  const anchors: SourceAnchor[] = [];
+  for (const item of value) {
+    const record = asRecord(item);
+    if (record === null) continue;
+    const anchorId = uuidValue(record.anchor_id);
+    if (anchorId === null) continue;
+    anchors.push({
+      anchor_id: anchorId,
+      doc_id: uuidValue(record.doc_id) ?? docId,
+      parse_job_id: uuidValue(record.parse_job_id) ?? NIL_UUID,
+      tenant_id: uuidValue(record.tenant_id) ?? NIL_UUID,
+      format: stringValue(record.format) ?? fileType,
+      kind: stringValue(record.kind) ?? 'paragraph',
+      page: i32Value(record.page),
+      slide: i32Value(record.slide),
+      block_id: uuidValue(record.block_id),
+      table_id: uuidValue(record.table_id),
+      cell_range: parseJsonAs(record.cell_range, parseCellRange),
+      char_range: parseJsonAs(record.char_range, parseCharRange),
+      bbox: parseJsonAs(record.bbox, parseNormalizedBBox),
+      source_ref: record.source_ref ?? { source: 'elasticsearch' },
+      text: stringValue(record.text) ?? '',
+      text_hash: stringValue(record.text_hash),
+      anchor_quality: stringValue(record.anchor_quality) ?? 'unknown',
+    });
+  }
+  return anchors;
 }

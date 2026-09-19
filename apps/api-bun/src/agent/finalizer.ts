@@ -58,8 +58,8 @@ export class GroundedAnswerFinalizer {
       finalized = insufficient[0];
       confidence = insufficient[1];
     }
-    finalized = canonicalizeCitationMarkers(finalized, evidence);
     const citations = resolveCitations(finalized, evidence);
+    finalized = canonicalizeCitationMarkers(finalized, evidence);
     const finalUsage: Usage =
       usage ?? { input_tokens: 0, output_tokens: Math.floor(charCount(finalized) / 2) };
     return finalizedStream(finalized, citations, confidence, finalUsage);

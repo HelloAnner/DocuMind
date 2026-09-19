@@ -4,12 +4,11 @@ import type { EmbeddingConfig } from '../config.ts';
 import type { ParseJobTask } from './documents_types.ts';
 import {
   canExcludeFromSearch, canMoveDocument, canReplaceFile, canSendToOcr, currentParserConfig,
-  parseIdentityFor, parseStatusForQuality, parseStatusForResult, sha256Hex, titleFromFileName,
+  parseByteRange, parseIdentityFor, parseStatusForQuality, parseStatusForResult, sha256Hex, titleFromFileName,
 } from './documents_support.ts';
 import {
   buildParseArtifacts, interruptedDocumentFinalStatus, parseFailedMetadata, parseRunningMetadata,
 } from './documents_parse.ts';
-import { extractSinglePagePdf, pdfPageCount } from './documents_pdf_page.ts';
 
 function testEmbeddingConfig(): EmbeddingConfig {
   return {
@@ -63,17 +62,6 @@ function blankPdfWithPages(pageCount: number): Uint8Array {
   return assemblePdf(objs);
 }
 
-function singlePagePdfWithText(text: string): Uint8Array {
-  const escaped = text.replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
-  const stream = `BT\n/F1 12 Tf\n72 720 Td\n(${escaped}) Tj\nET`;
-  return assemblePdf([
-    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n',
-    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n',
-    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>\nendobj\n',
-    '4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n',
-    `5 0 obj\n<< /Length ${stream.length} >>\nstream\n${stream}\nendstream\nendobj\n`,
-  ]);
-}
 
 function assemblePdf(objects: string[]): Uint8Array {
   const parts: Uint8Array[] = [encode('%PDF-1.4\n')];
@@ -97,6 +85,17 @@ function assemblePdf(objects: string[]): Uint8Array {
   for (const part of parts) { out.set(part, cursor); cursor += part.length; }
   return out;
 }
+
+test('byte ranges include their final byte and reject invalid bounds', () => {
+  expect(parseByteRange('bytes=0-0', 100)).toEqual([0, 1]);
+  expect(parseByteRange('bytes=0-63', 100)).toEqual([0, 64]);
+  expect(parseByteRange('bytes=90-', 100)).toEqual([90, 100]);
+  expect(parseByteRange('bytes=-10', 100)).toEqual([90, 100]);
+  expect(parseByteRange('bytes=90-200', 100)).toEqual([90, 100]);
+  for (const range of ['bytes=100-', 'bytes=5-4', 'bytes=-0', 'bytes=0-1,4-5', 'bytes=1x-4']) {
+    expect(parseByteRange(range, 100)).toBeNull();
+  }
+});
 
 describe('documents state predicates', () => {
   test('only_stable_documents_can_move_between_knowledge_bases', () => {
@@ -233,20 +232,5 @@ describe('documents parse artifacts', () => {
     expect(parseStatusForQuality(0.75)).toBe('chunked');
     expect(parseStatusForQuality(0.55)).toBe('parse_low_confidence');
     expect(() => parseStatusForQuality(0.2)).toThrow();
-  });
-});
-
-describe('documents pdf page extraction', () => {
-  test('counts_pages_and_slices_single_page', () => {
-    const twoPages = new Uint8Array(blankPdfWithPages(2));
-    expect(pdfPageCount(twoPages)).toBe(2);
-
-    const extracted = extractSinglePagePdf(twoPages, 2);
-    expect(extracted.totalPages).toBe(2);
-    expect(pdfPageCount(extracted.bytes)).toBe(1);
-
-    const withText = new Uint8Array(singlePagePdfWithText('DocuMind'));
-    expect(pdfPageCount(withText)).toBe(1);
-    expect(() => extractSinglePagePdf(withText, 3)).toThrow('page 3 out of range (1-1)');
   });
 });

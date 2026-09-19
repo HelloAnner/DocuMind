@@ -23,9 +23,11 @@ import type {
   DocumentPage,
   DownloadedDocument,
   ExcludeFromSearchResponse,
+  FilePreviewTransport,
   Identity,
   KnowledgeBase,
   KnowledgeBaseUpsert,
+  JsonObject,
   LoginResponse,
   MessageListResponse,
   MessageTraceResponse,
@@ -502,6 +504,32 @@ export class ApiClient {
     return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}`, {
       method: "DELETE",
     });
+  }
+
+  async filePreviewTransport(docId: string, rangeBytes = 64): Promise<FilePreviewTransport> {
+    const base = `/api/files/${encodeURIComponent(docId)}`;
+    const [preview, manifest, signed] = await Promise.all([
+      this.requestJson<JsonObject>(`${base}/preview`),
+      this.requestJson<JsonObject>(`${base}/preview/manifest`),
+      this.requestJson<JsonObject>(`${base}/preview-url`),
+    ]);
+    const response = await this.request(`${base}/preview/content`, {
+      headers: { Accept: "*/*", Range: `bytes=0-${rangeBytes - 1}` },
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {
+      preview,
+      manifest,
+      signed,
+      range: {
+        status: response.status,
+        content_type: response.headers.get("content-type") ?? "",
+        content_range: response.headers.get("content-range") ?? "",
+        accept_ranges: response.headers.get("accept-ranges") ?? "",
+        byte_length: bytes.byteLength,
+        head: new TextDecoder("latin1").decode(bytes.subarray(0, 5)),
+      },
+    };
   }
 
   async downloadDocument(id: string): Promise<DownloadedDocument> {
