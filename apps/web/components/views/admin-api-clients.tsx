@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, KeyRound, Power, RefreshCw, ShieldOff } from "lucide-react";
+import { Check, Copy, KeyRound, Power, RefreshCw, ShieldOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Panel } from "@/components/ui/panel";
@@ -37,6 +37,7 @@ export function AdminApiClients() {
   const [secret, setSecret] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState<"endpoint" | "token" | "quick" | null>(null);
 
   const reload = async () => {
     const [nextClients, nextKbs] = await Promise.all([listApiClients(), listAdminKnowledgeBases()]);
@@ -117,6 +118,12 @@ export function AdminApiClients() {
     }
   };
 
+  const copy = async (value: string, target: "endpoint" | "token" | "quick") => {
+    await copyToClipboard(value);
+    setCopied(target);
+    setTimeout(() => setCopied(null), 1500);
+  };
+
   return (
     <>
       <Topbar title="MCP 接入" />
@@ -127,7 +134,7 @@ export function AdminApiClients() {
           </div>
           <div className="dm-permission-form">
             <code style={{ overflowWrap: "anywhere", flex: 1 }}>/documind/mcp</code>
-            <Button icon={<Copy size={14} />} onClick={() => copyToClipboard(`${window.location.origin}/documind/mcp`)}>复制地址</Button>
+            <Button icon={copied === "endpoint" ? <Check size={14} /> : <Copy size={14} />} onClick={() => copy(`${window.location.origin}/documind/mcp`, "endpoint")}>{copied === "endpoint" ? "已复制" : "复制地址"}</Button>
           </div>
         </Panel>
         {secret ? (
@@ -137,9 +144,11 @@ export function AdminApiClients() {
             </div>
             <div className="dm-permission-form">
               <code style={{ overflowWrap: "anywhere", flex: 1 }}>{secret}</code>
-              <Button icon={<Copy size={14} />} onClick={() => copyToClipboard(secret)}>复制</Button>
+              <Button icon={copied === "token" ? <Check size={14} /> : <Copy size={14} />} onClick={() => copy(secret, "token")}>{copied === "token" ? "已复制" : "复制 Token"}</Button>
+              <Button variant="secondary" icon={copied === "quick" ? <Check size={14} /> : <Copy size={14} />} onClick={() => copy(`请在当前 AI 客户端中添加并验证名为 DocuMind 的 MCP 服务：使用 Streamable HTTP，地址 ${window.location.origin}/documind/mcp，认证请求头为 Authorization: Bearer ${secret}。`, "quick")}>{copied === "quick" ? "已复制" : "复制快速配置"}</Button>
               <Button variant="secondary" onClick={() => setSecret(null)}>我已保存</Button>
             </div>
+            <div className="dm-form-note" style={{ marginTop: 10 }}>快速配置包含完整 Token，请只发送给可信的 AI 客户端。</div>
           </Panel>
         ) : null}
 
