@@ -184,6 +184,28 @@ export class ApiClient {
     };
   }
 
+  async acceptInvitation(token: string): Promise<LoginResponse> {
+    const response = await this.requestJson<LoginResponse>("/api/v1/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    const previous = await this.getSession();
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      ...(previous.last_conversation_id
+        ? { last_conversation_id: previous.last_conversation_id }
+        : {}),
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
   async logout(): Promise<void> {
     const current = await this.getSession();
     if (current.access_token) {

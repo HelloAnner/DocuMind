@@ -22,7 +22,6 @@ import {
 // system_tenants.rs / system_tenant_invitations.rs / 向量索引部分的实现拆到独立文件，
 // 这里转发导出并在 systemRouter 中挂载；各 router 只注册互不冲突的路径。
 export { createTenant, updateTenant, requestTenantDeletion } from './system_tenants.ts';
-export { generateAdminInvitation } from './system_tenant_invitations.ts';
 
 export function systemRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();

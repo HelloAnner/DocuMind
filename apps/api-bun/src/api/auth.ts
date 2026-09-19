@@ -18,6 +18,11 @@ import { derivePermissions, roleMatrix } from '../auth/permissions.ts';
 import type { CurrentActor, MeResponse, TenantProfile, UserProfile } from '../models/identity.ts';
 import type { LoginResponse } from './auth_types.ts';
 import { newUuid } from '../infra/uuid.ts';
+import {
+  invitationTokenHash,
+  normalizeInvitationAccount,
+} from './system_tenants.ts';
+export { normalizeInvitationAccount } from './system_tenants.ts';
 
 const AUTHENTICATED_HOME_PATH = '/chat';
 
@@ -26,9 +31,7 @@ interface LoginRequest {
   tenant_id?: string | null; tenant_slug?: string | null;
 }
 interface RegisterRequest { username: string; password: string; }
-interface AcceptInvitationRequest {
-  token: string; login_id?: string | null; name?: string | null; password?: string | null;
-}
+interface AcceptInvitationRequest { token: string; }
 interface InvitationGrantStored { kb_id: string; permission: string; }
 
 export function authRouter(): Hono<AppEnv> {
@@ -38,7 +41,7 @@ export function authRouter(): Hono<AppEnv> {
   router.post('/api/auth/login', loginHandler);
   router.post('/api/auth/refresh', refreshHandler);
   router.post('/api/auth/logout', logoutHandler);
-  router.post('/api/invitations/accept', acceptInvitationHandler);
+  router.post('/api/v1/invitations/validate', validateInvitationHandler);
   router.get('/api/v1/me', getMeHandler);
   router.get('/api/v1/auth/me', getMeHandler);
   router.post('/api/v1/auth/register', registerHandler);
@@ -337,19 +340,7 @@ function htmlEscape(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
-function invitationTokenHash(token: string): string {
-  return new Bun.CryptoHasher('sha256').update(token).digest('hex');
-}
 
-export function normalizeInvitationAccount(value: string): string {
-  const account = value.trim().toLowerCase();
-  const chars = [...account];
-  if (chars.length < 2 || chars.length > 128
-    || !chars.every((ch) => /[a-z0-9]/i.test(ch) || ['.', '_', '-', '@', '+'].includes(ch))) {
-    throw AppError.badRequest('ACCOUNT_INVALID', '请输入有效账号');
-  }
-  return account;
-}
 
 async function hashPassword(password: string): Promise<string> {
   if (password.length < 8) {
@@ -696,180 +687,192 @@ async function logoutHandler(c: import('hono').Context<AppEnv>) {
   return c.json({ ok: true });
 }
 
-async function acceptInvitationHandler(c: import('hono').Context<AppEnv>) {
-  const state = c.get('appState');
+async function validateInvitationHandler(c: import('hono').Context<AppEnv>) {
+  const sql = c.get('appState').sql;
+  if (!sql) throw AppError.badRequest('DB_REQUIRED', '邀请功能需要数据库');
   const req = await c.req.json() as AcceptInvitationRequest;
-  return c.json(await acceptInvitation(state, req));
+  const token = (req.token ?? '').trim();
+  if (!token) throw AppError.badRequest('INVITATION_TOKEN_REQUIRED', '邀请链接无效');
+  const rows = await sql`
+    SELECT inv.id, inv.kind, inv.invitee_username_normalized, inv.roles, inv.status,
+           inv.expires_at, t.id AS tenant_id, t.name AS tenant_name, t.status AS tenant_status
+    FROM tenant_invitation inv
+    JOIN tenant t ON t.id = inv.tenant_id
+    WHERE inv.token_hash = ${invitationTokenHash(token)}
+    LIMIT 1
+  `;
+  const invitation = rows[0];
+  if (!invitation || invitation.status !== 'pending'
+    || new Date(invitation.expires_at as Date | string).getTime() <= Date.now()) {
+    return c.json({ valid: false, code: 'invite_invalid_or_expired' });
+  }
+  return c.json({
+    valid: true,
+    tenant: { name: String(invitation.tenant_name) },
+    kind: String(invitation.kind),
+    invitee_hint: maskInvitationAccount(
+      invitation.invitee_username_normalized === null
+        ? null
+        : String(invitation.invitee_username_normalized),
+    ),
+    roles: Array.isArray(invitation.roles) ? invitation.roles : [],
+    expires_at: new Date(invitation.expires_at as Date | string).toISOString(),
+  });
 }
 
+function maskInvitationAccount(value: string | null): string | null {
+  if (value === null) return null;
+  const [name, domain] = value.split('@');
+  if (domain) return `${name?.slice(0, 1) ?? ''}***@${domain}`;
+  return `${value.slice(0, 1)}***`;
+}
 
-async function acceptInvitation(state: AppState, req: AcceptInvitationRequest): Promise<LoginResponse> {
+async function acceptInvitationHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
   const sql = state.sql;
   if (!sql) throw AppError.badRequest('DB_REQUIRED', '邀请功能需要数据库');
+  const req = await c.req.json() as AcceptInvitationRequest;
   const token = (req.token ?? '').trim();
-  if (token.length === 0) throw AppError.badRequest('INVITATION_TOKEN_REQUIRED', '邀请链接无效');
-
-  const tokenHash = invitationTokenHash(token);
-  return sql.begin(async (tx) => {
-    const invitations = await tx.unsafe(`
-      SELECT inv.id, inv.tenant_id, inv.email, inv.name, inv.roles, inv.kb_grants,
-             inv.invited_by, inv.status, inv.expires_at, t.status AS tenant_status
+  if (!token) throw AppError.badRequest('INVITATION_TOKEN_REQUIRED', '邀请链接无效');
+  const claims = await claimsFromAuthorizationHeader(
+    state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  const result = await sql.begin(async (tx) => {
+    const accounts = await tx`
+      SELECT login_id, status FROM app_user WHERE id = ${claims.sub} FOR UPDATE
+    `;
+    const account = accounts[0];
+    if (!account || account.status !== 'active') {
+      throw AppError.forbiddenWith('ACCOUNT_NOT_ACTIVE', '账号已停用，不能接受邀请');
+    }
+    const rows = await tx`
+      SELECT inv.id, inv.tenant_id, inv.kind, inv.invitee_username_normalized,
+             inv.roles, inv.kb_grants, inv.invited_by, inv.status, inv.accepted_by,
+             inv.expires_at, t.status AS tenant_status
       FROM tenant_invitation inv
       JOIN tenant t ON t.id = inv.tenant_id
-      WHERE inv.token_hash = '${tokenHash}'
+      WHERE inv.token_hash = ${invitationTokenHash(token)}
       LIMIT 1
       FOR UPDATE OF inv, t
-    `);
-    const invitation = invitations[0];
-    if (!invitation) {
+    `;
+    const invitation = rows[0];
+    if (!invitation) throw AppError.notFound('INVITATION_NOT_FOUND', '邀请不存在或已失效');
+    const tenantId = String(invitation.tenant_id);
+    if (invitation.status === 'accepted' && String(invitation.accepted_by) === claims.sub) {
+      return {
+        tenantId,
+        roles: normalizeInvitationRoles(invitation.roles, String(invitation.kind)),
+        alreadyAccepted: true,
+      };
+    }
+    if (invitation.status !== 'pending'
+      || new Date(invitation.expires_at as Date | string).getTime() <= Date.now()) {
       throw AppError.notFound('INVITATION_NOT_FOUND', '邀请不存在或已失效');
     }
-    const invitationId = String(invitation.id);
-    const tenantId = String(invitation.tenant_id);
-    const invitedEmail = (invitation.email as string | null) ?? null;
-    const loginId = normalizeInvitationAccount(req.login_id ?? '');
-    const invitationName = (invitation.name as string | null) ?? null;
-    const invitationRoles = (invitation.roles as string[]) ?? [];
-    const roles = [...new Set(invitationRoles.flatMap((role) => {
-      switch (role) {
-        case 'tenant_admin': case 'enterprise_admin': case 'team_admin':
-        case 'data_admin': case 'tenant_owner': return ['tenant_admin'];
-        case 'end_user': case 'user': case 'analyst': case 'viewer': return ['end_user'];
-        default: return [];
-      }
-    }))].sort();
-
-    const status = String(invitation.status);
-    const expiresAt = new Date(invitation.expires_at as Date | string);
+    const kind = String(invitation.kind);
+    const invitee = invitation.invitee_username_normalized === null
+      ? null
+      : String(invitation.invitee_username_normalized);
+    if (kind === 'targeted' && invitee !== normalizeInvitationAccount(String(account.login_id))) {
+      throw AppError.forbiddenWith('INVITATION_ACCOUNT_MISMATCH', '该邀请不属于当前账号');
+    }
+    const roles = normalizeInvitationRoles(invitation.roles, kind);
     const tenantStatus = String(invitation.tenant_status);
-    if (status !== 'pending') {
-      throw AppError.conflictWith('INVITATION_NOT_PENDING', '邀请已被接受、撤销或失效');
-    }
-    if (expiresAt.getTime() < Date.now()) {
-      await tx.unsafe(`UPDATE tenant_invitation SET status = 'expired', updated_at = NOW() WHERE id = '${invitationId}'`);
-      throw AppError.conflictWith('INVITATION_EXPIRED', '邀请已过期');
-    }
-    if (roles.length === 0 || invitationRoles.includes('super_admin')) {
-      throw AppError.forbiddenWith('INVITATION_ROLE_FORBIDDEN', '邀请角色无效或无权授予');
-    }
-    const primaryRole = roles[0]!;
-    const activatesPendingTenant = tenantStatus === 'pending' && roles.includes('tenant_admin');
-    if (tenantStatus !== 'active' && !activatesPendingTenant) {
+    if (tenantStatus !== 'active' && !(kind === 'bootstrap_owner' && tenantStatus === 'pending')) {
       throw AppError.conflictWith('TENANT_NOT_ACTIVE', '租户当前不可接受邀请');
     }
-
-    const escapedLoginId = loginId.replace(/'/g, "''");
-    const existingUsers = await tx.unsafe(`
-      SELECT u.id, u.email, u.password_hash, u.status
-      FROM app_user u
-      WHERE lower(u.login_id) = lower('${escapedLoginId}')
-      LIMIT 1
-      FOR UPDATE OF u
-    `);
-    const displayName = (req.name ?? '').trim().length > 0 ? req.name!.trim()
-      : invitationName ?? loginId;
-
-    let updateExistingMembership = false;
-    let userId: string;
-    const existingUser = existingUsers[0];
-    if (existingUser) {
-      userId = String(existingUser.id);
-      const userStatus = String(existingUser.status);
-      const existingEmail = (existingUser.email as string | null) ?? null;
-      if (invitedEmail !== null
-        && (existingEmail === null || existingEmail.toLowerCase() !== invitedEmail.toLowerCase())) {
-        throw AppError.forbiddenWith('INVITATION_EMAIL_MISMATCH', '该邀请不属于此账号');
-      }
-      if (userStatus !== 'active') {
-        throw AppError.forbiddenWith('ACCOUNT_NOT_ACTIVE', '账号已停用，不能接受邀请');
-      }
-      const passwordHash = (existingUser.password_hash as string | null) ?? null;
-      const password = req.password ?? null;
-      if (password === null) {
-        throw AppError.badRequest('PASSWORD_REQUIRED', '已有账号接受邀请需要验证密码');
-      }
-      const passwordMatches = passwordHash !== null && passwordHash.length > 0
-        && await bcrypt.compare(password, passwordHash);
-      if (!passwordMatches) {
-        throw AppError.unauthorizedWith('INVITATION_ACCOUNT_VERIFICATION_FAILED', '账号密码验证失败');
-      }
-      const memberships = await tx.unsafe(`
-        SELECT roles FROM tenant_member
-        WHERE tenant_id = '${tenantId}' AND user_id = '${userId}' FOR UPDATE
-      `);
-      updateExistingMembership = memberships.length > 0;
-    } else {
-      const password = req.password ?? null;
-      if (password === null) {
-        throw AppError.badRequest('PASSWORD_REQUIRED', '首次接受邀请需要设置密码');
-      }
-      userId = newUuid();
-      const passwordHash = await hashPassword(password);
-      await tx`
-        INSERT INTO app_user
-          (id, login_id, email, name, password_hash, auth_provider, last_active_tenant, status)
-        VALUES (${userId}, ${loginId}, ${invitedEmail}, ${displayName}, ${passwordHash}, 'local', ${tenantId}, 'active')
-      `;
+    const memberships = await tx`
+      SELECT status FROM tenant_member
+      WHERE tenant_id = ${tenantId} AND user_id = ${claims.sub}
+      FOR UPDATE
+    `;
+    if (memberships[0]) {
+      const status = String(memberships[0].status);
+      throw AppError.conflictWith(
+        status === 'active' ? 'INVITEE_ALREADY_MEMBER' : 'INVITEE_MEMBERSHIP_BLOCKED',
+        status === 'active' ? '当前账号已是该租户成员' : '当前成员状态不可通过邀请恢复',
+      );
     }
-
-    const invitedBy = String(invitation.invited_by);
-    if (updateExistingMembership) {
-      await tx`
-        UPDATE tenant_member
-        SET roles = ${roles}, status = 'active', invited_by = ${invitedBy},
-            invited_at = NOW(), joined_at = COALESCE(joined_at, NOW()), updated_at = NOW()
-        WHERE tenant_id = ${tenantId} AND user_id = ${userId}
-      `;
-    } else {
-      await tx`
-        INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_by, invited_at, joined_at)
-        VALUES (${tenantId}, ${userId}, ${roles}, 'active', ${invitedBy}, NOW(), NOW())
-      `;
-    }
-
+    await tx`
+      INSERT INTO tenant_member (tenant_id, user_id, roles, status, invited_by, invited_at, joined_at)
+      VALUES (
+        ${tenantId}, ${claims.sub}, ${roles}, 'active',
+        ${String(invitation.invited_by)}, NOW(), NOW()
+      )
+    `;
     const grantsValue = invitation.kb_grants;
-    const grants: InvitationGrantStored[] = Array.isArray(grantsValue) ? grantsValue as InvitationGrantStored[] : [];
+    const grants = Array.isArray(grantsValue) ? grantsValue as InvitationGrantStored[] : [];
     for (const grant of grants) {
+      if (!grant.kb_id || !['query', 'edit', 'manage'].includes(grant.permission)) {
+        throw AppError.forbiddenWith('INVITATION_KB_GRANT_INVALID', '邀请中的知识库授权无效');
+      }
+      const knowledgeBases = await tx`
+        SELECT 1 FROM knowledge_base
+        WHERE id = ${grant.kb_id} AND tenant_id = ${tenantId}
+        LIMIT 1
+      `;
+      if (!knowledgeBases[0]) {
+        throw AppError.forbiddenWith('INVITATION_KB_GRANT_INVALID', '邀请中的知识库授权无效');
+      }
       await tx`
         INSERT INTO knowledge_base_acl
           (tenant_id, kb_id, subject_type, subject_id, permission, created_by)
-        VALUES (${tenantId}, ${grant.kb_id}, 'user', ${userId}, ${grant.permission}, NULL)
+        VALUES (${tenantId}, ${grant.kb_id}, 'user', ${claims.sub}, ${grant.permission}, NULL)
         ON CONFLICT (tenant_id, kb_id, subject_type, subject_id, permission) DO NOTHING
       `;
     }
-
     await tx`
       UPDATE tenant_invitation
-      SET status = 'accepted', accepted_by = ${userId}, accepted_at = NOW(), updated_at = NOW()
-      WHERE id = ${invitationId}
+      SET status = 'accepted', accepted_by = ${claims.sub}, accepted_at = NOW(), updated_at = NOW()
+      WHERE id = ${String(invitation.id)}
     `;
-    if (activatesPendingTenant) {
-      await tx.unsafe(`UPDATE tenant SET status = 'active', updated_at = NOW() WHERE id = '${tenantId}'`);
+    if (kind === 'bootstrap_owner') {
+      await tx`
+        UPDATE tenant SET status = 'active', updated_at = NOW()
+        WHERE id = ${tenantId} AND status = 'pending'
+      `;
     }
     await tx`
-      UPDATE app_user SET last_active_tenant = ${tenantId}, updated_at = NOW() WHERE id = ${userId}
+      UPDATE app_user SET last_active_tenant = ${tenantId}, updated_at = NOW()
+      WHERE id = ${claims.sub}
     `;
     await tx`
       INSERT INTO audit_log
         (tenant_id, actor_user_id, actor_role, action, resource_type, resource_id, detail)
-      VALUES (${tenantId}, ${userId}, ${primaryRole}, 'tenant_invitation.accept',
-        'tenant_invitation', ${invitationId}, ${tx.json({ login_id: loginId, roles })})
+      VALUES (
+        ${tenantId}, ${claims.sub}, ${roles[0]!}, 'tenant_invitation.accept',
+        'tenant_invitation', ${String(invitation.id)},
+        ${tx.json({ login_id: String(account.login_id), roles })}
+      )
     `;
-
-    const claims: Claims = {
-      sub: userId, email: invitedEmail ?? '', role: primaryRole, scope: 'tenant',
-      tenant_id: tenantId, sid: null, exp: Math.floor(Date.now() / 1000) + 3600,
-    };
-    const actor = await actorFromClaims({ sql, config: state.config }, claims);
-    const sessionId = await createAuthSession(state.redis, state.config, actor);
-    const accessToken = await issueToken(state.config, actor, sessionId);
-    const me = await meResponse(state, actor);
-    return {
-      access_token: accessToken, token_type: 'bearer', scope: me.scope,
-      user: me.user, tenant: me.tenant, roles: me.roles,
-      permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
-    } satisfies LoginResponse;
+    return { tenantId, roles, alreadyAccepted: false };
   });
+  const actor = await actorFromClaims({ sql, config: state.config }, {
+    ...claims,
+    tenant_id: result.tenantId,
+    role: result.roles[0] ?? 'end_user',
+    scope: 'tenant',
+  });
+  const sessionId = claims.sid ?? await createAuthSession(state.redis, state.config, actor);
+  await setAuthSessionTenant(
+    state.redis, state.config, sessionId, actor.user_id,
+    result.tenantId, actor.roles[0] ?? 'end_user');
+  return c.json({
+    ...await tenantLoginResponse(state, actor, sessionId),
+    already_accepted: result.alreadyAccepted,
+  });
+}
+
+function normalizeInvitationRoles(value: unknown, kind: string): string[] {
+  const source = Array.isArray(value) ? value.map(String) : [];
+  const roles = [...new Set(source)];
+  const allowed: Record<string, true> = kind === 'bootstrap_owner'
+    ? { tenant_owner: true }
+    : { tenant_admin: true, end_user: true };
+  if (!roles.length || roles.some((role) => !allowed[role])) {
+    throw AppError.forbiddenWith('INVITATION_ROLE_FORBIDDEN', '邀请角色无效或无权授予');
+  }
+  return roles;
 }
 
 export async function meResponse(

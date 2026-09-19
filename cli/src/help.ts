@@ -10,6 +10,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(ADMIN_HELP);
     return;
   }
+  if (topic === "invitation") {
+    process.stdout.write(INVITATION_HELP);
+    return;
+  }
   if (topic === "chat") {
     process.stdout.write(CHAT_HELP);
     return;
@@ -51,6 +55,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  mcp verify                   验证工具发现与租户会话隔离\n\n` +
   `  system <subcommand>          平台后台全量查看与管理\n` +
   `  admin <subcommand>           租户后台全量查看与管理\n` +
+  `  invitation <subcommand>      邀请创建、校验、接受、重发与撤销\n` +
   `对话与评测\n` +
   `  chat|ask <问题>              真实 SSE 对话并合并落库 trace\n` +
   `  models                       列出可选模型与深度思考能力\n` +
@@ -73,22 +78,29 @@ const SYSTEM_HELP = `用法: documind system <subcommand> [options]\n\n` +
   `查看: overview | tenants | tenant <id> | users | models | jobs | audit | settings | vectors | vector-reconcile | integrity\n` +
   `租户: tenant-create --name NAME [--slug S --plan P --expires-in-days N]\n` +
   `      tenant-update <id> [--name N --plan P --status S]\n` +
-  `      tenant-invite <id> [--expires-in-days N]\n` +
+
   `      tenant-delete <id> --slug S --force\n` +
   `设置: settings-set [--auth-token-expire-hours N] [--object-storage-presign-expire-seconds N]\n` +
   `向量: vector-rebuild --force\n` +
   `筛选: audit [--q TEXT --limit N]\n`;
 
 const ADMIN_HELP = `用法: documind admin <subcommand> [options]\n\n` +
-  `查看: overview | logs | members | invitations | permissions | permission-matrix | runtime-config\n` +
+  `查看: overview | logs | members | permissions | permission-matrix | runtime-config\n` +
   `配置: chunking | search | embedding | llm（运行时只读配置）\n` +
   `成员: member-update <id> [--role ROLE --status STATUS] | member-remove <id> --force\n` +
-  `邀请: invitation-create --email EMAIL [--name N --role R --expires-in-days N]\n` +
-  `      invitation-resend <id> | invitation-revoke <id> --force\n` +
   `权限: permission-grant --kb ID --subject-type role|user --subject ID --permission read|write|manage\n` +
   `      permission-revoke <id> --force\n` +
   `日志: logs [--range today|week|month|all --q TEXT --limit N]\n` +
   `知识库、文档、文档任务和 API 接入分别使用 kb、documents、api-clients 命令。\n`;
+
+const INVITATION_HELP = `用法: documind invitation <subcommand> [options]\n\n` +
+  `租户邀请: list\n` +
+  `          create --username USER [--role ROLE --expires-in-days N]\n` +
+  `          resend <id> [--expires-in-days N] | revoke <id> --force\n` +
+  `领取邀请: validate --token TOKEN | accept --token TOKEN\n` +
+  `所有者邀请: owner-create <tenant-id> [--expires-in-days N]\n` +
+  `            owner-resend <tenant-id> [--expires-in-days N]\n` +
+  `            owner-revoke <tenant-id> --force\n`;
 
 const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --conversation, -c <id>      在指定会话继续多轮对话\n` +

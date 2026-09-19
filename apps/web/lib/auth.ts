@@ -64,6 +64,7 @@ export interface TenantLoginContext {
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 const AUTH_KEY = "documind-auth";
 export const TENANT_SWITCH_STORAGE_KEY = "documind:tenant-switch";
+export const INVITATION_STORAGE_KEY = "documind:invitation-token";
 
 export const AUTHENTICATED_HOME_PATH = "/chat";
 
@@ -225,21 +226,35 @@ export async function createTenant(name: string): Promise<LoginResponse> {
   return data;
 }
 
-export async function acceptInvitation(
-  token: string,
-  loginId: string,
-  password: string
-): Promise<MeResponse> {
-  const res = await fetch(`${BASE}/api/v1/invitations/accept`, {
+export interface InvitationValidation {
+  valid: true;
+  tenant: { name: string };
+  kind: "targeted" | "bootstrap_owner";
+  invitee_hint: string | null;
+  roles: string[];
+  expires_at: string;
+}
+
+export async function validateInvitation(token: string): Promise<InvitationValidation> {
+  const response = await fetch(`${BASE}/api/v1/invitations/validate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token, login_id: loginId, password }),
+    body: JSON.stringify({ token }),
   });
-  if (!res.ok) {
-    const error = await res.json().catch(() => null) as { message?: string } | null;
-    throw new Error(error?.message || "邀请链接无效、已过期或账号信息不正确");
+  if (!response.ok) {
+    const error = await response.json().catch(() => null) as { message?: string } | null;
+    throw new Error(error?.message || "邀请链接无效或已过期");
   }
-  const data: LoginResponse = await res.json();
+  const data = await response.json() as InvitationValidation | { valid: false; code: string };
+  if (!data.valid) throw new Error("邀请链接无效或已过期");
+  return data;
+}
+
+export async function acceptInvitation(token: string): Promise<LoginResponse> {
+  const data = await authJson<LoginResponse>("/api/v1/invitations/accept", {
+    method: "POST",
+    body: JSON.stringify({ token }),
+  });
   storeLoginResponse(data);
   return data;
 }

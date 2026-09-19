@@ -1,29 +1,52 @@
 "use client";
 
-import { LockKeyhole, UserRound } from "lucide-react";
-import { useSearchParams } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { useAuth } from "@/components/providers/auth-provider";
 import { BrandMark } from "@/components/ui/brand-mark";
-import { acceptInvitation, AUTHENTICATED_HOME_PATH } from "@/lib/auth";
+import {
+  acceptInvitation,
+  AUTHENTICATED_HOME_PATH,
+  INVITATION_STORAGE_KEY,
+  validateInvitation,
+  type InvitationValidation,
+} from "@/lib/auth";
 
 export function InviteAcceptView() {
-  const params = useSearchParams();
-  const token = params.get("token") ?? "";
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const { me, loading } = useAuth();
+  const [token, setToken] = useState("");
+  const [details, setDetails] = useState<InvitationValidation | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const submit = async (event: FormEvent) => {
-    event.preventDefault();
+  useEffect(() => {
+    const hashToken = new URLSearchParams(window.location.hash.slice(1)).get("token");
+    const storedToken = sessionStorage.getItem(INVITATION_STORAGE_KEY);
+    const nextToken = hashToken || storedToken || "";
+    if (hashToken) {
+      sessionStorage.setItem(INVITATION_STORAGE_KEY, hashToken);
+      history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+    setToken(nextToken);
+    if (!nextToken) {
+      setError("邀请链接无效");
+      return;
+    }
+    validateInvitation(nextToken)
+      .then(setDetails)
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "邀请链接无效"));
+  }, []);
+
+  const accept = async () => {
     setSubmitting(true);
     setError(null);
     try {
-      await acceptInvitation(token, email, password);
+      await acceptInvitation(token);
+      sessionStorage.removeItem(INVITATION_STORAGE_KEY);
       const basePath = window.location.pathname.startsWith("/documind") ? "/documind" : "";
       window.location.replace(`${basePath}${AUTHENTICATED_HOME_PATH}`);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "接受邀请失败");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "接受邀请失败");
     } finally {
       setSubmitting(false);
     }
@@ -34,59 +57,47 @@ export function InviteAcceptView() {
       <header className="dm-login-brandbar">
         <div className="dm-login-brand-identity"><BrandMark /></div>
       </header>
-
       <section className="dm-login-story" aria-label="租户邀请说明">
         <div className="dm-login-story-watermark" aria-hidden="true">邀</div>
         <div className="dm-login-story-copy">
           <div className="dm-login-story-kicker"><span />TENANT INVITATION</div>
           <h2><span>连接企业知识</span><strong>加入协作空间</strong></h2>
-          <p>通过管理员发出的安全邀请加入租户。已有账号直接验证，新账号将自动完成注册。</p>
+          <p>邀请只为已注册账号增加租户成员关系，不会创建账号或修改现有成员角色。</p>
         </div>
       </section>
-
-      <form className="dm-login-card" onSubmit={submit}>
+      <section className="dm-login-card">
         <div className="dm-login-card-heading">
           <span className="dm-login-eyebrow">接受邀请</span>
-          <h1>加入租户</h1>
-          <p>填写账号与密码，验证后立即进入企业知识空间。</p>
+          <h1>{details?.tenant.name ?? "加入租户"}</h1>
+          <p>
+            {details?.invitee_hint
+              ? `受邀账号：${details.invitee_hint}`
+              : "首位租户所有者邀请"}
+          </p>
         </div>
-
-        <label className="dm-field">
-          <span>用户 ID</span>
-          <span className="dm-login-input-wrap">
-            <UserRound size={16} aria-hidden="true" />
-            <input
-              autoComplete="username"
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              placeholder="已有或新建用户 ID"
-              required
-            />
-          </span>
-        </label>
-
-        <label className="dm-field">
-          <span>密码</span>
-          <span className="dm-login-input-wrap">
-            <LockKeyhole size={16} aria-hidden="true" />
-            <input
-              autoComplete="current-password"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              placeholder="已有账号密码；新账号至少 8 位"
-              required
-            />
-          </span>
-        </label>
-
+        {details ? (
+          <div className="dm-login-footnote">
+            角色：{details.roles.join("、")} · 有效期至 {new Date(details.expires_at).toLocaleString()}
+          </div>
+        ) : null}
         {error ? <div className="dm-login-error" role="alert">{error}</div> : null}
-
-        <button className="dm-button primary dm-login-submit" disabled={submitting || !token} type="submit">
-          {submitting ? "正在加入…" : "加入租户"}
-        </button>
-        <p className="dm-login-footnote">邀请链接仅限一人领取，请勿转发</p>
-      </form>
+        {!loading && !me ? (
+          <>
+            <Link className="dm-button primary dm-login-submit" href="/login">登录后确认</Link>
+            <Link className="dm-login-footnote" href="/register">没有账号？先注册</Link>
+          </>
+        ) : (
+          <button
+            className="dm-button primary dm-login-submit"
+            disabled={submitting || !details || !token}
+            onClick={accept}
+            type="button"
+          >
+            {submitting ? "正在加入…" : "确认加入租户"}
+          </button>
+        )}
+        <p className="dm-login-footnote">邀请令牌仅使用一次，请勿转发</p>
+      </section>
     </main>
   );
 }

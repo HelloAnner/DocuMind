@@ -7,6 +7,7 @@ import {
   getMe,
   getStoredAuth,
   loginWithPassword,
+  INVITATION_STORAGE_KEY,
   logoutRequest,
   TENANT_SWITCH_STORAGE_KEY,
   register as registerAccount,
@@ -60,7 +61,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const finishAuthentication = useCallback((data: MeResponse) => {
     setMe(data);
-    router.replace(data.tenant ? AUTHENTICATED_HOME_PATH : "/onboarding/tenant");
+    router.replace(sessionStorage.getItem(INVITATION_STORAGE_KEY)
+      ? "/invite"
+      : data.tenant ? AUTHENTICATED_HOME_PATH : "/onboarding/tenant");
   }, [router]);
 
   const login = useCallback(

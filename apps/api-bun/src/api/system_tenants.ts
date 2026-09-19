@@ -17,7 +17,7 @@ interface UpdateTenantRequest { name?: string | null; plan?: string | null; stat
 
 export interface CreatedTenant { id: string; name: string; slug: string; plan: string; status: string; }
 export interface CreatedInvitation {
-  id: string; email: string | null; roles: string[]; status: string;
+  id: string; kind: 'bootstrap_owner'; invitee_username: null; roles: string[]; status: string;
   expires_at: string; invite_url: string;
 }
 export interface CreateTenantResponse { tenant: CreatedTenant; invitation: CreatedInvitation; }
@@ -64,9 +64,14 @@ export async function createTenant(c: Context<AppEnv>) {
       VALUES (${tenantId}, ${name}, ${slug}, ${plan}, 'pending')
     `;
     await tx`
-      INSERT INTO tenant_invitation
-        (id, tenant_id, email, name, roles, kb_grants, token_hash, status, invited_by, expires_at)
-      VALUES (${invitationId}, ${tenantId}, NULL, NULL, ARRAY['tenant_admin'], '[]'::jsonb, ${tokenHash}, 'pending', ${actor.user_id}, ${expiresAt})
+      INSERT INTO tenant_invitation (
+        id, tenant_id, token_hash, kind, invitee_username_normalized, roles,
+        kb_grants, status, invited_by, expires_at
+      )
+      VALUES (
+        ${invitationId}, ${tenantId}, ${tokenHash}, 'bootstrap_owner', NULL,
+        ARRAY['tenant_owner'], '[]'::jsonb, 'pending', ${actor.user_id}, ${expiresAt}
+      )
     `;
     await insertSystemAudit(tx, tenantId, actor.user_id, 'tenant.create', 'tenant', tenantId, {
       name, slug, plan, invitation_id: invitationId, expires_at: toRfc3339(expiresAt),
@@ -76,8 +81,9 @@ export async function createTenant(c: Context<AppEnv>) {
   const response: CreateTenantResponse = {
     tenant: { id: tenantId, name, slug, plan, status: 'pending' },
     invitation: {
-      id: invitationId, email: null, roles: ['tenant_admin'], status: 'pending',
-      expires_at: toRfc3339(expiresAt), invite_url: `/invite?token=${token}`,
+      id: invitationId, kind: 'bootstrap_owner', invitee_username: null,
+      roles: ['tenant_owner'], status: 'pending',
+      expires_at: toRfc3339(expiresAt), invite_url: `/invite#token=${encodeURIComponent(token)}`,
     },
   };
   return c.json(response);
@@ -224,11 +230,19 @@ export function ensureStatusTransition(current: string, next: string): void {
 }
 
 export function newInvitationToken(): string {
-  return `inv_${newUuid().replace(/-/g, '')}${newUuid().replace(/-/g, '')}`;
+  return `inv_${Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString('base64url')}`;
 }
 
 export function invitationTokenHash(token: string): string {
   return new Bun.CryptoHasher('sha256').update(token).digest('hex');
+}
+
+export function normalizeInvitationAccount(value: string): string {
+  const account = value.trim().toLowerCase();
+  if (account.length < 2 || account.length > 128 || !/^[a-z0-9._@+\-]+$/i.test(account)) {
+    throw AppError.badRequest('INVITE_ACCOUNT_INVALID', '请输入有效受邀账号');
+  }
+  return account;
 }
 
 export function clampDays(days: number): number {

@@ -42,12 +42,6 @@ export async function systemCommand(args: ParsedArgs, api: ApiClient): Promise<n
       result = await api.requestJson(`/api/system/tenants/${id(args, command)}?confirm_slug=${encodeURIComponent(slug)}`, { method: "DELETE" });
       break;
     }
-    case "tenant-invite":
-      result = await api.requestJson(`/api/system/tenants/${id(args, command)}/invitations/resend`, {
-        method: "POST",
-        body: JSON.stringify({ expires_in_days: numberOption(args, "expires-in-days", 7, { min: 1, max: 365 }) }),
-      });
-      break;
     case "users": result = await api.requestJson("/api/system/users"); break;
     case "models": result = await api.requestJson("/api/system/models"); break;
     case "jobs": result = await api.requestJson("/api/system/jobs"); break;
@@ -94,27 +88,6 @@ export async function adminCommand(args: ParsedArgs, api: ApiClient): Promise<nu
       requireForce(args, "成员将从当前租户移除");
       result = await api.requestJson(`/api/admin/members/${id(args, command)}`, { method: "DELETE" });
       break;
-    case "invitations": result = await api.requestJson("/api/admin/invitations"); break;
-    case "invitation-create": {
-      const roles = listOption(args, "role");
-      result = await api.requestJson("/api/admin/invitations", {
-        method: "POST",
-        body: JSON.stringify({
-          email: required(args, "email", "admin invitation-create 需要 --email"),
-          ...(stringOption(args, "name") ? { name: stringOption(args, "name") } : {}),
-          roles: roles.length ? roles : ["end_user"],
-          expires_in_days: numberOption(args, "expires-in-days", 7, { min: 1, max: 365 }),
-        }),
-      });
-      break;
-    }
-    case "invitation-resend":
-      result = await api.requestJson(`/api/admin/invitations/${id(args, command)}/resend`, { method: "POST" });
-      break;
-    case "invitation-revoke":
-      requireForce(args, "邀请将被撤销");
-      result = await api.requestJson(`/api/admin/invitations/${id(args, command)}/revoke`, { method: "POST" });
-      break;
     case "permissions": result = await api.requestJson("/api/admin/permissions"); break;
     case "permission-matrix": result = await api.requestJson("/api/v1/permission/matrix"); break;
     case "permission-grant":
@@ -146,6 +119,71 @@ export async function adminCommand(args: ParsedArgs, api: ApiClient): Promise<nu
   printJson(result);
   return 0;
 }
+export async function invitationCommand(args: ParsedArgs, api: ApiClient): Promise<number> {
+  const command = args.positionals[1] ?? "list";
+  const expiresInDays = () => numberOption(args, "expires-in-days", 7, { min: 1, max: 30 });
+  let result: unknown;
+  switch (command) {
+    case "list":
+      result = await api.requestJson("/api/v1/tenant/invitations");
+      break;
+    case "create": {
+      const roles = listOption(args, "role");
+      result = await api.requestJson("/api/v1/tenant/invitations", {
+        method: "POST",
+        body: JSON.stringify({
+          invitee_username: required(args, "username", "invitation create 需要 --username"),
+          roles: roles.length ? roles : ["end_user"],
+          expires_in_days: expiresInDays(),
+        }),
+      });
+      break;
+    }
+    case "resend":
+      result = await api.requestJson(`/api/v1/tenant/invitations/${id(args, command)}/resend`, {
+        method: "POST",
+        body: JSON.stringify({ expires_in_days: expiresInDays() }),
+      });
+      break;
+    case "revoke":
+      requireForce(args, "邀请将被撤销");
+      result = await api.requestJson(`/api/v1/tenant/invitations/${id(args, command)}/revoke`, {
+        method: "POST",
+      });
+      break;
+    case "validate":
+      result = await api.requestJson("/api/v1/invitations/validate", {
+        method: "POST",
+        body: JSON.stringify({ token: required(args, "token", "invitation validate 需要 --token") }),
+      }, false, false);
+      break;
+    case "accept":
+      result = await api.acceptInvitation(required(args, "token", "invitation accept 需要 --token"));
+      break;
+    case "owner-create":
+    case "owner-resend": {
+      const tenantId = id(args, command);
+      const suffix = command === "owner-resend" ? "/resend" : "";
+      result = await api.requestJson(
+        `/api/v1/system/tenants/${tenantId}/owner-invitation${suffix}`,
+        { method: "POST", body: JSON.stringify({ expires_in_days: expiresInDays() }) },
+      );
+      break;
+    }
+    case "owner-revoke":
+      requireForce(args, "租户所有者邀请将被撤销");
+      result = await api.requestJson(
+        `/api/v1/system/tenants/${id(args, command)}/owner-invitation/revoke`,
+        { method: "POST" },
+      );
+      break;
+    default:
+      throw new CliError(`未知 invitation 子命令: ${command}`, 2);
+  }
+  printJson(result);
+  return 0;
+}
+
 
 function id(args: ParsedArgs, command: string): string {
   const value = args.positionals[2];

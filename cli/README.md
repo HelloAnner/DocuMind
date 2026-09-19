@@ -68,7 +68,6 @@ documind system tenants
 documind system tenant <tenant-id>
 documind system tenant-create --name NAME --slug SLUG --plan trial
 documind system tenant-update <tenant-id> --plan team --status active
-documind system tenant-invite <tenant-id>
 documind system tenant-delete <tenant-id> --slug SLUG --force
 documind system users
 documind system models
@@ -81,16 +80,12 @@ documind system vector-reconcile
 documind system vector-rebuild --force
 documind system integrity
 
-# 租户后台：总览、日志、成员、邀请、授权与运行配置
+# 租户后台：总览、日志、成员、授权与运行配置
 documind admin overview
 documind admin logs --range all --q TEXT --limit 100
 documind admin members
 documind admin member-update <user-id> --role end_user --status active
 documind admin member-remove <user-id> --force
-documind admin invitations
-documind admin invitation-create --email EMAIL --name NAME --role end_user
-documind admin invitation-resend <invitation-id>
-documind admin invitation-revoke <invitation-id> --force
 documind admin permissions
 documind admin permission-matrix
 documind admin permission-grant --kb <kb-id> --subject-type role --subject end_user --permission read
@@ -100,6 +95,17 @@ documind admin chunking
 documind admin search
 documind admin embedding
 documind admin llm
+
+# 统一邀请生命周期
+documind invitation create --username USER --role end_user
+documind invitation list
+documind invitation resend <invitation-id>
+documind invitation revoke <invitation-id> --force
+documind invitation validate --token TOKEN
+documind invitation accept --token TOKEN
+documind invitation owner-create <tenant-id>
+documind invitation owner-resend <tenant-id>
+documind invitation owner-revoke <tenant-id> --force
 ```
 
 知识库、文档、文档任务和 API 接入沿用 `kb`、`documents`、`api-clients`。`system settings-set` 的两项设置立即生效并持久化到 PostgreSQL；`admin chunking/search/embedding/llm` 与页面一致，明确显示为服务端环境只读配置。

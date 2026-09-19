@@ -64,7 +64,6 @@ export function AdminMembers() {
   const [query, setQuery] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
-  const [inviteName, setInviteName] = useState("");
   const [inviteRole, setInviteRole] = useState<"end_user" | "tenant_admin">("end_user");
   const [expiresInDays, setExpiresInDays] = useState(7);
   const [busy, setBusy] = useState<string | null>(null);
@@ -106,8 +105,7 @@ export function AdminMembers() {
     setMessage("");
     try {
       const invitation = await createTenantInvitation({
-        email: inviteEmail,
-        name: inviteName || undefined,
+        invitee_username: inviteEmail,
         roles: [inviteRole],
         expires_in_days: expiresInDays,
       });
@@ -116,7 +114,6 @@ export function AdminMembers() {
       await copyToClipboard(url);
       await reload();
       setInviteEmail("");
-      setInviteName("");
       setMessage("邀请已创建，链接已复制。链接只会在创建或重发时展示。");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "邀请失败");
@@ -190,7 +187,7 @@ export function AdminMembers() {
   };
 
   const revoke = async (invitation: TenantInvitation) => {
-    if (!confirm(`确定撤销${invitation.email ? `发给 ${invitation.email} 的` : "公开"}邀请吗？`)) return;
+    if (!confirm(`确定撤销发给 ${invitation.invitee_username ?? "未知账号"} 的邀请吗？`)) return;
     setBusy(invitation.id);
     setMessage("");
     try {
@@ -303,8 +300,8 @@ export function AdminMembers() {
           {invitations.map((invitation) => (
             <div className="dm-table-row dm-invite-row" key={invitation.id}>
               <span>
-                <strong>{invitation.name || invitation.email || "管理员公开邀请"}</strong>
-                <small>{invitation.email || "领取后绑定账号"}</small>
+                <strong>{invitation.invitee_username ?? "所有者邀请"}</strong>
+                <small>{invitation.kind === "targeted" ? "账号定向邀请" : "首位所有者邀请"}</small>
               </span>
               <span>{invitation.roles.map(roleLabel).join("、")}</span>
               <span>{new Date(invitation.created_at).toLocaleDateString()}</span>
@@ -346,12 +343,14 @@ export function AdminMembers() {
             </div>
             <p className={styles.drawerIntro}>租户管理员可管理成员与全部知识库；普通用户只能访问明确授权的知识库并进行问答。</p>
             <label className={styles.field}>
-              <span>邮箱 *</span>
-              <input autoFocus onChange={(event) => setInviteEmail(event.target.value)} placeholder="name@company.com" type="email" value={inviteEmail} />
-            </label>
-            <label className={styles.field}>
-              <span>姓名</span>
-              <input onChange={(event) => setInviteName(event.target.value)} placeholder="可选" value={inviteName} />
+              <span>受邀账号 *</span>
+              <input
+                autoFocus
+                onChange={(event) => setInviteEmail(event.target.value)}
+                placeholder="已注册用户名"
+                type="text"
+                value={inviteEmail}
+              />
             </label>
             <label className={styles.field}>
               <span>租户角色</span>

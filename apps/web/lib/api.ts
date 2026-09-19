@@ -240,7 +240,8 @@ export interface CreateSystemTenantResponse {
   tenant: Pick<SystemTenant, "id" | "name" | "slug" | "plan" | "status">;
   invitation: {
     id: string;
-    email?: string;
+    kind: "bootstrap_owner";
+    invitee_username: null;
     roles: string[];
     status: string;
     expires_at: string;
@@ -277,60 +278,65 @@ export async function requestSystemTenantDeletion(id: string, slug: string) {
 }
 
 export async function generateSystemTenantAdminInvitation(id: string) {
-  return fetchJson<{ id: string; expires_at: string; invite_url: string }>(
-    `/api/system/tenants/${id}/invitations/resend`,
-    {
-      method: "POST",
-      body: JSON.stringify({ expires_in_days: 7 }),
-    }
-  );
+  return fetchJson<{
+    invitation: { id: string; expires_at: string };
+    invite_url: string;
+  }>(`/api/v1/system/tenants/${id}/owner-invitation/resend`, {
+    method: "POST",
+    body: JSON.stringify({ expires_in_days: 7 }),
+  });
 }
 
 export interface TenantInvitation {
   id: string;
   tenant_id: string;
-  email?: string;
-  name?: string;
+  kind: "targeted" | "bootstrap_owner";
+  invitee_username: string | null;
   roles: string[];
   kb_grants: { kb_id: string; permission: KnowledgeBasePermission }[];
   status: string;
   invited_by: string;
-  invited_by_label?: string;
-  accepted_by?: string;
+  invited_by_label?: string | null;
+  accepted_by?: string | null;
   expires_at: string;
-  accepted_at?: string;
-  revoked_at?: string;
+  accepted_at?: string | null;
+  revoked_at?: string | null;
   created_at: string;
   invite_url?: string;
 }
 
 export interface CreateTenantInvitationRequest {
-  email: string;
-  name?: string;
+  invitee_username: string;
   roles: string[];
   kb_grants?: { kb_id: string; permission: KnowledgeBasePermission }[];
   expires_in_days?: number;
 }
 
 export async function listTenantInvitations(): Promise<TenantInvitation[]> {
-  return fetchJson("/api/admin/invitations");
+  const data = await fetchJson<{ items: TenantInvitation[] }>("/api/v1/tenant/invitations");
+  return data.items;
 }
 
 export async function createTenantInvitation(
   req: CreateTenantInvitationRequest
 ): Promise<TenantInvitation> {
-  return fetchJson("/api/admin/invitations", {
-    method: "POST",
-    body: JSON.stringify(req),
-  });
+  const data = await fetchJson<{ invitation: TenantInvitation; invite_url: string }>(
+    "/api/v1/tenant/invitations",
+    { method: "POST", body: JSON.stringify(req) }
+  );
+  return { ...data.invitation, invite_url: data.invite_url };
 }
 
 export async function resendTenantInvitation(id: string): Promise<TenantInvitation> {
-  return fetchJson(`/api/admin/invitations/${id}/resend`, { method: "POST" });
+  const data = await fetchJson<{ invitation: TenantInvitation; invite_url: string }>(
+    `/api/v1/tenant/invitations/${id}/resend`,
+    { method: "POST" }
+  );
+  return { ...data.invitation, invite_url: data.invite_url };
 }
 
-export async function revokeTenantInvitation(id: string): Promise<TenantInvitation> {
-  return fetchJson(`/api/admin/invitations/${id}/revoke`, { method: "POST" });
+export async function revokeTenantInvitation(id: string): Promise<void> {
+  await fetchJson(`/api/v1/tenant/invitations/${id}/revoke`, { method: "POST" });
 }
 
 export type PermissionSubjectType = "role" | "user";
