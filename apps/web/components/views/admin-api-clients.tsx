@@ -18,12 +18,20 @@ import {
   type KnowledgeBase,
 } from "@/lib/api";
 
+const scopeOptions = [
+  { value: "chat:write", label: "发起问答" },
+  { value: "conversations:read", label: "读取会话" },
+  { value: "conversations:write", label: "管理会话" },
+  { value: "knowledge_bases:read", label: "读取知识库" },
+];
+
 export function AdminApiClients() {
   const [clients, setClients] = useState<ApiClientSummary[]>([]);
   const [knowledgeBases, setKnowledgeBases] = useState<KnowledgeBase[]>([]);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [kbIds, setKbIds] = useState<string[]>([]);
+  const [scopes, setScopes] = useState(scopeOptions.map((scope) => scope.value));
   const [expires, setExpires] = useState(90);
   const [rateLimit, setRateLimit] = useState(60);
   const [secret, setSecret] = useState<string | null>(null);
@@ -41,8 +49,8 @@ export function AdminApiClients() {
   }, []);
 
   const create = async () => {
-    if (!name.trim() || !kbIds.length) {
-      setError("请输入应用名称并至少选择一个知识库");
+    if (!name.trim() || !kbIds.length || !scopes.length) {
+      setError("请输入应用名称，并至少选择一个知识库和一项能力");
       return;
     }
     setBusy(true);
@@ -52,6 +60,7 @@ export function AdminApiClients() {
         name: name.trim(),
         ...(description.trim() ? { description: description.trim() } : {}),
         kb_ids: kbIds,
+        scopes,
         expires_in_days: expires,
         rate_limit_per_minute: rateLimit,
       });
@@ -59,6 +68,7 @@ export function AdminApiClients() {
       setName("");
       setDescription("");
       setKbIds([]);
+      setScopes(scopeOptions.map((scope) => scope.value));
       await reload();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "创建失败");
@@ -140,10 +150,18 @@ export function AdminApiClients() {
             <label className="dm-form-field"><span>有效期</span><select value={expires} onChange={(event) => setExpires(Number(event.target.value))}><option value={30}>30 天</option><option value={90}>90 天</option><option value={180}>180 天</option><option value={365}>365 天</option></select></label>
             <label className="dm-form-field"><span>每分钟限额</span><input type="number" min={1} max={10000} value={rateLimit} onChange={(event) => setRateLimit(Number(event.target.value))} /></label>
           </div>
-          <div className="dm-form-note" style={{ margin: "14px 0 8px" }}>授权知识库</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-            {knowledgeBases.map((kb) => <label key={kb.id} style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={kbIds.includes(kb.id)} onChange={(event) => setKbIds((current) => event.target.checked ? [...current, kb.id] : current.filter((id) => id !== kb.id))} />{kb.name}</label>)}
-          </div>
+          <fieldset style={{ marginTop: 14, border: 0, padding: 0 }}>
+            <legend className="dm-form-note" style={{ marginBottom: 8 }}>授权知识库</legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {knowledgeBases.map((kb) => <label key={kb.id} style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={kbIds.includes(kb.id)} onChange={(event) => setKbIds((current) => event.target.checked ? [...current, kb.id] : current.filter((id) => id !== kb.id))} />{kb.name}</label>)}
+            </div>
+          </fieldset>
+          <fieldset style={{ marginTop: 14, border: 0, padding: 0 }}>
+            <legend className="dm-form-note" style={{ marginBottom: 8 }}>允许能力</legend>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+              {scopeOptions.map((scope) => <label key={scope.value} style={{ display: "flex", alignItems: "center", gap: 6 }}><input type="checkbox" checked={scopes.includes(scope.value)} onChange={(event) => setScopes((current) => event.target.checked ? [...current, scope.value] : current.filter((value) => value !== scope.value))} />{scope.label}<code>{scope.value}</code></label>)}
+            </div>
+          </fieldset>
           {error ? <div className="dm-form-note" style={{ color: "var(--color-error)", marginTop: 12 }}>{error}</div> : null}
           <div style={{ marginTop: 16 }}><Button icon={<KeyRound size={14} />} disabled={busy} onClick={() => create().catch(console.error)}>创建并生成 Token</Button></div>
         </Panel>
@@ -153,7 +171,7 @@ export function AdminApiClients() {
           {clients.map((client) => (
             <div key={client.id} style={{ borderBottom: "1px solid var(--border-subtle)", padding: "16px 0" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-                <div><strong>{client.name}</strong> <Badge>{client.status === "active" ? "启用" : "停用"}</Badge><div className="dm-form-note">{client.description || "无说明"} · {client.kb_ids.length} 个知识库 · {client.rate_limit_per_minute} 次/分钟</div></div>
+                <div><strong>{client.name}</strong> <Badge>{client.status === "active" ? "启用" : "停用"}</Badge><div className="dm-form-note">{client.description || "无说明"} · {client.kb_ids.length} 个知识库 · {client.rate_limit_per_minute} 次/分钟</div><div className="dm-form-note">{client.scopes.join(" · ")}</div></div>
                 <div style={{ display: "flex", gap: 8 }}><Button variant="secondary" icon={<RefreshCw size={14} />} disabled={busy} onClick={() => rotate(client.id).catch(console.error)}>新 Token</Button><Button variant="secondary" icon={<Power size={14} />} disabled={busy} onClick={() => toggle(client).catch(console.error)}>{client.status === "active" ? "停用" : "启用"}</Button></div>
               </div>
               {client.tokens.map((token) => (

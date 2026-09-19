@@ -408,6 +408,7 @@ export async function createApiClient(input: {
   name: string;
   description?: string;
   kb_ids: string[];
+  scopes?: string[];
   expires_in_days: number;
   rate_limit_per_minute: number;
 }): Promise<CreatedApiClient> {
