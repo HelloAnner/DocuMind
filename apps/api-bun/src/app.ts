@@ -12,7 +12,7 @@ import { extractActorMiddleware } from './http/auth_middleware.ts';
 import type { AppEnv } from './http/types.ts';
 import { getAsset, fallbackHtml } from './web_assets.ts';
 import {
-  accountRouter, adminApiClientsRouter, adminMembersRouter, adminRouter, authRouter,
+  accountRouter, adminApiClientsRouter, adminMembersRouter, adminRouter, adminSkillsRouter, authRouter,
   conversationsRouter, documentsRouter, externalApiRouter, historyRouter, knowledgeRouter,
   systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
   vectorDiagnosticsRouter,
@@ -70,6 +70,7 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', adminRouter());
   api.route('/', adminMembersRouter());
   api.route('/', adminApiClientsRouter());
+  api.route('/', adminSkillsRouter());
   api.route('/', documentsRouter());
   api.route('/', knowledgeRouter());
   api.route('/', historyRouter());

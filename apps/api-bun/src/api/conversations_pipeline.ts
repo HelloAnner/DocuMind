@@ -92,6 +92,8 @@ async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<voi
     assistant_message_id: options.assistantMessageId,
     original_query: options.originalQuery,
     effective_kb_ids: options.effectiveKbIds,
+    can_manage_skills: actor.is_super_admin || actor.roles.some((role) =>
+      ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role)),
     history: history,
     options: agentOptionsFromConfig(config),
   };

@@ -65,6 +65,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "admin": return adminCommand(args, api);
     case "invitation": return invitationCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
+    case "skills": return skillCommand(args, api, json);
     case "kb": return knowledgeBaseCommand(args, api, json);
     case "models": return modelsCommand(api, json);
     case "chat": return chatCommand(args, api, json);
@@ -76,6 +77,54 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     default:
       throw new CliError(`未知命令: ${command}。运行 documind help 查看帮助`, 2);
   }
+}
+
+async function skillCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "list";
+  if (subcommand === "list") {
+    const result = await api.listSkills(stringOption(args, "search") ?? "");
+    if (json) printJson(result);
+    else {
+      const rows = result.items
+        .filter((item): item is Record<string, unknown> => item !== null && typeof item === "object")
+        .map((item) => [
+          String(item.id ?? ""), String(item.display_name ?? ""), String(item.name ?? ""),
+          `v${String(item.revision ?? "")}`, String(item.source ?? ""),
+        ]);
+      printTable(["ID", "名称", "标识", "版本", "来源"], rows);
+    }
+    return 0;
+  }
+  const value = args.positionals[2];
+  if (subcommand === "create" || subcommand === "update") {
+    if (subcommand === "update" && !value) throw new CliError("skills update 需要技能 ID", 2);
+    const current = subcommand === "update" ? await api.getSkill(value!) : {};
+    const contentFile = stringOption(args, "content-file");
+    const content = contentFile ? await readFile(contentFile, "utf8") : current.content;
+    const input = {
+      name: stringOption(args, "name") ?? current.name,
+      display_name: stringOption(args, "display-name") ?? current.display_name,
+      description: stringOption(args, "description") ?? current.description,
+      content,
+      source: "editor",
+      files: current.files ?? [],
+    };
+    if (!input.name || !input.display_name || !input.description || !input.content) {
+      throw new CliError("skills create 需要 --name、--display-name、--description 和 --content-file", 2);
+    }
+    printJson(subcommand === "create" ? await api.createSkill(input) : await api.updateSkill(value!, input));
+    return 0;
+  }
+  if (!value) throw new CliError(`skills ${subcommand} 需要参数`, 2);
+  if (subcommand === "show") printJson(await api.getSkill(value));
+  else if (subcommand === "delete") {
+    if (!booleanOption(args, "force")) throw new CliError("skills delete 需要 --force", 2);
+    printJson(await api.deleteSkill(value));
+  } else if (subcommand === "upload") {
+    printJson(await api.uploadSkill(Bun.file(value), value.split("/").pop() ?? "skill.zip"));
+  } else if (subcommand === "import") printJson(await api.importSkill(value));
+  else throw new CliError(`未知 skills 子命令: ${subcommand}`, 2);
+  return 0;
 }
 
 async function initCommand(args: ParsedArgs, path: string): Promise<number> {

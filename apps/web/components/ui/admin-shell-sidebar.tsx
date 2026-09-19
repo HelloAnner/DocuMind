@@ -18,6 +18,7 @@ import {
   Settings,
   Shield,
   Users,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -82,6 +83,7 @@ const tenantSections: NavSection[] = [
       { label: "成员与邀请", href: "/admin/members", icon: Users },
       { label: "访问权限", href: "/admin/permissions", icon: Shield },
       { label: "MCP 接入", href: "/admin/api-clients", icon: KeyRound },
+      { label: "技能管理", href: "/admin/skills", icon: Sparkles },
     ],
   },
   {

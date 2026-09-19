@@ -130,6 +130,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
     contextAssembler: contextAssembler,
     promptRegistry: new BuiltinPromptRegistry(),
     answerFinalizer: new GroundedAnswerFinalizer(verifier),
+    sql,
   });
 
   const storage = buildStorage(config);

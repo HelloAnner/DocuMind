@@ -10,6 +10,7 @@ export { systemTenantInvitationsRouter } from './system_tenant_invitations.ts';
 export { adminRouter } from './admin.ts';
 export { adminMembersRouter } from './admin_members.ts';
 export { adminApiClientsRouter } from './admin_api_clients.ts';
+export { adminSkillsRouter } from './admin_skills.ts';
 export { authRouter } from './auth.ts';
 export { tenantLoginRouter } from './tenant_login.ts';
 export { accountRouter } from './account.ts';

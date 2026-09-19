@@ -96,6 +96,41 @@ export class ApiClient {
       body: JSON.stringify({ status }),
     });
   }
+  async listSkills(search = ""): Promise<{ items: unknown[] }> {
+    const query = search ? `?q=${encodeURIComponent(search)}` : "";
+    return this.requestJson(`/api/admin/skills${query}`);
+  }
+
+  async getSkill(id: string): Promise<Record<string, unknown>> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`);
+  }
+
+  async createSkill(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.requestJson("/api/admin/skills", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async updateSkill(id: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`, {
+      method: "PUT", body: JSON.stringify(input),
+    });
+  }
+
+  async deleteSkill(id: string): Promise<unknown> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async uploadSkill(file: Blob, fileName: string): Promise<Record<string, unknown>> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    return this.requestJson("/api/admin/skills/upload", { method: "POST", body: form });
+  }
+
+  async importSkill(url: string): Promise<Record<string, unknown>> {
+    return this.requestJson("/api/admin/skills/import", {
+      method: "POST", body: JSON.stringify({ url }),
+    });
+  }
+
 
   async register(): Promise<Identity> {
     const response = await this.requestJson<LoginResponse>(

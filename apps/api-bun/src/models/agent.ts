@@ -19,7 +19,7 @@ export interface ConversationTurn {
 export interface AgentRequest {
   tenant_id: string; user_id: string; conversation_id: string;
   user_message_id: string; assistant_message_id: string;
-  original_query: string; effective_kb_ids: string[];
+  original_query: string; effective_kb_ids: string[]; can_manage_skills?: boolean;
   history: ConversationTurn[]; options: AgentOptions;
 }
 

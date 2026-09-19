@@ -21,6 +21,7 @@ import type { Citation, FeedbackReason, Message, Rating } from "@/lib/types";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
+import { SkillCard } from "./skill-card";
 
 function CitationChip({
   citation,
@@ -306,6 +307,7 @@ export function MessageRow({
         durationMs={message.duration_ms}
         status={message.status}
       />
+      <SkillCard toolCalls={message.tool_calls} />
 
       {failed || cancelled ? (
         <div className="dm-answer-error">

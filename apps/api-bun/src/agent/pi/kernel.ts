@@ -7,6 +7,7 @@ import {
   type StreamFn,
 } from '@earendil-works/pi-agent-core';
 import type { AssistantMessage, Usage as PiUsage } from '@earendil-works/pi-ai';
+import type { Sql } from 'postgres';
 import { citedEvidenceIndexes } from '../citation_resolver.ts';
 import { emit, type ProgressSender } from '../events.ts';
 import type { GroundedAnswerFinalizer } from '../finalizer.ts';
@@ -25,6 +26,7 @@ import type { RetrievalTrace } from '../../models/trace.ts';
 import { defaultRetrievalPlan } from '../../models/trace.ts';
 import type { Confidence, NoAnswerReason, Usage } from '../../models/index.ts';
 import { nowRfc3339 } from '../../infra/time.ts';
+import { formatSkillsForSystemPrompt, listSkills } from '../../api/admin_skills.ts';
 import {
   DOCUMIND_PROVIDER,
   buildPiModel,
@@ -57,10 +59,11 @@ import {
 import {
   createClarificationTool,
   createKnowledgeSearchTool,
+  createSkillReadTool,
+  createSkillSaveTool,
   type TerminalToolEffect,
   type ToolRunContext,
 } from './tools.ts';
-
 const GROUNDING_GUARD_MESSAGE =
   'Runtime grounding guard: citation markers are invalid because this turn has no document evidence. Call knowledge_search to obtain current evidence, or answer without document claims and citations.';
 
@@ -104,6 +107,7 @@ export interface PiKernelOptions {
   contextAssembler: ContextAssembler;
   promptRegistry: PromptRegistry;
   answerFinalizer: GroundedAnswerFinalizer;
+  sql?: Sql | null;
 }
 
 export class PiAgentKernel {
@@ -119,7 +123,12 @@ export class PiAgentKernel {
       request.options.runtime.max_history_turns,
       request.options.runtime.max_history_chars,
     );
-    const prompt = await this.options.promptRegistry.compose(request.options);
+    const basePrompt = await this.options.promptRegistry.compose(request.options);
+    const skills = this.options.sql ? await listSkills(this.options.sql, request.tenant_id) : [];
+    const prompt = {
+      ...basePrompt,
+      system_text: basePrompt.system_text + '\n\n' + formatSkillsForSystemPrompt(skills),
+    };
     const mode: AgentMode = request.options.mode ?? 'answerer';
     return new PreparedAgentRequest(request, bounded, prompt, mode, nowRfc3339());
   }
@@ -179,6 +188,7 @@ export class PiAgentKernel {
       state: state,
       retriever: options.retriever,
       reranker: options.reranker,
+      sql: options.sql ?? null,
       recordApplied: (callId, applied) => {
         appliedByCall.set(callId, applied);
         if (applied.documentSearchAttempted) documentSearchAttempted = true;
@@ -191,6 +201,10 @@ export class PiAgentKernel {
       createKnowledgeSearchTool(options.retriever, options.reranker, toolContext),
       createClarificationTool(toolContext),
     ];
+    if (options.sql) {
+      tools.push(createSkillReadTool(toolContext));
+      if (request.can_manage_skills) tools.push(createSkillSaveTool(toolContext));
+    }
 
     const onEvent = async (event: AgentEvent): Promise<void> => {
       switch (event.type) {

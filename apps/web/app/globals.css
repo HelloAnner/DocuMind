@@ -6163,3 +6163,13 @@ a {
 .dm-batch-upload-list article strong, .dm-batch-upload-list article small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dm-batch-upload-list article small { color: var(--text-muted); }
 .dm-batch-upload-list .dm-bar { height: 3px; }
+
+.dm-skill-conversation-card { background: var(--bg-secondary); border: 1px solid var(--border-subtle); border-radius: 14px; box-shadow: 0 8px 28px rgba(0,0,0,.05); margin: 12px 0; max-width: 560px; overflow: hidden; }
+.dm-skill-conversation-head { align-items: center; display: flex; gap: 12px; padding: 18px 20px; }
+.dm-skill-conversation-head > span { align-items: center; background: linear-gradient(145deg,#f6d3ff,#d8e7ff); border-radius: 10px; color: #695683; display: flex; height: 40px; justify-content: center; width: 40px; }
+.dm-skill-conversation-head > div { display: flex; flex-direction: column; gap: 3px; }
+.dm-skill-conversation-head small { color: var(--text-muted); font-size: 10px; font-weight: 600; letter-spacing: .08em; }
+.dm-skill-conversation-head strong { color: var(--text-primary); font-size: 15px; }
+.dm-skill-conversation-head code { color: var(--text-muted); font-size: 11px; }
+.dm-skill-conversation-card > p { border-top: 1px solid var(--border-faint); color: var(--text-tertiary); font-size: 12px; line-height: 1.65; margin: 0; padding: 13px 20px; }
+.dm-skill-conversation-card > a { align-items: center; border-top: 1px solid var(--border-faint); color: var(--text-primary); display: flex; font-size: 12px; font-weight: 550; gap: 6px; justify-content: flex-end; padding: 11px 20px; text-decoration: none; }

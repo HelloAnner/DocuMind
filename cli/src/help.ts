@@ -58,6 +58,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  api-clients list|create      管理租户 MCP / API 客户端与 Token\n` +
   `  mcp tools                    列出 Token 可用的 MCP 工具\n` +
   `  mcp ask <问题>               通过 MCP 执行真实文档问答\n` +
+  `  skills list|show|create|update|delete|upload|import  管理租户技能\n` +
   `  mcp verify                   验证工具发现与租户会话隔离\n\n` +
   `  system <subcommand>          平台后台全量查看与管理\n` +
   `  admin <subcommand>           租户后台全量查看与管理\n` +

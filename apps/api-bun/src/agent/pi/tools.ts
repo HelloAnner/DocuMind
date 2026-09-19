@@ -1,6 +1,7 @@
 // pi core 工具：knowledge_search / ask_clarification
 import { Type, type Static } from 'typebox';
 import type { AgentTool, AgentToolResult } from '@earendil-works/pi-agent-core';
+import type { Sql } from 'postgres';
 import { emit, type AgentProgress, type ProgressSender } from '../events.ts';
 import { rerankedTraces, retrievedTraces } from '../trace_builder.ts';
 import { isAgentMode, type AgentMode, type AgentRequest } from '../../models/agent.ts';
@@ -12,6 +13,7 @@ import {
   type AppliedToolEffect,
   type ToolState,
 } from './support.ts';
+import { getSkill, saveSkill } from '../../api/admin_skills.ts';
 
 export interface KnowledgeSearchEffect {
   chunks: import('../../models/rag.ts').RerankedChunk[];
@@ -52,6 +54,7 @@ export interface ToolRunContext {
   state: ToolState;
   retriever: Retriever;
   reranker: Reranker;
+  sql: Sql | null;
   recordApplied(callId: string, applied: AppliedToolEffect): void;
   recordClarification(terminal: TerminalToolEffect): void;
 }
@@ -96,6 +99,19 @@ const clarificationParameters = Type.Object({
 }, { additionalProperties: false });
 
 type ClarificationParams = Static<typeof clarificationParameters>;
+const skillReadParameters = Type.Object({
+  name: Type.String({ description: '技能英文名称' }),
+}, { additionalProperties: false });
+type SkillReadParams = Static<typeof skillReadParameters>;
+
+const skillSaveParameters = Type.Object({
+  name: Type.String({ description: '小写英文、数字和连字符组成的技能名称' }),
+  display_name: Type.String({ description: '技能显示名称' }),
+  description: Type.String({ description: '技能适用场景的一句话说明' }),
+  content: Type.String({ description: '完整 Markdown 执行指令' }),
+}, { additionalProperties: false });
+type SkillSaveParams = Static<typeof skillSaveParameters>;
+
 
 function textResult(text: string): { type: 'text'; text: string }[] {
   return [{ type: 'text', text: text }];
@@ -131,6 +147,61 @@ export function createKnowledgeSearchTool(
     },
   };
 }
+export function createSkillReadTool(
+  context: ToolRunContext,
+): AgentTool<typeof skillReadParameters, unknown> {
+  return {
+    name: 'skill_read',
+    label: 'Read Skill',
+    description: '按技能名称加载当前租户技能的完整指令和参考文件。仅在确认技能适用后调用。',
+    parameters: skillReadParameters,
+    execute: async (toolCallId, params: SkillReadParams): Promise<AgentToolResult<unknown>> => {
+      if (!context.sql) throw new Error('技能服务需要 PostgreSQL');
+      const skill = await getSkill(context.sql, context.request.tenant_id, params.name);
+      const publicResult = {
+        name: skill.name, display_name: skill.display_name, description: skill.description,
+        content: skill.content, references: skill.files, revision: skill.revision,
+      };
+      const applied = applyToolEffect({ type: 'none' }, publicResult, publicResult, context.state);
+      context.recordApplied(toolCallId, applied);
+      return { content: textResult(JSON.stringify(publicResult)), details: publicResult };
+    },
+  };
+}
+
+export function createSkillSaveTool(
+  context: ToolRunContext,
+): AgentTool<typeof skillSaveParameters, unknown> {
+  return {
+    name: 'skill_save',
+    label: 'Save Skill',
+    description: '将当前对话中确认的流程保存为租户技能。仅在用户明确要求创建或保存技能后调用。',
+    parameters: skillSaveParameters,
+    execute: async (toolCallId, params: SkillSaveParams): Promise<AgentToolResult<unknown>> => {
+      if (!context.request.can_manage_skills) throw new Error('当前用户无权创建技能');
+      if (!context.sql) throw new Error('技能服务需要 PostgreSQL');
+      const skill = await saveSkill(
+        context.sql, context.request.tenant_id, context.request.user_id,
+        { ...params, source: 'conversation' },
+      );
+      const publicResult = {
+        message: `技能「${skill.display_name}」已创建`,
+        interaction: {
+          kind: 'skill_card',
+          action: 'created',
+          skill: {
+            id: skill.id, name: skill.name, display_name: skill.display_name,
+            description: skill.description, revision: skill.revision,
+          },
+        },
+      };
+      const applied = applyToolEffect({ type: 'none' }, publicResult, publicResult, context.state);
+      context.recordApplied(toolCallId, applied);
+      return { content: textResult(JSON.stringify(publicResult)), details: publicResult };
+    },
+  };
+}
+
 
 async function runKnowledgeSearch(
   params: KnowledgeSearchParams,
