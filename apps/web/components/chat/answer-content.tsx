@@ -17,7 +17,6 @@ import { copyToClipboard } from "@/lib/clipboard";
 interface AnswerContentProps {
   content: string;
   isStreaming?: boolean;
-  runtimeStage?: string;
   onCitationClick?: (index: number) => void;
   displayCitationIndex?: (index: number) => number;
 }
@@ -27,7 +26,6 @@ interface MarkdownContentProps {
   className: string;
   isStreaming?: boolean;
   realtime?: boolean;
-  runtimeStage?: string;
   onCitationClick?: (index: number) => void;
   displayCitationIndex?: (index: number) => number;
 }
@@ -111,7 +109,6 @@ export const MarkdownContent = memo(function MarkdownContent({
   className,
   isStreaming = false,
   realtime = false,
-  runtimeStage,
   onCitationClick,
   displayCitationIndex,
 }: MarkdownContentProps) {
@@ -121,7 +118,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   return (
     <div className={`${className} ${isStreaming ? "is-streaming" : ""}`}>
       <Streamdown
-        isAnimating={isStreaming}
+        animated={false}
         mode={isStreaming ? "streaming" : "static"}
         parseIncompleteMarkdown={isStreaming}
         components={{
@@ -157,12 +154,6 @@ export const MarkdownContent = memo(function MarkdownContent({
       >
         {renderContent}
       </Streamdown>
-      {isStreaming ? (
-        <div className="dm-answer-streaming-status" aria-live="polite">
-          <span className="dm-streaming-pulse-dot" aria-hidden="true" />
-          <span>{runtimeStage === "verifying" ? "正在核验引用" : "生成中"}</span>
-        </div>
-      ) : null}
     </div>
   );
 });
@@ -170,7 +161,6 @@ export const MarkdownContent = memo(function MarkdownContent({
 export const AnswerContent = memo(function AnswerContent({
   content,
   isStreaming = false,
-  runtimeStage,
   onCitationClick,
   displayCitationIndex,
 }: AnswerContentProps) {
@@ -180,7 +170,6 @@ export const AnswerContent = memo(function AnswerContent({
       className="dm-answer-content dm-markdown-content"
       isStreaming={isStreaming}
       realtime={isStreaming}
-      runtimeStage={runtimeStage}
       onCitationClick={onCitationClick}
       displayCitationIndex={displayCitationIndex}
     />

@@ -3352,18 +3352,6 @@ body > .hiddenCanvasElement {
   }
 }
 
-@keyframes dm-streaming-dot-breathe {
-  0%,
-  100% {
-    opacity: 0.35;
-    transform: scale(0.82);
-  }
-
-  50% {
-    opacity: 0.92;
-    transform: scale(1);
-  }
-}
 
 @keyframes dm-trace-row-enter {
   from {
@@ -3631,38 +3619,6 @@ body > .hiddenCanvasElement {
   color: var(--text-secondary);
 }
 
-.dm-answer-content {
-  position: relative;
-}
-
-.dm-answer-content.is-streaming {
-  padding-bottom: 36px;
-}
-
-.dm-answer-streaming-status {
-  align-items: center;
-  bottom: 12px;
-  color: var(--text-muted);
-  display: inline-flex;
-  font-size: 11px;
-  gap: 5px;
-  line-height: 16px;
-  margin: 8px 0 0 auto;
-  opacity: 0.72;
-  pointer-events: none;
-  position: sticky;
-  width: max-content;
-  z-index: 2;
-}
-
-.dm-streaming-pulse-dot {
-  animation: dm-streaming-dot-breathe 1.35s ease-in-out infinite;
-  background: var(--text-muted);
-  border-radius: 999px;
-  display: inline-block;
-  height: 6px;
-  width: 6px;
-}
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -3675,7 +3631,6 @@ body > .hiddenCanvasElement {
   .dm-anchor-box,
   .dm-login-story-copy,
   .dm-action-spinner::before,
-  .dm-streaming-pulse-dot,
   .action-feed-row {
     animation: none !important;
   }
