@@ -7,6 +7,7 @@ import { rerankedTraces, retrievedTraces } from '../trace_builder.ts';
 import { isAgentMode, type AgentMode, type AgentRequest } from '../../models/agent.ts';
 import type { Reranker, Retriever } from '../../rag/types.ts';
 import type { ResolvedRef, SubQuery } from '../../models/trace.ts';
+import type { RerankedChunk } from '../../models/rag.ts';
 import type { Confidence, NoAnswerReason } from '../../models/index.ts';
 import {
   applyToolEffect,
@@ -132,6 +133,23 @@ function normalizeQueries(raw: string[], maxQueries: number, originalQuery: stri
   ];
 }
 
+export function mergeCoveredReranks(
+  perQuery: RerankedChunk[][],
+  global: RerankedChunk[],
+  topK: number,
+): RerankedChunk[] {
+  const merged: RerankedChunk[] = [];
+  const seen = new Set<string>();
+  const covered = perQuery.flatMap((items) => items.slice(0, 1));
+  for (const item of [...covered, ...global]) {
+    if (seen.has(item.chunk.chunk_id)) continue;
+    seen.add(item.chunk.chunk_id);
+    merged.push({ ...item, rank: merged.length + 1 });
+    if (merged.length >= topK) break;
+  }
+  return merged;
+}
+
 /** knowledge_search：授权范围内的混合检索 + 精排，返回稳定证据编号。 */
 export function createKnowledgeSearchTool(
   retriever: Retriever,
@@ -250,12 +268,20 @@ async function runKnowledgeSearch(
     warnings: [...warnings],
   } satisfies AgentProgress);
 
-  emit(progress, { type: 'status_updated', status: 'reranking' } satisfies AgentProgress);
-  const reranked = await context.reranker.rerank({
-    query: rerankQuery,
-    chunks: retrieved,
-    top_k: Math.max(context.request.options.retrieval.rerank_top_k, 1),
-  });
+  const rerankTopK = Math.max(context.request.options.retrieval.rerank_top_k, 1);
+  const [globalReranked, ...perQueryReranked] = await Promise.all([
+    context.reranker.rerank({
+      query: rerankQuery,
+      chunks: retrieved,
+      top_k: rerankTopK,
+    }),
+    ...queries.map((query) => context.reranker.rerank({
+      query: query,
+      chunks: retrieved,
+      top_k: 1,
+    })),
+  ]);
+  const reranked = mergeCoveredReranks(perQueryReranked, globalReranked, rerankTopK);
   traces.push(...rerankedTraces(context.request.user_message_id, reranked));
   const topChunkIds = reranked.map((item) => item.chunk.chunk_id);
   emit(progress, {
