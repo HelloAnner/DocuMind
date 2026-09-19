@@ -75,6 +75,72 @@ export async function adminCommand(args: ParsedArgs, api: ApiClient): Promise<nu
   switch (command) {
     case "overview": result = await api.requestJson("/api/admin/overview"); break;
     case "logs": result = await api.requestJson(queryPath("/api/admin/logs", args, ["range", "q", "limit"])); break;
+    case "quality-summary":
+      result = await api.requestJson("/api/admin/answer-quality/summary");
+      break;
+    case "quality-cases":
+      result = await api.requestJson(queryPath(
+        "/api/admin/answer-quality/cases", args,
+        ["status", "root-cause", "kb", "q", "limit", "cursor"],
+      ).replace("root-cause=", "root_cause=").replace("kb=", "kb_id="));
+      break;
+    case "quality-case":
+      result = await api.requestJson(`/api/admin/answer-quality/cases/${id(args, command)}`);
+      break;
+    case "quality-diagnose":
+      result = await api.requestJson(`/api/admin/answer-quality/cases/${id(args, command)}/diagnose`, {
+        method: "POST",
+      });
+      break;
+    case "quality-update": {
+      const input = defined({
+        status: stringOption(args, "status"),
+        root_cause: stringOption(args, "root-cause"),
+        resolution_note: stringOption(args, "resolution-note"),
+      });
+      if (Object.keys(input).length === 0) {
+        throw new CliError("admin quality-update 需要 --status、--root-cause 或 --resolution-note", 2);
+      }
+      result = await api.requestJson(`/api/admin/answer-quality/cases/${id(args, command)}`, {
+        method: "PATCH", body: JSON.stringify(input),
+      });
+      break;
+    }
+    case "corrections":
+      result = await api.requestJson(queryPath("/api/admin/answer-corrections", args, ["status", "q", "limit"]));
+      break;
+    case "correction":
+      result = await api.requestJson(`/api/admin/answer-corrections/${id(args, command)}`);
+      break;
+    case "correction-create":
+      result = await api.requestJson("/api/admin/answer-corrections", {
+        method: "POST", body: JSON.stringify(correctionInput(args, true)),
+      });
+      break;
+    case "correction-update":
+      result = await api.requestJson(`/api/admin/answer-corrections/${id(args, command)}`, {
+        method: "PATCH", body: JSON.stringify(correctionInput(args, false)),
+      });
+      break;
+    case "correction-publish":
+      result = await api.requestJson(`/api/admin/answer-corrections/${id(args, command)}/publish`, {
+        method: "POST",
+      });
+      break;
+    case "correction-archive":
+      result = await api.requestJson(`/api/admin/answer-corrections/${id(args, command)}/archive`, {
+        method: "POST",
+      });
+      break;
+    case "correction-match":
+      result = await api.requestJson("/api/admin/answer-corrections/match-preview", {
+        method: "POST",
+        body: JSON.stringify({
+          question: required(args, "question", "admin correction-match 需要 --question"),
+          kb_ids: listOption(args, "kb"),
+        }),
+      });
+      break;
     case "members": result = await api.requestJson("/api/admin/members"); break;
     case "member-update": {
       const input = defined({ role: stringOption(args, "role"), status: stringOption(args, "status") });
@@ -181,7 +247,38 @@ export async function invitationCommand(args: ParsedArgs, api: ApiClient): Promi
       throw new CliError(`未知 invitation 子命令: ${command}`, 2);
   }
   printJson(result);
+
   return 0;
+}
+function correctionInput(args: ParsedArgs, create: boolean): Record<string, unknown> {
+  const question = stringOption(args, "question");
+  const answer = stringOption(args, "answer");
+  if (create && (!question || !answer)) {
+    throw new CliError("admin correction-create 需要 --question 和 --answer", 2);
+  }
+  const input = defined({
+    source_case_id: stringOption(args, "case"),
+    canonical_question: question,
+    answer_markdown: answer,
+    valid_until: stringOption(args, "valid-until"),
+    change_note: stringOption(args, "change-note"),
+  });
+  if ("alias" in args.options) input.aliases = listOption(args, "alias");
+  if ("kb" in args.options) input.required_kb_ids = listOption(args, "kb");
+  const sourceJson = stringOption(args, "source-json");
+  if (sourceJson !== undefined) {
+    try {
+      const sources: unknown = JSON.parse(sourceJson);
+      if (!Array.isArray(sources)) throw new Error("not an array");
+      input.sources = sources;
+    } catch {
+      throw new CliError("--source-json 必须是 JSON 数组", 2);
+    }
+  }
+  if (!create && Object.keys(input).length === 0) {
+    throw new CliError("admin correction-update 至少需要一个修改选项", 2);
+  }
+  return input;
 }
 
 

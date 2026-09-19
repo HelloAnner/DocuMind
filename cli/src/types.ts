@@ -185,6 +185,20 @@ export interface Message {
   agent_mode?: string;
   prompt_versions?: Record<string, string>;
   citations: Citation[];
+  feedback?: {
+    id: string;
+    rating: "up" | "down";
+    reason?: string | null;
+    comment?: string | null;
+    correction?: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
+  answer_source?: "rag" | "manual_correction";
+  correction_id?: string | null;
+  correction_version_id?: string | null;
+  correction_match_type?: "exact" | "alias" | "semantic" | null;
+  correction_match_score?: number | null;
   parent_message_id?: string;
   retry_of_message_id?: string;
   created_at: string;

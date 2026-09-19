@@ -552,9 +552,27 @@ export function useConversationManager() {
             if (runtime.event_type === "response.completed") {
               flushPendingMessageUpdates();
               const confidence = confidenceFromRuntime(runtime.payload.confidence);
+              const manualCorrection = runtime.payload.answer_source === "manual_correction";
               updateMessage(runtime.response_message_id, {
                 status: "completed",
                 confidence,
+                answer_source: manualCorrection ? "manual_correction" : "rag",
+                correction_id: manualCorrection && typeof runtime.payload.correction_id === "string"
+                  ? runtime.payload.correction_id
+                  : null,
+                correction_version_id:
+                  manualCorrection && typeof runtime.payload.correction_version_id === "string"
+                    ? runtime.payload.correction_version_id
+                    : null,
+                correction_match_type:
+                  runtime.payload.correction_match_type === "exact" ||
+                  runtime.payload.correction_match_type === "alias"
+                    ? runtime.payload.correction_match_type
+                    : null,
+                correction_match_score:
+                  typeof runtime.payload.correction_match_score === "number"
+                    ? runtime.payload.correction_match_score
+                    : null,
                 runtime_stage: undefined,
                 thinking: undefined,
               });
@@ -696,10 +714,20 @@ export function useConversationManager() {
             const data = sse.data as {
               message_id: string;
               confidence: "high" | "medium" | "low";
+              answer_source?: "rag" | "manual_correction";
+              correction_id?: string | null;
+              correction_version_id?: string | null;
+              correction_match_type?: "exact" | "alias" | null;
+              correction_match_score?: number | null;
             };
             updateMessage(data.message_id, {
               status: "completed",
               confidence: data.confidence,
+              answer_source: data.answer_source ?? "rag",
+              correction_id: data.correction_id ?? null,
+              correction_version_id: data.correction_version_id ?? null,
+              correction_match_type: data.correction_match_type ?? null,
+              correction_match_score: data.correction_match_score ?? null,
               thinking: undefined,
             });
             abortControllersRef.current.delete(data.message_id);

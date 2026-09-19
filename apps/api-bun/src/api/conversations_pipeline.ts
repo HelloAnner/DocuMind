@@ -1,5 +1,8 @@
 // 移植自 apps/api-rs/src/api/conversations.rs 的 Agent 执行管线
 import type { Sql } from 'postgres';
+import {
+  findPublishedCorrection, type PublishedCorrectionMatch,
+} from '../answer_quality.ts';
 import type { ProgressSender } from '../agent/events.ts';
 import type { PiAgentKernel } from '../agent/pi/kernel.ts';
 import type { AppConfig } from '../config.ts';
@@ -82,6 +85,12 @@ export async function runAgentPipeline(options: AgentPipelineOptions): Promise<v
 
 async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<void> {
   const { repo, config, ctx, actor } = options;
+  const correction = await findPublishedCorrection(
+    options.sql, actor.tenant_id, options.originalQuery, options.effectiveKbIds);
+  if (correction !== null) {
+    await completeWithCorrection(options, correction);
+    return;
+  }
   const history = await buildHistory(
     options.sql, repo, actor.tenant_id, options.conversationId, options.userMessageId);
   const agentRequest: AgentRequest = {
@@ -233,6 +242,88 @@ async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<voi
   }
 
   sendAnswerCompleted(ctx, options.assistantMessageId, confidence, usage);
+}
+async function completeWithCorrection(
+  options: AgentPipelineOptions, correction: PublishedCorrectionMatch,
+): Promise<void> {
+  const { repo, actor, ctx } = options;
+  const message = await repo.getMessage(actor.tenant_id, options.assistantMessageId);
+  if (message === null) throw AppError.messageNotFound();
+  if (message.status === 'cancelled') {
+    sendExecutionCancelled(ctx);
+    return;
+  }
+  const citationOutputs: CitationOutput[] = correction.sources
+    .filter((source) => source.doc_id !== null && source.chunk_id !== null)
+    .map((source, index) => ({
+      index: index + 1,
+      chunk_id: source.chunk_id!,
+      doc_id: source.doc_id!,
+      doc_title: source.source_title,
+      page_range: source.page_range,
+      quote: source.quote,
+      score: 1,
+      source_status: 'active',
+      anchor: null,
+    }));
+  message.content = correction.answer_markdown;
+  message.status = 'completed';
+  message.confidence = 'high';
+  message.no_answer_reason = null;
+  message.error_code = null;
+  message.error_message = null;
+  message.answer_source = 'manual_correction';
+  message.correction_id = correction.correction_id;
+  message.correction_version_id = correction.version_id;
+  message.correction_match_type = correction.match_type;
+  message.correction_match_score = correction.match_score;
+  message.completed_at = nowRfc3339();
+  await repo.updateMessage(message);
+
+  const citations: Citation[] = citationOutputs.map((citation) => ({
+    id: newUuid(),
+    assistant_message_id: options.assistantMessageId,
+    index: citation.index,
+    chunk_id: citation.chunk_id,
+    doc_id: citation.doc_id,
+    doc_title: citation.doc_title,
+    page_range: citation.page_range,
+    heading_path: [],
+    quote: citation.quote,
+    score: citation.score,
+    source_status: citation.source_status,
+    anchor: citation.anchor ?? null,
+  }));
+  await repo.saveCitations(citations);
+  await repo.saveQueryTrace({
+    id: newUuid(),
+    message_id: options.userMessageId,
+    original_query: options.originalQuery,
+    rewritten_query: null,
+    keywords: [],
+    hypothetical_answer: null,
+    resolved_refs: [],
+    effective_kb_ids: options.effectiveKbIds,
+    rewrite_model: 'manual-correction',
+    created_at: nowRfc3339(),
+  });
+
+  sendAnswerReplace(ctx, options.assistantMessageId, correction.answer_markdown);
+  for (const citation of citationOutputs) {
+    sendCitationDelta(ctx, options.assistantMessageId, citation);
+  }
+  sendAnswerCompleted(ctx, options.assistantMessageId, 'high', null, {
+    answer_source: 'manual_correction',
+    correction_id: correction.correction_id,
+    correction_version_id: correction.version_id,
+    correction_match_type: correction.match_type,
+    correction_match_score: correction.match_score,
+  });
+  const session = await repo.getSession(actor.tenant_id, options.conversationId);
+  if (session !== null) {
+    session.updated_at = nowRfc3339();
+    await repo.updateSession(session);
+  }
 }
 
 /** 对应 Rust fail_assistant_message：先发失败事件，再把 answering 消息标记为 failed。 */

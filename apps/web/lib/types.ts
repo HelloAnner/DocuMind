@@ -4,6 +4,8 @@ export type MessageRole = "user" | "assistant";
 export type MessageStatus = "created" | "answering" | "completed" | "failed" | "cancelled";
 export type Confidence = "high" | "medium" | "low";
 export type Rating = "up" | "down";
+export type AnswerSource = "rag" | "manual_correction";
+export type CorrectionMatchType = "exact" | "alias" | "semantic";
 export type FeedbackReason =
   | "helpful"
   | "wrong_answer"
@@ -99,6 +101,11 @@ export interface Message {
   reasoning_steps?: RuntimeReasoningStep[];
   runtime_stage?: string;
   feedback?: FeedbackResponse;
+  answer_source?: AnswerSource;
+  correction_id?: UUID | null;
+  correction_version_id?: UUID | null;
+  correction_match_type?: CorrectionMatchType | null;
+  correction_match_score?: number | null;
   follow_up_questions?: FollowUpQuestion[];
   duration_ms?: number;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };

@@ -61,6 +61,8 @@ function message(
     parent_message_id: null, retry_of_message_id: null, client_request_id: null,
     confidence: null, no_answer_reason: null, error_code: null, error_message: null,
     agent_mode: null, prompt_versions: null,
+    answer_source: 'rag', correction_id: null, correction_version_id: null,
+    correction_match_type: null, correction_match_score: null,
     created_at: nowRfc3339(), completed_at: nowRfc3339(),
     ...overrides,
   };

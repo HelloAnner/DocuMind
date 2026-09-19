@@ -75,6 +75,11 @@ export async function messageToResponse(
     reasoning_steps: reasoningSteps,
     // Rust 侧 feedback 是 skip_serializing_if=Option::is_none：没有反馈时不能出现该键
     feedback: feedback === null ? undefined : feedback,
+    answer_source: message.answer_source,
+    correction_id: message.correction_id,
+    correction_version_id: message.correction_version_id,
+    correction_match_type: message.correction_match_type,
+    correction_match_score: message.correction_match_score,
     parent_message_id: message.parent_message_id,
     retry_of_message_id: message.retry_of_message_id,
     created_at: message.created_at,

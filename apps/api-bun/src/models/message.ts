@@ -4,6 +4,9 @@ import type { Citation, CitationAnchor } from './citation.ts';
 import type { FeedbackResponse } from './feedback.ts';
 import type { Confidence, MessageRole, MessageStatus, NoAnswerReason } from './index.ts';
 
+export type AnswerSource = 'rag' | 'manual_correction';
+export type CorrectionMatchType = 'exact' | 'alias' | 'semantic';
+
 export interface ConversationMessage {
   id: string; conversation_id: string; tenant_id: string; user_id: string;
   role: MessageRole; content: string; status: MessageStatus;
@@ -12,6 +15,8 @@ export interface ConversationMessage {
   confidence: Confidence | null; no_answer_reason: NoAnswerReason | null;
   error_code: string | null; error_message: string | null;
   agent_mode: AgentMode | null; prompt_versions: PromptVersions | null;
+  answer_source: AnswerSource; correction_id: string | null; correction_version_id: string | null;
+  correction_match_type: CorrectionMatchType | null; correction_match_score: number | null;
   created_at: string; completed_at: string | null;
 }
 
@@ -36,6 +41,8 @@ export interface MessageResponse {
   prompt_versions: PromptVersions | null;
   citations: CitationResponse[]; reasoning_steps: ReactStepTrace[];
   feedback?: FeedbackResponse | null;
+  answer_source: AnswerSource; correction_id: string | null; correction_version_id: string | null;
+  correction_match_type: CorrectionMatchType | null; correction_match_score: number | null;
   parent_message_id: string | null; retry_of_message_id: string | null;
   created_at: string; completed_at: string | null;
 }

@@ -8,6 +8,7 @@ import { recordAuditEvent } from '../auth/audit.ts';
 import { requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
 import { newUuid } from '../infra/uuid.ts';
 import { toRfc3339 } from '../infra/time.ts';
+import { adminAnswerQualityRouter } from './admin_answer_quality.ts';
 import { adminInvitationsRouter } from './admin_invitations.ts';
 import { adminLogsRouter } from './admin_logs.ts';
 import { adminPermissionsRouter } from './admin_permissions.ts';
@@ -29,6 +30,7 @@ export function adminRouter(): Hono<AppEnv> {
   router.route('/', adminInvitationsRouter());
   router.route('/', adminPermissionsRouter());
   router.route('/', adminLogsRouter());
+  router.route('/', adminAnswerQualityRouter());
   return router;
 }
 

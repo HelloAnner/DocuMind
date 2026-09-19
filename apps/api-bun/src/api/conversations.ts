@@ -2,6 +2,9 @@
 import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { streamSSE } from 'hono/streaming';
+import {
+  deactivateFeedbackCaseItemByMessage, syncFeedbackQualityCase,
+} from '../answer_quality.ts';
 import { PiAgentKernel, buildPiStreamFn } from '../agent/pi/index.ts';
 import { requirePermission } from '../auth/permissions.ts';
 import { spawnTitleUpdate } from '../conversation_title.ts';
@@ -275,6 +278,11 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
     error_message: null,
     agent_mode: null,
     prompt_versions: null,
+    answer_source: 'rag',
+    correction_id: null,
+    correction_version_id: null,
+    correction_match_type: null,
+    correction_match_score: null,
     created_at: nowRfc3339(),
     completed_at: nowRfc3339(),
   };
@@ -408,6 +416,11 @@ function assistantPlaceholder(
     error_message: null,
     agent_mode: null,
     prompt_versions: null,
+    answer_source: 'rag',
+    correction_id: null,
+    correction_version_id: null,
+    correction_match_type: null,
+    correction_match_score: null,
     created_at: nowRfc3339(),
     completed_at: null,
   };
@@ -422,6 +435,16 @@ async function submitFeedbackHandler(c: Context<AppEnv>): Promise<Response> {
   if (request.rating !== 'up' && request.rating !== 'down') {
     throw AppError.badRequest('INVALID_REQUEST_BODY', 'rating 只能是 up 或 down');
   }
+  const feedbackReasons = [
+    'helpful', 'wrong_answer', 'missing_source', 'outdated', 'not_helpful', 'other',
+  ];
+  if (request.reason !== undefined && request.reason !== null
+    && !feedbackReasons.includes(request.reason)) {
+    throw AppError.badRequest('INVALID_REQUEST_BODY', '反馈原因无效');
+  }
+  if ((request.comment?.length ?? 0) > 4_000 || (request.correction?.length ?? 0) > 20_000) {
+    throw AppError.badRequest('INVALID_REQUEST_BODY', '反馈内容过长');
+  }
   await validateFeedbackTarget(
     state, actor.tenant_id, actor.user_id, conversationId, messageId);
   const feedback: Feedback = {
@@ -434,8 +457,11 @@ async function submitFeedbackHandler(c: Context<AppEnv>): Promise<Response> {
     correction: request.correction ?? null,
     created_at: nowRfc3339(),
     updated_at: nowRfc3339(),
+    cleared_at: null,
   };
   const saved = await state.repository.upsertFeedback(feedback);
+  await syncFeedbackQualityCase(
+    state.sql, state.repository, actor.tenant_id, conversationId, messageId, saved);
   const response: FeedbackResponse = feedbackToResponse(saved);
   return c.json(response);
 }
@@ -448,6 +474,7 @@ async function deleteFeedbackHandler(c: Context<AppEnv>): Promise<Response> {
   await validateFeedbackTarget(
     state, actor.tenant_id, actor.user_id, conversationId, messageId);
   await state.repository.deleteFeedback(messageId, actor.user_id);
+  await deactivateFeedbackCaseItemByMessage(state.sql, messageId, actor.user_id);
   const body: DeleteFeedbackResponse = { message_id: messageId };
   return c.json(body);
 }

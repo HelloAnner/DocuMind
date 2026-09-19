@@ -6,7 +6,7 @@ export type FeedbackReason =
 export interface Feedback {
   id: string; assistant_message_id: string; user_id: string; rating: Rating;
   reason: FeedbackReason | null; comment: string | null; correction: string | null;
-  created_at: string; updated_at: string;
+  created_at: string; updated_at: string; cleared_at: string | null;
 }
 export interface SubmitFeedbackRequest {
   rating: Rating; reason?: FeedbackReason | null; comment?: string | null; correction?: string | null;

@@ -123,7 +123,8 @@ function parsePromptVersionsOrNull(value: unknown): PromptVersions | null {
 const MESSAGE_COLUMNS = `id, conversation_id, tenant_id, user_id, role, content, status,
                     parent_message_id, retry_of_message_id, client_request_id,
                     confidence, no_answer_reason, error_code, error_message,
-                    agent_mode, prompt_versions, created_at, completed_at`;
+                    agent_mode, prompt_versions, answer_source, correction_id, correction_version_id,
+                    correction_match_type, correction_match_score, created_at, completed_at`;
 
 export function parseMessage(row: Row): ConversationMessage {
   const promptJson: unknown = lenientOrNull(row, 'prompt_versions');
@@ -159,6 +160,16 @@ export function parseMessage(row: Row): ConversationMessage {
     error_message: lenientOrNull<string>(row, 'error_message'),
     agent_mode: agentModeText !== null && isAgentMode(agentModeText) ? agentModeText : null,
     prompt_versions: parsePromptVersionsOrNull(promptJson),
+    answer_source: strOrNullCol(row, 'answer_source') === 'manual_correction'
+      ? 'manual_correction' : 'rag',
+    correction_id: lenientOrNull<string>(row, 'correction_id'),
+    correction_version_id: lenientOrNull<string>(row, 'correction_version_id'),
+    correction_match_type: (() => {
+      const matchType = lenientOrNull<string>(row, 'correction_match_type');
+      return matchType === 'exact' || matchType === 'alias' || matchType === 'semantic'
+        ? matchType : null;
+    })(),
+    correction_match_score: lenientOrNull<number>(row, 'correction_match_score'),
     created_at: dateCol(row, 'created_at'),
     completed_at: dateOrNullCol(row, 'completed_at'),
   };
@@ -267,14 +278,18 @@ export class SqlxConversationCore {
         id, conversation_id, tenant_id, user_id, role, content, status,
         parent_message_id, retry_of_message_id, client_request_id,
         confidence, no_answer_reason, error_code, error_message,
-        agent_mode, prompt_versions, created_at, completed_at
+        agent_mode, prompt_versions, answer_source, correction_id, correction_version_id,
+        correction_match_type, correction_match_score, created_at, completed_at
       ) VALUES (${message.id}, ${message.conversation_id}, ${message.tenant_id}, ${message.user_id},
         ${message.role}, ${message.content}, ${message.status},
         ${message.parent_message_id}, ${message.retry_of_message_id}, ${message.client_request_id},
         ${message.confidence},
         ${message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason)},
         ${message.error_code}, ${message.error_message},
-        ${message.agent_mode}, ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb, ${message.created_at}, ${message.completed_at})
+        ${message.agent_mode}, ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb,
+        ${message.answer_source}, ${message.correction_id}, ${message.correction_version_id},
+        ${message.correction_match_type}, ${message.correction_match_score},
+        ${message.created_at}, ${message.completed_at})
     `;
   }
 
@@ -310,6 +325,10 @@ export class SqlxConversationCore {
           no_answer_reason = ${message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason)},
           error_code = ${message.error_code}, error_message = ${message.error_message},
           agent_mode = ${message.agent_mode}, prompt_versions = ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb,
+          answer_source = ${message.answer_source}, correction_id = ${message.correction_id},
+          correction_version_id = ${message.correction_version_id},
+          correction_match_type = ${message.correction_match_type},
+          correction_match_score = ${message.correction_match_score},
           created_at = ${message.created_at}, completed_at = ${message.completed_at}
       WHERE id = ${message.id} AND tenant_id = ${message.tenant_id}
     `;

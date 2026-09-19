@@ -41,7 +41,9 @@ const SHORT_OPTIONS: Record<string, string> = {
   V: "version",
 };
 
-const REPEATABLE_OPTIONS: Record<string, true> = { doc: true, kb: true, scope: true, tag: true };
+const REPEATABLE_OPTIONS: Record<string, true> = {
+  alias: true, doc: true, kb: true, scope: true, tag: true,
+};
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];

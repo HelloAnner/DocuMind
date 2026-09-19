@@ -9,7 +9,7 @@ import type { QueryTrace, RetrievalSource, RetrievalTrace } from '../models/trac
 import type { ConversationRepository } from './types.ts';
 import {
   SqlxConversationCore, type Row, type Sql,
-  dateCol, numCol, numListOrEmpty, strCol, strListOrEmpty, strOrNullCol,
+  dateCol, dateOrNullCol, numCol, numListOrEmpty, strCol, strListOrEmpty, strOrNullCol,
 } from './sqlx_core.ts';
 import { queryConversationFiles } from './conversation_files.ts';
 
@@ -47,6 +47,7 @@ function parseFeedback(row: Row): Feedback {
     correction: strOrNullCol(row, 'correction'),
     created_at: dateCol(row, 'created_at'),
     updated_at: dateCol(row, 'updated_at'),
+    cleared_at: dateOrNullCol(row, 'cleared_at'),
   };
 }
 
@@ -281,20 +282,21 @@ export class SqlxConversationRepository
     const rows = await this.pool`
       INSERT INTO conversation_feedback (
         id, assistant_message_id, user_id, rating, reason, comment, correction,
-        created_at, updated_at
+        created_at, updated_at, cleared_at
       ) VALUES (${feedback.id}, ${feedback.assistant_message_id}, ${feedback.user_id},
         ${feedback.rating}, ${feedback.reason}, ${feedback.comment}, ${feedback.correction},
-        ${feedback.created_at}, ${feedback.updated_at})
+        ${feedback.created_at}, ${feedback.updated_at}, NULL)
       ON CONFLICT (assistant_message_id, user_id)
       DO UPDATE SET
         rating = EXCLUDED.rating,
         reason = EXCLUDED.reason,
         comment = EXCLUDED.comment,
         correction = EXCLUDED.correction,
-        updated_at = EXCLUDED.updated_at
+        updated_at = EXCLUDED.updated_at,
+        cleared_at = NULL
       RETURNING
         id, assistant_message_id, user_id, rating, reason, comment, correction,
-        created_at, updated_at
+        created_at, updated_at, cleared_at
     `;
     const row = rows[0];
     if (row === undefined) throw new Error('upsert feedback returned no row');
@@ -305,10 +307,11 @@ export class SqlxConversationRepository
     const rows = await this.pool`
       SELECT
         id, assistant_message_id, user_id, rating, reason, comment, correction,
-        created_at, updated_at
+        created_at, updated_at, cleared_at
       FROM conversation_feedback
       WHERE assistant_message_id = ${assistantMessageId}
         AND user_id = ${userId}
+        AND cleared_at IS NULL
     `;
     const row = rows[0];
     if (row === undefined) return null;
@@ -317,9 +320,11 @@ export class SqlxConversationRepository
 
   async deleteFeedback(assistantMessageId: string, userId: string): Promise<boolean> {
     const result = await this.pool`
-      DELETE FROM conversation_feedback
+      UPDATE conversation_feedback
+      SET cleared_at = NOW(), updated_at = NOW()
       WHERE assistant_message_id = ${assistantMessageId}
         AND user_id = ${userId}
+        AND cleared_at IS NULL
     `;
     return result.count > 0;
   }

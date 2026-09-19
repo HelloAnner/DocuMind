@@ -28,6 +28,8 @@ function makeMessage(
     parent_message_id: null, retry_of_message_id: null, client_request_id: null,
     confidence: null, no_answer_reason: null, error_code: null, error_message: null,
     agent_mode: null, prompt_versions: null,
+    answer_source: 'rag', correction_id: null, correction_version_id: null,
+    correction_match_type: null, correction_match_score: null,
     created_at: nowRfc3339(), completed_at: nowRfc3339(),
     ...overrides,
   };
@@ -92,14 +94,14 @@ describe('InMemoryConversationRepository', () => {
     await repo.upsertFeedback({
       id: originalId, assistant_message_id: messageId, user_id: userId,
       rating: 'up', reason: null, comment: null, correction: null,
-      created_at: createdAt, updated_at: createdAt,
+      created_at: createdAt, updated_at: createdAt, cleared_at: null,
     });
 
     const updatedAt = nowRfc3339();
     const updated = await repo.upsertFeedback({
       id: newUuid(), assistant_message_id: messageId, user_id: userId,
       rating: 'down', reason: null, comment: '答案不够准确', correction: null,
-      created_at: updatedAt, updated_at: updatedAt,
+      created_at: updatedAt, updated_at: updatedAt, cleared_at: null,
     });
 
     expect(updated.id).toBe(originalId);

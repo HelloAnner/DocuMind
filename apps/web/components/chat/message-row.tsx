@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  BadgeCheck,
   Check,
   Copy,
   RefreshCw,
@@ -22,6 +23,13 @@ import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
 import { SkillCard } from "./skill-card";
+const DOWN_REASON_OPTIONS: Array<{ value: FeedbackReason; label: string }> = [
+  { value: "wrong_answer", label: "内容不正确" },
+  { value: "not_helpful", label: "没有回答问题" },
+  { value: "missing_source", label: "缺少依据" },
+  { value: "outdated", label: "内容已过期" },
+  { value: "other", label: "其他" },
+];
 
 function CitationChip({
   citation,
@@ -125,6 +133,7 @@ function AgentMeta({
   deletedAll: boolean;
 }) {
   const meta = [
+    message.answer_source === "manual_correction" ? "租户标准答案" : "",
     hasCitations ? `基于 ${message.citations.length} 个来源` : "",
     deletedAll ? "来源已删除" : "",
   ].filter(Boolean);
@@ -139,6 +148,12 @@ function AgentMeta({
       <div className="dm-answer-head-copy">
         <div className="dm-message-identity">
           <strong>DocuMind</strong>
+          {message.answer_source === "manual_correction" ? (
+            <span className="dm-standard-answer-badge">
+              <BadgeCheck size={13} aria-hidden="true" />
+              管理员已校正
+            </span>
+          ) : null}
           {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
         </div>
         {meta.length > 0 ? <p>{meta.join(" · ")}</p> : null}
@@ -190,7 +205,13 @@ export function MessageRow({
   const [feedbackSaving, setFeedbackSaving] = useState(false);
   const [feedbackError, setFeedbackError] = useState("");
   const [downPanelOpen, setDownPanelOpen] = useState(false);
-  const [downReason, setDownReason] = useState(message.feedback?.comment ?? "");
+  const [downReason, setDownReason] = useState<FeedbackReason>(
+    message.feedback?.reason ?? "wrong_answer"
+  );
+  const [downComment, setDownComment] = useState(message.feedback?.comment ?? "");
+  const [suggestedCorrection, setSuggestedCorrection] = useState(
+    message.feedback?.correction ?? ""
+  );
 
   const handleCopy = async () => {
     if (await copyToClipboard(message.content)) {
@@ -201,17 +222,25 @@ export function MessageRow({
 
   useEffect(() => {
     setFeedbackRating(message.feedback?.rating ?? null);
-    setDownReason(message.feedback?.comment ?? "");
+    setDownReason(message.feedback?.reason ?? "wrong_answer");
+    setDownComment(message.feedback?.comment ?? "");
+    setSuggestedCorrection(message.feedback?.correction ?? "");
     setDownPanelOpen(false);
     setFeedbackError("");
-  }, [message.feedback?.comment, message.feedback?.rating, message.message_id]);
+  }, [
+    message.feedback?.comment,
+    message.feedback?.correction,
+    message.feedback?.rating,
+    message.feedback?.reason,
+    message.message_id,
+  ]);
 
   useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
-
   const saveFeedback = async (
     rating: Rating,
     reason?: FeedbackReason,
-    comment?: string
+    comment?: string,
+    correction?: string
   ) => {
     if (feedbackSaving) return;
     const previous = feedbackRating;
@@ -222,7 +251,8 @@ export function MessageRow({
       message.message_id,
       rating,
       reason,
-      comment
+      comment,
+      correction
     );
     if (saved) {
       setDownPanelOpen(false);
@@ -242,7 +272,9 @@ export function MessageRow({
     const cleared = await onClearFeedback(message.message_id);
     if (cleared) {
       setDownPanelOpen(false);
-      setDownReason("");
+      setDownReason("wrong_answer");
+      setDownComment("");
+      setSuggestedCorrection("");
     } else {
       setFeedbackRating(previous);
       setFeedbackError("取消反馈失败，请重试");
@@ -399,20 +431,56 @@ export function MessageRow({
             id={`feedback-panel-${message.message_id}`}
             onSubmit={(event) => {
               event.preventDefault();
-              const comment = downReason.trim() || undefined;
-              void saveFeedback("down", "not_helpful", comment);
+              void saveFeedback(
+                "down",
+                downReason,
+                downComment.trim() || undefined,
+                suggestedCorrection.trim() || undefined
+              );
             }}
           >
-            <label htmlFor={`feedback-reason-${message.message_id}`}>
-              这条回复哪里不对？
+            <fieldset className="dm-feedback-reasons">
+              <legend>这条回复哪里不对？</legend>
+              <div className="dm-feedback-reason-grid">
+                {DOWN_REASON_OPTIONS.map((option) => (
+                  <label
+                    className={downReason === option.value ? "is-selected" : ""}
+                    key={option.value}
+                  >
+                    <input
+                      checked={downReason === option.value}
+                      name={`feedback-reason-${message.message_id}`}
+                      onChange={() => setDownReason(option.value)}
+                      type="radio"
+                      value={option.value}
+                    />
+                    <span>{option.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <label htmlFor={`feedback-comment-${message.message_id}`}>
+              具体说明 <small>可选</small>
             </label>
             <textarea
               autoFocus
-              id={`feedback-reason-${message.message_id}`}
-              onChange={(event) => setDownReason(event.target.value)}
-              placeholder="可以简单说下原因"
+              id={`feedback-comment-${message.message_id}`}
+              maxLength={4000}
+              onChange={(event) => setDownComment(event.target.value)}
+              placeholder="例如：审批人不是财务负责人"
+              rows={2}
+              value={downComment}
+            />
+            <label htmlFor={`feedback-correction-${message.message_id}`}>
+              我认为正确答案是 <small>可选，提交后由管理员审核</small>
+            </label>
+            <textarea
+              id={`feedback-correction-${message.message_id}`}
+              maxLength={20000}
+              onChange={(event) => setSuggestedCorrection(event.target.value)}
+              placeholder="如果你知道正确答案，可以填写在这里"
               rows={3}
-              value={downReason}
+              value={suggestedCorrection}
             />
             {feedbackError ? (
               <p className="dm-feedback-error" role="alert">

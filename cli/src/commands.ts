@@ -71,6 +71,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "chat": return chatCommand(args, api, json);
     case "run": return runCommand(args, api, json);
     case "conversations": return conversationCommand(args, api, json);
+    case "feedback": return feedbackCommand(args, api, json);
     case "traces": return traceCommand(args, api, json);
     case "documents": return documentCommand(args, api, json);
     case "vector": return vectorCommand(args, api, json);
@@ -78,6 +79,39 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
       throw new CliError(`未知命令: ${command}。运行 documind help 查看帮助`, 2);
   }
 }
+async function feedbackCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "set";
+  const conversationId = args.positionals[2];
+  const messageId = args.positionals[3];
+  if (!conversationId || !messageId) {
+    throw new CliError(`feedback ${subcommand} 需要会话 ID 和回答消息 ID`, 2);
+  }
+  const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/feedback`;
+  if (subcommand === "clear") {
+    const result = await api.requestJson(path, { method: "DELETE" });
+    if (json) printJson(result);
+    else process.stdout.write(`已清除回答 ${messageId} 的反馈\n`);
+    return 0;
+  }
+  if (subcommand !== "set") throw new CliError(`未知 feedback 子命令: ${subcommand}`, 2);
+  const rating = stringOption(args, "rating");
+  if (rating !== "up" && rating !== "down") {
+    throw new CliError("feedback set 需要 --rating up|down", 2);
+  }
+  const result = await api.requestJson(path, {
+    method: "POST",
+    body: JSON.stringify({
+      rating,
+      ...(stringOption(args, "reason") ? { reason: stringOption(args, "reason") } : {}),
+      ...(stringOption(args, "comment") ? { comment: stringOption(args, "comment") } : {}),
+      ...(stringOption(args, "correction") ? { correction: stringOption(args, "correction") } : {}),
+    }),
+  });
+  if (json) printJson(result);
+  else process.stdout.write(`已提交 ${rating === "up" ? "点赞" : "点踩"}反馈 · message=${messageId}\n`);
+  return 0;
+}
+
 
 async function skillCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "list";

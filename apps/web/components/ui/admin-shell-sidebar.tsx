@@ -3,6 +3,7 @@
 import { usePathname } from "next/navigation";
 import {
   BrainCircuit,
+  BadgeCheck,
   Building2,
   ClipboardList,
   Cpu,
@@ -75,6 +76,7 @@ const tenantSections: NavSection[] = [
       { label: "知识库", href: "/admin/knowledge", icon: FolderOpen },
       { label: "文档处理", href: "/admin/document-jobs", icon: FileClock },
       { label: "问答日志", href: "/admin/logs", icon: MessageSquare },
+      { label: "答案治理", href: "/admin/answer-quality", icon: BadgeCheck },
     ],
   },
   {

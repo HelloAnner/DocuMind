@@ -2,6 +2,7 @@
 import type { SSEStreamingApi } from 'hono/streaming';
 import type { AgentProgress } from '../agent/events.ts';
 import type { CitationOutput } from '../models/agent.ts';
+import type { AnswerSource, CorrectionMatchType } from '../models/message.ts';
 import type { Confidence, Usage } from '../models/index.ts';
 import type { RuntimeEventFactory, RuntimeStep, SseEvent, SseProtocol } from './runtime_events.ts';
 import { toolStep } from './runtime_events.ts';
@@ -45,6 +46,13 @@ export interface PipelineContext {
   abandoned: boolean;
 }
 
+export interface AnswerCompletionMetadata {
+  answer_source: AnswerSource;
+  correction_id: string | null;
+  correction_version_id: string | null;
+  correction_match_type: CorrectionMatchType | null;
+  correction_match_score: number | null;
+}
 export type LegacyEvent =
   | { kind: 'message_created'; user_message_id: string; assistant_message_id: string }
   | { kind: 'status_updated'; message_id: string; status: string }
@@ -53,7 +61,10 @@ export type LegacyEvent =
   | { kind: 'rerank_completed'; message_id: string; top_chunk_ids: string[] }
   | { kind: 'answer_delta'; message_id: string; text: string }
   | { kind: 'citation_delta'; message_id: string; citation: CitationOutput }
-  | { kind: 'answer_completed'; message_id: string; confidence: Confidence; usage: Usage | null }
+  | {
+      kind: 'answer_completed'; message_id: string; confidence: Confidence; usage: Usage | null;
+      metadata: AnswerCompletionMetadata | null;
+    }
   | { kind: 'answer_failed'; message_id: string; code: string; message: string }
   | { kind: 'conversation_title_updated'; conversation_id: string; title: string };
 
@@ -100,7 +111,10 @@ function legacyEventData(event: LegacyEvent): unknown {
     case 'citation_delta':
       return { message_id: event.message_id, citation: event.citation };
     case 'answer_completed':
-      return { message_id: event.message_id, confidence: event.confidence, usage: event.usage };
+      return {
+        message_id: event.message_id, confidence: event.confidence, usage: event.usage,
+        ...(event.metadata ?? {}),
+      };
     case 'answer_failed':
       return { message_id: event.message_id, code: event.code, message: event.message };
     case 'conversation_title_updated':
@@ -301,6 +315,7 @@ export function sendCitationDelta(
 
 export function sendAnswerCompleted(
   ctx: PipelineContext, messageId: string, confidence: Confidence, usage: Usage | null,
+  metadata: AnswerCompletionMetadata | null = null,
 ): void {
   if (ctx.protocol === 'legacy') {
     sendLegacyEvent(ctx, {
@@ -308,10 +323,13 @@ export function sendAnswerCompleted(
       message_id: messageId,
       confidence: confidence,
       usage: usage,
+      metadata,
     });
     return;
   }
-  sendRuntimeEvent(ctx, 'response.completed', { finish_reason: 'stop', confidence: confidence });
+  sendRuntimeEvent(ctx, 'response.completed', {
+    finish_reason: 'stop', confidence: confidence, ...(metadata ?? {}),
+  });
   if (usage !== null) {
     sendRuntimeEvent(ctx, 'usage.reported', {
       prompt_tokens: usage.input_tokens,

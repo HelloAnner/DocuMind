@@ -1532,6 +1532,24 @@ select:focus-visible {
   font-size: 12px;
 }
 
+.dm-standard-answer-badge {
+  align-items: center;
+  background: color-mix(in srgb, #0f766e 10%, var(--bg-secondary));
+  border: 1px solid color-mix(in srgb, #0f766e 24%, var(--border-subtle));
+  border-radius: 999px;
+  color: #0f766e;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 650;
+  gap: 4px;
+  line-height: 20px;
+  padding: 0 8px;
+}
+
+[data-theme="dark"] .dm-standard-answer-badge {
+  color: #5eead4;
+}
+
 .dm-user-bubble {
   background: var(--bubble-user);
   border: 0;
@@ -4357,7 +4375,7 @@ body > .hiddenCanvasElement {
   flex-direction: column;
   gap: 7px;
   margin-top: 6px;
-  max-width: min(360px, 100%);
+  max-width: min(480px, 100%);
   padding: 10px;
 }
 
@@ -4366,6 +4384,64 @@ body > .hiddenCanvasElement {
   font-size: 12px;
   font-weight: 600;
   line-height: 18px;
+}
+
+.dm-feedback-panel label small {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  margin-left: 4px;
+}
+
+.dm-feedback-reasons {
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+
+.dm-feedback-reasons legend {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 18px;
+  margin-bottom: 7px;
+}
+
+.dm-feedback-reason-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dm-feedback-reason-grid label {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 999px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 26px;
+  padding: 0 10px;
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.dm-feedback-reason-grid label:hover,
+.dm-feedback-reason-grid label.is-selected {
+  background: var(--feedback-negative-bg);
+  border-color: color-mix(in srgb, var(--feedback-negative) 35%, var(--border-subtle));
+  color: var(--feedback-negative);
+}
+
+.dm-feedback-reason-grid input {
+  height: 1px;
+  opacity: 0;
+  position: absolute;
+  width: 1px;
+}
+
+.dm-feedback-reason-grid label:has(input:focus-visible) {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--feedback-negative) 18%, transparent);
 }
 
 .dm-feedback-panel textarea {

@@ -18,6 +18,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(CONVERSATIONS_HELP);
     return;
   }
+  if (topic === "feedback") {
+    process.stdout.write(FEEDBACK_HELP);
+    return;
+  }
   if (topic === "chat") {
     process.stdout.write(CHAT_HELP);
     return;
@@ -69,6 +73,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  chat --interactive           多轮交互 REPL\n` +
   `  run <scenario.json>          运行 JSON 多轮评测场景\n` +
   `  conversations list|create|show|messages|update|delete\n` +
+  `  feedback set|clear <会话ID> <回答消息ID>  提交或清除真实用户反馈\n` +
   `  traces show <会话ID> <消息ID>\n\n` +
   `知识与向量\n` +
   `  kb list|show|create|update|delete\n` +
@@ -98,6 +103,15 @@ const ADMIN_HELP = `用法: documind admin <subcommand> [options]\n\n` +
   `权限: permission-grant --kb ID --subject-type role|user --subject ID --permission read|write|manage\n` +
   `      permission-revoke <id> --force\n` +
   `日志: logs [--range today|week|month|all --q TEXT --limit N]\n` +
+  `质量: quality-summary | quality-cases [--status S --root-cause C --kb ID --q TEXT]\n` +
+  `      quality-case <id> | quality-diagnose <id>\n` +
+  `      quality-update <id> [--status S --root-cause C --resolution-note TEXT]\n` +
+  `答案: corrections [--status S --q TEXT] | correction <id>\n` +
+  `      correction-create --question Q --answer A [--alias Q --kb ID --case ID]\n` +
+  `      correction-update <id> [--question Q --answer A --alias Q --valid-until DATE]\n` +
+  `      correction-publish|correction-archive <id>\n` +
+  `      correction-match --question Q [--kb ID]\n` +
+  `      写入命令可用 --change-note TEXT 与 --source-json '[{...}]'\n` +
   `知识库、文档、文档任务和 API 接入分别使用 kb、documents、api-clients 命令。\n`;
 
 const INVITATION_HELP = `用法: documind invitation <subcommand> [options]\n\n` +
@@ -132,6 +146,11 @@ const CONVERSATIONS_HELP = `用法: documind conversations <subcommand> [options
   `  update <id> --kb ID[,ID]     保存该会话使用的知识库组合\n` +
   `  update <id> --all            恢复为全部可访问知识库\n` +
   `  delete <id>                  删除会话\n`;
+
+const FEEDBACK_HELP = `用法: documind feedback <subcommand> <会话ID> <回答消息ID> [options]\n\n` +
+  `  set --rating up|down [--reason REASON --comment TEXT --correction TEXT]\n` +
+  `  clear                        撤回当前用户对该回答的反馈\n` +
+  `点踩原因: wrong_answer | missing_source | outdated | not_helpful | other\n`;
 
 const VECTOR_HELP = `用法: documind vector <subcommand> [options]\n\n` +
   `  indexes                      API 返回的租户向量索引健康统计\n` +

@@ -191,20 +191,26 @@ export class InMemoryConversationRepository implements ConversationRepository {
       feedback.id = existing.id;
       feedback.created_at = existing.created_at;
     }
+    feedback.cleared_at = null;
     this.feedback.set(key, { ...feedback });
     return feedback;
   }
 
   async getFeedback(assistantMessageId: string, userId: string): Promise<Feedback | null> {
-    return this.feedback.get(
+    const feedback = this.feedback.get(
       InMemoryConversationRepository.feedbackKey(assistantMessageId, userId),
-    ) ?? null;
+    );
+    return feedback === undefined || feedback.cleared_at !== null ? null : feedback;
   }
 
   async deleteFeedback(assistantMessageId: string, userId: string): Promise<boolean> {
-    return this.feedback.delete(
+    const feedback = this.feedback.get(
       InMemoryConversationRepository.feedbackKey(assistantMessageId, userId),
     );
+    if (feedback === undefined || feedback.cleared_at !== null) return false;
+    feedback.cleared_at = nowRfc3339();
+    feedback.updated_at = feedback.cleared_at;
+    return true;
   }
 
   async listConversationFiles(
