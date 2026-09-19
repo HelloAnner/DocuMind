@@ -8,6 +8,7 @@ interface ReasoningTraceProps {
   steps?: RuntimeReasoningStep[];
   toolCalls?: RuntimeToolCall[];
   answerContent: string;
+  thinking?: string;
   isStreaming: boolean;
   durationMs?: number;
   status: MessageStatus;
@@ -23,6 +24,7 @@ export function ReasoningTrace({
   steps,
   toolCalls,
   isStreaming,
+  thinking,
   durationMs,
   status,
 }: ReasoningTraceProps) {
@@ -36,6 +38,7 @@ export function ReasoningTrace({
   const autoScrollRef = useRef(true);
   const rounds = useMemo(() => buildReasoningRounds(steps ?? [], toolCalls ?? []), [steps, toolCalls]);
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
+  const hasThinking = Boolean(thinking?.trim());
 
   useEffect(() => {
     if (isStreaming) {
@@ -62,9 +65,9 @@ export function ReasoningTrace({
   useEffect(() => {
     const feed = feedRef.current;
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
-  }, [expanded, rounds]);
+  }, [expanded, rounds, thinking]);
 
-  if (toolCount === 0 && !isStreaming) return null;
+  if (toolCount === 0 && !hasThinking && !isStreaming) return null;
 
   function toggle() {
     if (isStreaming) return;
@@ -88,7 +91,7 @@ export function ReasoningTrace({
     >
       {isStreaming ? (
         <div className="dm-reasoning-running">
-          {toolCount === 0 ? "正在思考..." : "正在处理中..."}
+          {toolCount === 0 ? "正在深度思考..." : "正在处理中..."}
         </div>
       ) : (
         <button
@@ -112,6 +115,9 @@ export function ReasoningTrace({
           }}
           ref={feedRef}
         >
+          {hasThinking ? (
+            <div className="dm-reasoning-thought">{thinking}</div>
+          ) : null}
           {rounds.map((round, index) => (
             <ProcessGroup
               hasFollowing={index < rounds.length - 1}

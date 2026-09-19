@@ -11,8 +11,7 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import { Streamdown } from "streamdown";
 import { copyToClipboard } from "@/lib/clipboard";
 
 interface AnswerContentProps {
@@ -33,7 +32,6 @@ interface MarkdownContentProps {
   displayCitationIndex?: (index: number) => number;
 }
 
-const remarkPlugins = [remarkGfm];
 
 function CitationBadge({ index, onClick }: { index: number; onClick?: () => void }) {
   return (
@@ -122,8 +120,10 @@ export const MarkdownContent = memo(function MarkdownContent({
 
   return (
     <div className={`${className} ${isStreaming ? "is-streaming" : ""}`}>
-      <ReactMarkdown
-        remarkPlugins={remarkPlugins}
+      <Streamdown
+        isAnimating={isStreaming}
+        mode={isStreaming ? "streaming" : "static"}
+        parseIncompleteMarkdown={isStreaming}
         components={{
           h1: ({ children }) => <h1>{renderCitations(children, onCitationClick, displayCitationIndex)}</h1>,
           h2: ({ children }) => <h2>{renderCitations(children, onCitationClick, displayCitationIndex)}</h2>,
@@ -156,7 +156,7 @@ export const MarkdownContent = memo(function MarkdownContent({
         }}
       >
         {renderContent}
-      </ReactMarkdown>
+      </Streamdown>
       {isStreaming ? (
         <div className="dm-answer-streaming-status" aria-live="polite">
           <span className="dm-streaming-pulse-dot" aria-hidden="true" />

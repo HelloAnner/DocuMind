@@ -14,8 +14,7 @@
     "pdfjs-dist": "^4.10.38",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
-    "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "streamdown": "^2.6.0"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

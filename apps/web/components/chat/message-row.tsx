@@ -296,16 +296,12 @@ export function MessageRow({
         deletedAll={deletedAll}
       />
 
-      {message.thinking ? (
-        <div className="dm-live-thinking" aria-live="polite">
-          {message.thinking}
-        </div>
-      ) : null}
 
       <ReasoningTrace
         steps={message.reasoning_steps}
         toolCalls={message.tool_calls}
         answerContent={message.content}
+        thinking={message.thinking}
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
         status={message.status}
