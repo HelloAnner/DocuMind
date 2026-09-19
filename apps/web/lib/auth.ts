@@ -216,7 +216,7 @@ async function authenticate(path: string, body: Record<string, string>): Promise
 export async function createTenant(name: string): Promise<LoginResponse> {
   const data = await authJson<LoginResponse>("/api/v1/tenants", {
     method: "POST",
-    headers: { "Idempotency-Key": crypto.randomUUID() },
+    headers: { "Idempotency-Key": globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}` },
     body: JSON.stringify({ name }),
   });
   storeLoginResponse(data);

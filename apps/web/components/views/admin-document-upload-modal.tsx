@@ -26,7 +26,7 @@ export function AdminDocumentUploadModal({ kbId, kbName, onClose, onUploaded }: 
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
-  const batchIdRef = useRef(crypto.randomUUID());
+  const batchIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
 
   function addFiles(files: FileList | File[]) {
     const selected = Array.from(files);
@@ -35,7 +35,13 @@ export function AdminDocumentUploadModal({ kbId, kbName, onClose, onUploaded }: 
       const existing = new Set(current.map((item) => `${item.file.name}:${item.file.size}:${item.file.lastModified}`));
       return [...current, ...selected.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`)).slice(0, available).map((file) => {
         const error = validation(file);
-        return { id: crypto.randomUUID(), file, status: error ? "failed" as const : "ready" as const, percent: 0, error };
+        return {
+          id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+          file,
+          status: error ? "failed" as const : "ready" as const,
+          percent: 0,
+          error,
+        };
       })];
     });
   }
