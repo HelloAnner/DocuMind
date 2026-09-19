@@ -60,7 +60,7 @@ export function buildDocumindMcpServer(state: AppState, actor: CurrentActor): Mc
         inputSchema: z.object({
           message: z.string().trim().min(1),
           conversation_id: z.string().uuid().optional(),
-          kb_ids: z.array(z.string().uuid()).optional(),
+          kb_ids: z.array(z.string().min(1)).optional(),
           model_id: z.string().optional(),
           thinking_enabled: z.boolean().optional(),
         }),
