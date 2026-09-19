@@ -175,7 +175,13 @@ export class ApiClient {
       saved_at: new Date().toISOString(),
     };
     await writeSession(this.configPath, this.session);
-    return response;
+    return {
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+    };
   }
 
   async logout(): Promise<void> {
