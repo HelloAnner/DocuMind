@@ -111,7 +111,7 @@ function ModelPicker({
                 placeholder="搜索模型"
               />
             </label>
-            <div className="chat-model-section-label">可用模型</div>
+            <div className="chat-model-section-label">官方推荐</div>
             <div className="chat-model-options" role="listbox">
               {filtered.map((model) => (
                 <button
@@ -127,11 +127,11 @@ function ModelPicker({
                     setOpen(false);
                   }}
                 >
-                  <span>
-                    <strong>{model.name}</strong>
-                    <small>{thinkingLabel(model.thinking_mode)}</small>
+                  <strong>{model.name}</strong>
+                  <span className="chat-model-option-tail">
+                    <small>{model.thinking_mode === "always_on" ? "深度" : model.thinking_mode === "switchable" ? "灵活" : "快速"}</small>
+                    {model.id === value ? <Check size={14} aria-hidden="true" /> : null}
                   </span>
-                  {model.id === value ? <Check size={17} aria-hidden="true" /> : null}
                 </button>
               ))}
               {filtered.length === 0 ? <p className="chat-model-empty">没有匹配的模型</p> : null}
