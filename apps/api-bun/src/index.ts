@@ -10,6 +10,7 @@ async function main(): Promise<void> {
   const host = config.serverHost;
   const server = Bun.serve({
     port, hostname: host,
+    idleTimeout: 255,
     fetch: app.fetch,
   });
   console.log(`[documind] runtime listening on http://${host}:${port} (bun ${Bun.version})`);
