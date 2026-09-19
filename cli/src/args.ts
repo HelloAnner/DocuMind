@@ -40,7 +40,7 @@ const SHORT_OPTIONS: Record<string, string> = {
   V: "version",
 };
 
-const REPEATABLE_OPTIONS = new Set(["doc", "kb", "tag"]);
+const REPEATABLE_OPTIONS: Record<string, true> = { doc: true, kb: true, scope: true, tag: true };
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const positionals: string[] = [];
@@ -111,7 +111,7 @@ function assignOption(
   name: string,
   value: string,
 ): void {
-  if (!REPEATABLE_OPTIONS.has(name)) {
+  if (!REPEATABLE_OPTIONS[name]) {
     options[name] = value;
     return;
   }

@@ -25,6 +25,17 @@ describe("parseArgs", () => {
     expect(stringOption(args, "trace")).toBe("full");
   });
 
+  test("keeps every repeated API scope", () => {
+    const args = parseArgs([
+      "api-clients", "create",
+      "--scope", "chat:write",
+      "--scope", "conversations:read,conversations:write",
+    ]);
+    expect(listOption(args, "scope")).toEqual([
+      "chat:write", "conversations:read", "conversations:write",
+    ]);
+  });
+
   test("supports explicit negative boolean and bounded numbers", () => {
     const args = parseArgs(["vector", "list", "--no-stream", "--limit", "25"]);
     expect(booleanOption(args, "stream", true)).toBe(false);
