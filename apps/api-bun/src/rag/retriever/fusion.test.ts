@@ -38,6 +38,18 @@ describe('fuseRankedLists', () => {
     expect(Math.abs(fused[0]!.score - fused[1]!.score)).toBeLessThan(Number.EPSILON);
   });
 
+  test('keeps_the_best_result_from_each_query', () => {
+    const first = chunk('00000000-0000-0000-0000-000000000001', 'A', 'alpha');
+    const second = chunk('00000000-0000-0000-0000-000000000002', 'B', 'beta');
+    const shared = chunk('00000000-0000-0000-0000-000000000003', 'C', 'shared');
+    const fused = fuseRankedLists(
+      [[first, shared], [second, structuredClone(shared)]],
+      [],
+      2,
+    );
+    expect(fused.map((item) => item.chunk_id)).toEqual([first.chunk_id, second.chunk_id]);
+  });
+
   test('cross_channel_evidence_is_marked_as_rrf', () => {
     const shared = chunk('00000000-0000-0000-0000-000000000001', 'A', 'alpha');
     const other = chunk('00000000-0000-0000-0000-000000000002', 'B', 'beta');

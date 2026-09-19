@@ -196,7 +196,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     allowAnalystMode: envBool('AGENT_ALLOW_ANALYST_MODE', true),
     requireCitationForAnalysis: envBool('AGENT_REQUIRE_CITATION_FOR_ANALYSIS', true),
     clarificationStyle: envStr('AGENT_CLARIFICATION_STYLE') ?? 'short',
-    maxReactSteps: clamp(envNum(['AGENT_MAX_REACT_STEPS'], 4), 2, 8),
+    maxReactSteps: clamp(envNum(['AGENT_MAX_REACT_STEPS'], 6), 2, 8),
     maxQueriesPerStep: clamp(envNum(['AGENT_MAX_QUERIES_PER_STEP'], 4), 1, 8),
     maxHistoryTurns: clamp(envNum(['AGENT_MAX_HISTORY_TURNS'], 12), 1, 50),
     maxHistoryChars: clamp(envNum(['AGENT_MAX_HISTORY_CHARS'], 24_000), 2_000, 100_000),

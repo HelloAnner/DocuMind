@@ -63,7 +63,13 @@ export function fuseRankedLists(
     fused.push(chunk);
   }
   fused.sort((left, right) => compareDesc(left.score, right.score));
-  return dedupeRetrievedChunks(fused, Math.max(1, topK));
+  const byId = new Map(fused.map((chunk) => [chunk.chunk_id, chunk]));
+  const representatives = [...denseLists, ...bm25Lists]
+    .map((list) => list[0])
+    .filter((chunk): chunk is RetrievedChunk => chunk !== undefined)
+    .map((chunk) => byId.get(chunk.chunk_id))
+    .filter((chunk): chunk is RetrievedChunk => chunk !== undefined);
+  return dedupeRetrievedChunks([...representatives, ...fused], Math.max(1, topK));
 }
 
 export function reciprocalRank(rank: number): number {
