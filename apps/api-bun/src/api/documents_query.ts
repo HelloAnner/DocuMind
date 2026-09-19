@@ -117,3 +117,70 @@ export async function getDocument(c: Context<AppEnv>): Promise<Response> {
   };
   return c.json(body);
 }
+
+export async function getDocumentDiagnostics(c: Context<AppEnv>): Promise<Response> {
+  const state = c.get('appState');
+  const actor = c.get('actor');
+  requirePermission(actor, 'document.upload');
+  const sql = requiredSql(state, '文档诊断需要启用 PostgreSQL 数据库连接');
+  const document = await fetchDocumentSummary(sql, actor.tenant_id, pathParam(c, 'doc_id'));
+  const parseJobId = document.latest_parse_job_id;
+  if (parseJobId === null) {
+    return c.json({
+      document_id: document.doc_id, parse_status: document.parse_status,
+      quality_score: null, pages: document.page_count ?? 0, covered_pages: 0,
+      page_coverage: 0, blocks: 0, block_types: {}, bbox_blocks: 0,
+      bbox_coverage: 0, text_layer_blocks: 0, ocr_blocks: 0, tables: 0, warnings: [],
+    });
+  }
+  const [counts, types, tables, latestJob] = await Promise.all([
+    sql.unsafe(
+      `SELECT COUNT(*)::int AS blocks,
+              COUNT(*) FILTER (WHERE metadata->'bbox' IS NOT NULL
+                                AND metadata->'bbox' <> 'null'::jsonb)::int AS bbox_blocks,
+              COUNT(*) FILTER (WHERE metadata->'metadata'->>'extraction_method' = 'text_layer')::int AS text_layer_blocks,
+              COUNT(*) FILTER (WHERE metadata->'metadata'->>'extraction_method' = 'ocr')::int AS ocr_blocks,
+              COUNT(DISTINCT page)::int AS covered_pages
+       FROM document_blocks b
+       LEFT JOIN LATERAL generate_series(
+         b.page_range[1], b.page_range[array_length(b.page_range, 1)]
+       ) AS page ON TRUE
+       WHERE b.tenant_id = \$1 AND b.doc_id = \$2 AND b.parse_job_id = \$3`,
+      [actor.tenant_id, document.doc_id, parseJobId],
+    ),
+    sql.unsafe(
+      `SELECT block_type, COUNT(*)::int AS count
+       FROM document_blocks
+       WHERE tenant_id = \$1 AND doc_id = \$2 AND parse_job_id = \$3
+       GROUP BY block_type`,
+      [actor.tenant_id, document.doc_id, parseJobId],
+    ),
+    sql.unsafe(
+      `SELECT COUNT(*)::int AS count FROM document_tables
+       WHERE tenant_id = \$1 AND doc_id = \$2 AND parse_job_id = \$3`,
+      [actor.tenant_id, document.doc_id, parseJobId],
+    ),
+    fetchParseJob(sql, parseJobId),
+  ]);
+  const count = (counts[0] ?? {}) as Record<string, unknown>;
+  const blocks = Number(count.blocks ?? 0);
+  const bboxBlocks = Number(count.bbox_blocks ?? 0);
+  const pages = document.page_count ?? 0;
+  const coveredPages = Number(count.covered_pages ?? 0);
+  return c.json({
+    document_id: document.doc_id,
+    parse_status: document.parse_status,
+    quality_score: document.quality_score ?? null,
+    pages,
+    covered_pages: coveredPages,
+    page_coverage: pages > 0 ? coveredPages / pages : 0,
+    blocks,
+    block_types: Object.fromEntries(types.map((row) => [String(row.block_type), Number(row.count)])),
+    bbox_blocks: bboxBlocks,
+    bbox_coverage: blocks > 0 ? bboxBlocks / blocks : 0,
+    text_layer_blocks: Number(count.text_layer_blocks ?? 0),
+    ocr_blocks: Number(count.ocr_blocks ?? 0),
+    tables: Number(tables[0]?.count ?? 0),
+    warnings: latestJob?.warnings ?? [],
+  });
+}

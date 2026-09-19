@@ -3,7 +3,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../http/types.ts';
 import { uploadDocument, replaceDocumentFile } from './documents_upload.ts';
-import { listDocuments, getDocument } from './documents_query.ts';
+import { listDocuments, getDocument, getDocumentDiagnostics } from './documents_query.ts';
 import {
   deleteDocument, reprocessDocument, retryParse, forceIndexDocument, excludeFromSearch,
   retryDocuments,
@@ -23,6 +23,7 @@ export function documentsRouter(): Hono<AppEnv> {
   router.get('/api/admin/documents', listDocuments);
   // 静态段先注册，避免与 /api/admin/documents/:doc_id 的 POST 冲突
   router.post('/api/admin/documents/retry', retryDocuments);
+  router.get('/api/admin/documents/:doc_id/diagnostics', getDocumentDiagnostics);
   router.get('/api/admin/documents/:doc_id', getDocument);
   router.delete('/api/admin/documents/:doc_id', deleteDocument);
   router.post('/api/admin/documents/:doc_id', reprocessDocument);

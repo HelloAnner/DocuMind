@@ -40,7 +40,10 @@ async function runCommand(command: string[], notFound: (message: string) => AppE
 }
 
 /** Rust: build_ocr_bundle */
-export async function buildOcrBundle(task: ParseJobTask): Promise<ParsedBundle> {
+export async function buildOcrBundle(
+  task: ParseJobTask,
+  pageNumbers?: number[],
+): Promise<ParsedBundle> {
   const workDir = join(tmpdir(), `documind-ocr-${task.parse_job_id}`);
   await rm(workDir, { recursive: true, force: true });
   try {
@@ -49,7 +52,7 @@ export async function buildOcrBundle(task: ParseJobTask): Promise<ParsedBundle> 
     throw AppError.internal(`failed to create ocr work dir: ${(error as Error).message}`);
   }
   try {
-    return await buildOcrBundleInDir(task, workDir);
+    return await buildOcrBundleInDir(task, workDir, pageNumbers);
   } finally {
     try {
       await rm(workDir, { recursive: true, force: true });
@@ -59,7 +62,11 @@ export async function buildOcrBundle(task: ParseJobTask): Promise<ParsedBundle> 
   }
 }
 
-async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise<ParsedBundle> {
+async function buildOcrBundleInDir(
+  task: ParseJobTask,
+  workDir: string,
+  pageNumbers?: number[],
+): Promise<ParsedBundle> {
   const inputPdf = join(workDir, 'source.pdf');
   try {
     await writeFile(inputPdf, task.bytes);
@@ -67,13 +74,24 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     throw AppError.internal(`failed to write ocr source pdf: ${(error as Error).message}`);
   }
 
-  const prefix = join(workDir, 'page');
-  const render = await runCommand(
-    ['pdftoppm', '-r', String(OCR_RENDER_DPI), '-png', inputPdf, prefix],
-    (message) => AppError.badRequest('OCR_RENDER_UNAVAILABLE', `无法执行 pdftoppm，请检查 OCR 依赖: ${message}`),
-  );
-  if (!render.success) {
-    throw AppError.badRequest('OCR_RENDER_FAILED', `PDF 转图片失败: ${render.stderr}`);
+  const selectedPages = pageNumbers === undefined
+    ? null
+    : [...new Set(pageNumbers)].filter((page) => Number.isInteger(page) && page > 0).sort((a, b) => a - b);
+  const renderCommands = selectedPages === null
+    ? [['pdftoppm', '-r', String(OCR_RENDER_DPI), '-png', inputPdf, join(workDir, 'page')]]
+    : selectedPages.map((page) => [
+      'pdftoppm', '-f', String(page), '-l', String(page), '-singlefile',
+      '-r', String(OCR_RENDER_DPI), '-png', inputPdf,
+      join(workDir, `page-${String(page).padStart(4, '0')}`),
+    ]);
+  for (const command of renderCommands) {
+    const render = await runCommand(
+      command,
+      (message) => AppError.badRequest('OCR_RENDER_UNAVAILABLE', `无法执行 pdftoppm，请检查 OCR 依赖: ${message}`),
+    );
+    if (!render.success) {
+      throw AppError.badRequest('OCR_RENDER_FAILED', `PDF 转图片失败: ${render.stderr}`);
+    }
   }
 
   let entries: string[];
@@ -95,9 +113,9 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
   let emptyPages = 0;
   const pageConfidences: number[] = [];
 
-  for (let pageIdx = 0; pageIdx < pageImages.length; pageIdx += 1) {
-    const page = pageIdx + 1;
-    const imagePath = join(workDir, pageImages[pageIdx]!);
+  for (const image of pageImages) {
+    const page = Number(/\d+/u.exec(image)?.[0]);
+    const imagePath = join(workDir, image);
     const output = await runCommand(
       ['tesseract', imagePath, 'stdout', '-l', 'chi_sim+eng', '--psm', '3', 'tsv'],
       (message) => AppError.badRequest('OCR_ENGINE_UNAVAILABLE', `无法执行 tesseract，请检查 OCR 依赖: ${message}`),
@@ -169,7 +187,7 @@ async function buildOcrBundleInDir(task: ParseJobTask, workDir: string): Promise
     parse_job_id: task.parse_job_id,
     file_type: 'pdf',
     title: task.title,
-    pages: pageImages.length,
+    pages: selectedPages === null ? pageImages.length : Math.max(...selectedPages),
     blocks,
     tables: [],
     anchors,
@@ -186,8 +204,7 @@ export async function buildSelectiveOcrBundle(
 ): Promise<ParsedBundle> {
   const requestedPages = new Set(pageNumbers);
   if (requestedPages.size === 0) return base;
-  // ponytail: Tesseract still scans every page; switch to per-page rendering if profiling shows this dominates ingestion.
-  const ocr = await buildOcrBundle(task);
+  const ocr = await buildOcrBundle(task, pageNumbers);
   const replacementBlocks = ocr.parsed.blocks.filter(
     (block) => block.page_start !== null && requestedPages.has(block.page_start),
   );
