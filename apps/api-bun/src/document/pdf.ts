@@ -1,4 +1,5 @@
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { WorkerMessageHandler } from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
 
 import { newUuid } from '../infra/uuid.ts';
 import {
@@ -18,6 +19,11 @@ import {
   type ParsedTableCell,
 } from './types.ts';
 import { extractPdfPageLayout, type PdfLayoutBlock, type PdfPageLayout } from './pdf_layout.ts';
+
+const pdfjsGlobal = globalThis as typeof globalThis & {
+  pdfjsWorker?: { WorkerMessageHandler: typeof WorkerMessageHandler };
+};
+pdfjsGlobal.pdfjsWorker ??= { WorkerMessageHandler };
 
 export async function parsePdf(
   docId: string,
