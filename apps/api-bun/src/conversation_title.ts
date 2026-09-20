@@ -121,6 +121,7 @@ export function normalizeTitle(raw: string): string | null {
     .replace(/^(?:标题|会话标题)\s*[:：]\s*/u, '')
     .replace(/^["'“”‘’《》。！？、：:；;]+/u, '')
     .replace(/^(?:请帮我|帮我|请问|请|麻烦)\s*/u, '')
+    .replace(/^(?:总结|分析|统计|查询|列出|说明|介绍|查看|对比)\s*/u, '')
     .replace(/["'“”‘’《》。！？、：:；;]+$/u, '')
     .replace(/\s+/gu, ' ')
     .trim();
