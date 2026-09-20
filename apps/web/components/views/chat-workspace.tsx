@@ -7,13 +7,15 @@ import {
   ArrowUpRight,
   Bookmark,
   BookOpen,
+  Brain,
   Check,
   ChevronUp,
   Folder,
   Menu,
   MessageSquareText,
-  Search,
+  Sparkles,
   Square,
+  Zap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -36,35 +38,22 @@ const suggestions = [
   "华东区 Q3 销售目标是多少？",
 ];
 
-function thinkingLabel(mode: ChatModelOption["thinking_mode"]) {
-  if (mode === "always_on") return "始终深度思考";
-  if (mode === "switchable") return "快速 / 深度思考";
-  return "快速模式";
-}
+type ThinkingMode = "auto" | "deep" | "fast";
 
 function ModelPicker({
   models,
   value,
-  thinkingEnabled,
   disabled,
   onChange,
 }: {
   models: ChatModelOption[];
   value: string;
-  thinkingEnabled: boolean;
   disabled: boolean;
-  onChange: (model: ChatModelOption, thinkingEnabled: boolean) => void;
+  onChange: (model: ChatModelOption) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [previewId, setPreviewId] = useState(value);
   const selected = models.find((model) => model.id === value);
-  const preview = models.find((model) => model.id === previewId) ?? selected;
-  const needle = query.trim().toLowerCase();
-  const filtered = needle
-    ? models.filter((model) => `${model.name} ${model.id}`.toLowerCase().includes(needle))
-    : models;
 
   useEffect(() => {
     if (!open) return;
@@ -87,104 +76,115 @@ function ModelPicker({
       <button
         type="button"
         className="chat-model-trigger"
-        aria-haspopup="dialog"
+        aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled || models.length === 0}
-        onClick={() => {
-          setPreviewId(value);
-          setQuery("");
-          setOpen((current) => !current);
-        }}
+        onClick={() => setOpen((current) => !current)}
       >
         <span>{selected?.name ?? "选择模型"}</span>
-        {selected ? (
-          <small className="chat-model-trigger-mode">
-            {selected.thinking_mode === "always_on" || thinkingEnabled ? "深度" : "快速"}
-          </small>
-        ) : null}
         <ChevronUp size={14} aria-hidden="true" />
       </button>
       {open ? (
-        <div className="chat-model-menu" role="dialog" aria-label="选择对话模型">
-          <div className="chat-model-list-panel">
-            <label className="chat-model-search">
-              <Search size={15} aria-hidden="true" />
-              <input
-                aria-label="搜索模型"
-                autoFocus
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="搜索模型"
-              />
-            </label>
-            <div className="chat-model-section-label">官方推荐</div>
-            <div className="chat-model-options" role="listbox">
-              {filtered.map((model) => (
-                <button
-                  type="button"
-                  role="option"
-                  aria-selected={model.id === value}
-                  className={`chat-model-option${model.id === value ? " selected" : ""}`}
-                  key={model.id}
-                  onMouseEnter={() => setPreviewId(model.id)}
-                  onFocus={() => setPreviewId(model.id)}
-                  onClick={() => {
-                    setPreviewId(model.id);
-                    if (model.id !== value) {
-                      onChange(model, model.thinking_mode === "always_on" || model.thinking_default);
-                    }
-                    if (model.thinking_mode !== "switchable") setOpen(false);
-                  }}
-                >
-                  <strong>{model.name}</strong>
-                  <span className="chat-model-option-tail">
-                    <small>{model.thinking_mode === "always_on" ? "深度" : model.thinking_mode === "switchable" ? "灵活" : "快速"}</small>
-                    {model.id === value ? <Check size={14} aria-hidden="true" /> : null}
-                  </span>
-                </button>
-              ))}
-              {filtered.length === 0 ? <p className="chat-model-empty">没有匹配的模型</p> : null}
-            </div>
-          </div>
-          {preview ? (
-            <aside className="chat-model-detail">
-              <div className="chat-model-detail-title">
-                <strong>{preview.name}</strong>
-                <span>{preview.thinking_mode === "always_on" ? "深度" : preview.thinking_mode === "switchable" ? "灵活" : "快速"}</span>
-              </div>
-              <p>{preview.id}</p>
-              <div className="chat-model-capability">
-                <span>思考模式</span>
-                {preview.thinking_mode === "switchable" ? (
-                  <div className="chat-model-thinking-options" role="group" aria-label={`${preview.name} 思考模式`}>
-                    <button
-                      type="button"
-                      aria-pressed={preview.id === value && !thinkingEnabled}
-                      onClick={() => {
-                        onChange(preview, false);
-                        setOpen(false);
-                      }}
-                    >
-                      快速
-                    </button>
-                    <button
-                      type="button"
-                      aria-pressed={preview.id === value && thinkingEnabled}
-                      onClick={() => {
-                        onChange(preview, true);
-                        setOpen(false);
-                      }}
-                    >
-                      深度思考
-                    </button>
-                  </div>
-                ) : (
-                  <strong>{thinkingLabel(preview.thinking_mode)}</strong>
-                )}
-              </div>
-              <code>{preview.id}</code>
-            </aside>
-          ) : null}
+        <div className="chat-model-menu" role="listbox" aria-label="选择对话模型">
+          {models.map((model) => (
+            <button
+              type="button"
+              role="option"
+              aria-selected={model.id === value}
+              className={`chat-model-option${model.id === value ? " selected" : ""}`}
+              key={model.id}
+              onClick={() => {
+                onChange(model);
+                setOpen(false);
+              }}
+            >
+              <strong>{model.name}</strong>
+              {model.id === value ? <Check size={14} aria-hidden="true" /> : null}
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function ThinkingModePicker({
+  mode,
+  model,
+  disabled,
+  onChange,
+}: {
+  mode: ThinkingMode;
+  model?: ChatModelOption;
+  disabled: boolean;
+  onChange: (mode: ThinkingMode) => void;
+}) {
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [open, setOpen] = useState(false);
+  const options = [
+    { value: "auto" as const, label: "自动", description: "由模型自行判断是否需要深度思考", icon: Sparkles },
+    { value: "deep" as const, label: "深度思考", description: "强制启用深度思考，推理更准确", icon: Brain },
+    { value: "fast" as const, label: "快速", description: "跳过深度思考，响应更快", icon: Zap },
+  ];
+  const ActiveIcon = mode === "deep" ? Brain : mode === "fast" ? Zap : Sparkles;
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [open]);
+
+  return (
+    <div className="chat-thinking-picker" ref={rootRef}>
+      <button
+        type="button"
+        className={`chat-thinking-trigger mode-${mode}`}
+        aria-label={`思考模式：${options.find((option) => option.value === mode)?.label}`}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        disabled={disabled || !model}
+        onClick={() => setOpen((current) => !current)}
+      >
+        <ActiveIcon size={16} aria-hidden="true" />
+      </button>
+      {open ? (
+        <div className="chat-thinking-menu" role="dialog" aria-label="选择思考模式">
+          {options.map((option) => {
+            const Icon = option.icon;
+            const unavailable =
+              (option.value === "deep" && model?.thinking_mode === "unsupported") ||
+              (option.value === "fast" && model?.thinking_mode === "always_on");
+            return (
+              <button
+                type="button"
+                className={`chat-thinking-option mode-${option.value}`}
+                aria-pressed={mode === option.value}
+                disabled={unavailable}
+                key={option.value}
+                onClick={() => {
+                  onChange(option.value);
+                  setOpen(false);
+                }}
+              >
+                <Icon size={19} aria-hidden="true" />
+                <span>
+                  <strong>{option.label}</strong>
+                  <small>{option.description}</small>
+                </span>
+                <i aria-hidden="true" />
+              </button>
+            );
+          })}
         </div>
       ) : null}
     </div>
@@ -349,7 +349,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const previewTriggerRef = useRef<HTMLElement | null>(null);
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
-  const [thinkingEnabled, setThinkingEnabled] = useState(false);
+  const [thinkingMode, setThinkingMode] = useState<ThinkingMode>("auto");
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
   const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
@@ -362,9 +362,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const selectedModelOption = chatModels.find((model) => model.id === selectedModel);
   const runtimeOptions = {
     model_id: selectedModel || undefined,
-    thinking_enabled: selectedModelOption?.thinking_mode === "always_on"
-      ? true
-      : thinkingEnabled,
+    thinking_enabled: thinkingMode === "auto" ? undefined : thinkingMode === "deep",
   };
 
   useEffect(() => {
@@ -373,10 +371,6 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
       if (!active) return;
       setChatModels(catalog.models);
       setSelectedModel(catalog.default_model_id);
-      setThinkingEnabled(
-        catalog.models.find((model) => model.id === catalog.default_model_id)?.thinking_default
-          ?? false
-      );
     }).catch(() => {});
     return () => { active = false; };
   }, []);
@@ -588,16 +582,29 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                     onChange={updateKnowledgeBaseSelection}
                   />
                   {chatModels.length > 0 ? (
-                    <ModelPicker
-                      models={chatModels}
-                      value={selectedModel}
-                      thinkingEnabled={thinkingEnabled}
-                      disabled={!!streamingId}
-                      onChange={(model, enabled) => {
-                        setSelectedModel(model.id);
-                        setThinkingEnabled(enabled);
-                      }}
-                    />
+                    <>
+                      <ModelPicker
+                        models={chatModels}
+                        value={selectedModel}
+                        disabled={!!streamingId}
+                        onChange={(model) => {
+                          setSelectedModel(model.id);
+                          setThinkingMode((current) =>
+                            model.thinking_mode === "always_on" && current === "fast"
+                              ? "deep"
+                              : model.thinking_mode === "unsupported" && current === "deep"
+                                ? "fast"
+                                : current
+                          );
+                        }}
+                      />
+                      <ThinkingModePicker
+                        mode={thinkingMode}
+                        model={selectedModelOption}
+                        disabled={!!streamingId}
+                        onChange={setThinkingMode}
+                      />
+                    </>
                   ) : null}
                   {selectedKnowledgeBases.length > 0 ? (
                     <div className="dm-kb-selection-badges" aria-label="当前对话知识库">

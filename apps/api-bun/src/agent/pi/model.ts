@@ -26,7 +26,7 @@ export function buildPiModel(settings: PiModelSettings): Model<'openai-completio
     api: 'openai-completions',
     provider: DOCUMIND_PROVIDER,
     baseUrl: settings.baseUrl,
-    reasoning: settings.thinkingEnabled ?? false,
+    reasoning: settings.thinkingEnabled !== false,
     compat: { supportsDeveloperRole: false },
     input: ['text'],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -46,7 +46,9 @@ export function buildPiStreamFn(settings: PiModelSettings): StreamFn {
       maxTokens: settings.maxTokens,
       samplingParams: {
         ...options?.samplingParams,
-        enable_thinking: settings.thinkingEnabled ?? false,
+        ...(settings.thinkingEnabled === undefined
+          ? {}
+          : { enable_thinking: settings.thinkingEnabled }),
         ...(settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),
       },
     });

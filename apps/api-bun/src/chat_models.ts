@@ -56,7 +56,7 @@ export function resolveChatModel(
   }
   const thinkingEnabled = option.thinking_mode === 'always_on'
     ? true
-    : option.thinking_mode === 'switchable' ? requestedThinking ?? false : false;
+    : option.thinking_mode === 'switchable' ? requestedThinking : false;
   const generation = config.rag.generation;
   return {
     model: id,

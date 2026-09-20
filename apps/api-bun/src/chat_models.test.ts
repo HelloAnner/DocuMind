@@ -14,6 +14,7 @@ describe('chat model selection', () => {
   test('uses ENV model by default and enforces thinking capability', () => {
     expect(chatModelCatalog(config).default_model_id).toBe('qwen3.8-max');
     expect(resolveChatModel(config).model).toBe('qwen3.8-max');
+    expect(resolveChatModel(config).thinkingEnabled).toBeUndefined();
     expect(resolveChatModel(config, 'deepseek-v4.1-flash', true).reasoningEffort).toBe('high');
     expect(() => resolveChatModel(config, 'glm-5.3', false)).toThrow('始终使用深度思考');
   });
