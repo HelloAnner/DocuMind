@@ -6909,18 +6909,19 @@ body > .hiddenCanvasElement {
 }
 
 .dm-new-session-button {
-  background: var(--bg-tertiary);
-  border-radius: 12px;
-  color: var(--text-primary);
-  font-size: 15px;
-  font-weight: 500;
-  gap: 11px;
-  height: 48px;
-  padding: 0 14px;
+  background: transparent;
+  border-radius: 9px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 400;
+  gap: 10px;
+  height: 36px;
+  padding: 0 12px;
 }
 
 .dm-new-session-button:hover {
-  background: var(--hover-bg-strong);
+  background: var(--hover-bg);
+  color: var(--text-primary);
 }
 
 .dm-chat-history-toolbar {

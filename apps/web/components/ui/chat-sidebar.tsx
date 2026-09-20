@@ -318,7 +318,7 @@ export function ChatSidebar() {
 
       <div className="dm-chat-primary-actions">
         <button type="button" className="dm-new-session-button" onClick={handleCreate}>
-          <Plus size={19} />
+          <Plus size={15} />
           <span>新任务</span>
         </button>
       </div>
