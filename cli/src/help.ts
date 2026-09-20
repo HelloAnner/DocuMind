@@ -78,6 +78,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  run <scenario.json>          运行 JSON 多轮评测场景\n` +
   `  conversations list|create|show|messages|update|delete\n` +
   `  feedback set|clear <会话ID> <回答消息ID>  提交或清除真实用户反馈\n` +
+  `  share create <会话ID> [--title T] | share show <token>\n` +
   `  traces show <会话ID> <消息ID>\n\n` +
   `知识与向量\n` +
   `  kb list|show|create|update|delete\n` +

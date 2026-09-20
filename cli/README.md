@@ -167,6 +167,13 @@ documind chat --json --input-json @request.json
 printf '%s' '{"content":"问题"}' | documind chat --json --input-json -
 ```
 
+公开分享当前会话：
+
+```bash
+documind share create <conversation-id> --title '采购合同问答'
+documind share show <shr_token>
+```
+
 交互模式支持 `/new [标题]`、`/use <会话ID>`、`/kb <ID,ID>`、`/trace off|summary|full` 和 `/quit`。
 
 ## JSON 多轮评测

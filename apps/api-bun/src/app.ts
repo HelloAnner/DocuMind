@@ -14,7 +14,7 @@ import { getAsset, fallbackHtml } from './web_assets.ts';
 import {
   accountRouter, adminApiClientsRouter, adminMembersRouter, adminRouter, adminSkillsRouter, authRouter,
   conversationsRouter, documentsRouter, externalApiRouter, historyRouter, knowledgeRouter,
-  systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
+  sharesRouter, systemRouter, systemTenantInvitationsRouter, systemTenantsRouter, tenantLoginRouter,
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
 import { createDocumindMcpEndpoint } from './mcp.ts';
@@ -33,6 +33,7 @@ const PUBLIC_API_PATHS = new Set([
 ]);
 const PUBLIC_API_PATTERNS = [
   /^\/api\/files\/[^/]+\/preview\/(manifest|content|pages\/\d+\/pdf)$/,
+  /^\/api\/shares\/[^/]+$/,
 ];
 
 function isPublicApiPath(rawPath: string): boolean {
@@ -76,6 +77,7 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', historyRouter());
   api.route('/', externalApiRouter());
   api.route('/', conversationsRouter());
+  api.route('/', sharesRouter());
 
   const app = new Hono<AppEnv>();
   app.use('*', logger());

@@ -13,6 +13,7 @@ import {
   Folder,
   Menu,
   MessageSquareText,
+  Share2,
   Sparkles,
   Square,
   Zap,
@@ -30,7 +31,8 @@ import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
-import { getChatModels, type ChatModelOption, type KnowledgeBase } from "@/lib/api";
+import { createConversationShare, getChatModels, type ChatModelOption, type KnowledgeBase } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 
 const suggestions = [
   "Q3 采购合同的付款节点是什么？",
@@ -350,6 +352,12 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const [chatModels, setChatModels] = useState<ChatModelOption[]>([]);
   const [selectedModel, setSelectedModel] = useState("");
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>("auto");
+  const [shareState, setShareState] = useState<{ busy: boolean; url: string; copied: boolean; error: string }>({
+    busy: false,
+    url: "",
+    copied: false,
+    error: "",
+  });
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
   const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
@@ -459,6 +467,24 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     window.requestAnimationFrame(() => previewTriggerRef.current?.focus());
   };
 
+  const shareConversation = async () => {
+    if (!currentId || shareState.busy) return;
+    setShareState({ busy: true, url: "", copied: false, error: "" });
+    try {
+      const share = await createConversationShare(currentId, currentConversation?.title);
+      const url = new URL(share.share_url, window.location.origin).toString();
+      const copied = await copyToClipboard(url);
+      setShareState({ busy: false, url, copied, error: "" });
+    } catch (error) {
+      setShareState({
+        busy: false,
+        url: "",
+        copied: false,
+        error: error instanceof Error ? error.message : "创建分享失败",
+      });
+    }
+  };
+
   const renderEmpty = () => (
     <div className="dm-chat-empty">
       <div className="dm-chat-empty-orb-wrap">
@@ -531,7 +557,22 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                 <Bookmark size={16} fill={currentFavorite ? "currentColor" : "none"} />
               </IconButton>
             </div>
+            <div className="dm-share-status" aria-live="polite">
+              {shareState.url ? (
+                <a href={shareState.url} target="_blank" rel="noreferrer">
+                  {shareState.copied ? "分享链接已复制" : "打开分享链接"}
+                </a>
+              ) : shareState.error ? <span>{shareState.error}</span> : null}
+            </div>
             <div className="dm-chat-session-actions">
+              <IconButton
+                aria-label="分享当前会话"
+                disabled={!currentId || messages.length === 0 || shareState.busy}
+                onClick={() => void shareConversation()}
+                title="生成并复制只读分享链接"
+              >
+                <Share2 size={18} />
+              </IconButton>
               <IconButton
                 aria-label={rightOpen ? "关闭会话文件" : "打开会话文件"}
                 className={`dm-file-preview-toggle ${rightOpen ? "active" : ""}`}

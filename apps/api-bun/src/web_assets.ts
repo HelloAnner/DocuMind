@@ -70,12 +70,18 @@ function isExtensionlessRoute(path: string): boolean {
   return !last.includes('.');
 }
 
-function routeCandidates(path: string): string[] {
+export function routeCandidates(path: string): string[] {
   const normalized = normalizePath(path);
   const candidates = [normalized];
   if (isExtensionlessRoute(normalized)) {
-    candidates.push(`${normalized}.html`);
-    candidates.push(`${normalized}/index.html`);
+    candidates.push(`${normalized}.html`, `${normalized}/index.html`);
+  }
+  const segments = normalized.split('/');
+  if (segments[0] === 's' && segments[1]) {
+    if (segments.length === 2) candidates.push('s/__placeholder__.html');
+    if (segments.length === 3 && segments[2] === 'info') {
+      candidates.push('s/__placeholder__/info.html');
+    }
   }
   return candidates;
 }

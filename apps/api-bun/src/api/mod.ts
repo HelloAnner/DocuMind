@@ -4,6 +4,7 @@ export { knowledgeRouter } from './knowledge.ts';
 export { conversationsRouter } from './conversations.ts';
 export { externalApiRouter } from './external_routes.ts';
 export { historyRouter } from './history.ts';
+export { sharesRouter } from './shares.ts';
 export { systemRouter } from './system.ts';
 export { systemTenantsRouter } from './system_tenants.ts';
 export { systemTenantInvitationsRouter } from './system_tenant_invitations.ts';

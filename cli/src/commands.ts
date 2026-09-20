@@ -72,6 +72,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "chat": return chatCommand(args, api, json);
     case "run": return runCommand(args, api, json);
     case "conversations": return conversationCommand(args, api, json);
+    case "share": return shareCommand(args, api, json);
     case "feedback": return feedbackCommand(args, api, json);
     case "traces": return traceCommand(args, api, json);
     case "documents": return documentCommand(args, api, json);
@@ -80,6 +81,29 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
       throw new CliError(`未知命令: ${command}。运行 documind help 查看帮助`, 2);
   }
 }
+async function shareCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "show";
+  const value = args.positionals[2];
+  if (!value) throw new CliError(`share ${subcommand} 需要会话 ID 或分享 token`, 2);
+  if (subcommand === "show") {
+    const result = await api.requestJson(`/api/shares/${encodeURIComponent(value)}`, {}, false, false);
+    printJson(result);
+    return 0;
+  }
+  if (subcommand !== "create") throw new CliError(`未知 share 子命令: ${subcommand}`, 2);
+  const result = await api.requestJson<Record<string, unknown>>(
+    `/api/conversations/${encodeURIComponent(value)}/share`,
+    {
+      method: "POST",
+      body: JSON.stringify({ title: stringOption(args, "title") }),
+    },
+  );
+  if (json) printJson(result);
+  else process.stdout.write(`${String(result.share_url ?? "")}\n`);
+  return 0;
+}
+
+
 async function feedbackCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "set";
   const conversationId = args.positionals[2];

@@ -49,6 +49,51 @@ export async function createConversation(
   });
 }
 
+export interface ConversationShare {
+  token: string;
+  title: string;
+  created_at: string;
+  share_url: string;
+}
+
+export interface SharedConversation {
+  token: string;
+  title: string;
+  created_at: string;
+  view_count: number;
+  messages: Array<{
+    message_id: string;
+    role: "user" | "assistant";
+    content: string;
+    status: string;
+    created_at: string;
+    completed_at?: string;
+    citations: Array<{
+      citation_id: string;
+      index: number;
+      doc_id: string;
+      doc_title: string;
+      page_range: number[];
+      quote: string;
+      score: number;
+    }>;
+  }>;
+}
+
+export async function createConversationShare(
+  conversationId: string,
+  title?: string
+): Promise<ConversationShare> {
+  return fetchJson(`/api/conversations/${conversationId}/share`, {
+    method: "POST",
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function getSharedConversation(token: string): Promise<SharedConversation> {
+  return fetchJson(`/api/shares/${encodeURIComponent(token)}`);
+}
+
 export interface ChatModelOption {
   id: string;
   name: string;
