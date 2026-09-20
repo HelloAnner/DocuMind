@@ -34,6 +34,7 @@ import type {
 } from "@/lib/types";
 
 const FAVORITES_KEY = "documind:favorite-conversations";
+const ANSWER_FLUSH_INTERVAL_MS = 24;
 type MessageListUpdate = (messages: Message[]) => Message[];
 
 function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
@@ -308,6 +309,73 @@ export function useConversationManager() {
           applyPendingMessageUpdates();
         });
       };
+      let pendingAnswer = "";
+      let pendingAnswerOffset = 0;
+      let pendingAnswerMessageId = assistantTempId;
+      let answerTimer: number | undefined;
+      let answerDrainResolvers: Array<() => void> = [];
+      const finishAnswerDrain = () => {
+        pendingAnswer = "";
+        pendingAnswerOffset = 0;
+        answerTimer = undefined;
+        const resolvers = answerDrainResolvers;
+        answerDrainResolvers = [];
+        resolvers.forEach((resolve) => resolve());
+      };
+      const appendAnswerText = (messageId: string, text: string) => {
+        if (!text) return;
+        queueMessageUpdate((prev) =>
+          prev.map((message) =>
+            message.message_id === messageId || message.message_id === assistantTempId
+              ? { ...message, content: message.content + text, thinking: undefined }
+              : message
+          )
+        );
+      };
+      const scheduleAnswerTick = () => {
+        if (answerTimer !== undefined) return;
+        const tick = () => {
+          const codePoint = pendingAnswer.codePointAt(pendingAnswerOffset);
+          if (codePoint === undefined) {
+            finishAnswerDrain();
+            return;
+          }
+          const character = String.fromCodePoint(codePoint);
+          pendingAnswerOffset += character.length;
+          appendAnswerText(pendingAnswerMessageId, character);
+          if (pendingAnswerOffset < pendingAnswer.length) {
+            answerTimer = window.setTimeout(tick, ANSWER_FLUSH_INTERVAL_MS);
+          } else {
+            finishAnswerDrain();
+          }
+        };
+        answerTimer = window.setTimeout(tick, ANSWER_FLUSH_INTERVAL_MS);
+      };
+      const queueAnswerText = (messageId: string, text: string) => {
+        if (!text) return;
+        if (pendingAnswerOffset >= pendingAnswer.length) {
+          pendingAnswer = "";
+          pendingAnswerOffset = 0;
+        }
+        pendingAnswerMessageId = messageId;
+        pendingAnswer += text;
+        scheduleAnswerTick();
+      };
+      const waitForAnswerDrain = () => {
+        if (answerTimer === undefined && pendingAnswerOffset >= pendingAnswer.length) {
+          return Promise.resolve();
+        }
+        return new Promise<void>((resolve) => answerDrainResolvers.push(resolve));
+      };
+      const flushAnswerText = () => {
+        window.clearTimeout(answerTimer);
+        answerTimer = undefined;
+        appendAnswerText(
+          pendingAnswerMessageId,
+          pendingAnswer.slice(pendingAnswerOffset)
+        );
+        finishAnswerDrain();
+      };
       const updateAssistantInStream = (patch: Partial<Message>) => {
         const messageId = assistantId;
         queueMessageUpdate((prev) =>
@@ -380,6 +448,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "agent.step.started") {
+              flushAnswerText();
               const stepNumber = runtimeStepNumber(runtime.payload.step);
               if (stepNumber !== null) {
                 activeReasoningStep = stepNumber;
@@ -435,6 +504,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "response.replace") {
+              flushAnswerText();
               const content = runtime.payload.content;
               if (typeof content === "string") {
                 updateAssistantInStream({ content, thinking: undefined });
@@ -522,14 +592,7 @@ export function useConversationManager() {
             if (runtime.event_type === "response.delta") {
               const delta = runtime.payload.delta;
               if (typeof delta !== "string") continue;
-              const messageId = runtime.response_message_id;
-              queueMessageUpdate((prev) =>
-                prev.map((m) =>
-                  m.message_id === messageId || m.message_id === assistantTempId
-                    ? { ...m, content: m.content + delta, thinking: undefined }
-                    : m
-                )
-              );
+              queueAnswerText(runtime.response_message_id, delta);
               continue;
             }
 
@@ -649,6 +712,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "execution.completed") {
+              await waitForAnswerDrain();
               flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, {
                 status: "completed",
@@ -666,12 +730,14 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "execution.cancelled") {
+              flushAnswerText();
               flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, { status: "cancelled" as MessageStatus });
               continue;
             }
 
             if (runtime.event_type === "execution.failed") {
+              flushAnswerText();
               flushPendingMessageUpdates();
               const error = runtime.payload.error as { message?: string } | undefined;
               updateMessage(runtime.response_message_id, {
@@ -699,13 +765,7 @@ export function useConversationManager() {
             setStreamingId(assistantId);
           } else if (sse.event === "answer.delta") {
             const data = sse.data as { message_id: string; text: string };
-            queueMessageUpdate((prev) =>
-              prev.map((m) =>
-                m.message_id === data.message_id || m.message_id === assistantTempId
-                  ? { ...m, content: m.content + data.text, thinking: undefined }
-                  : m
-              )
-            );
+            queueAnswerText(data.message_id, data.text);
           } else if (sse.event === "citation.delta") {
             const data = sse.data as { message_id: string; citation: Citation };
             queueMessageUpdate((prev) =>
@@ -716,6 +776,7 @@ export function useConversationManager() {
               )
             );
           } else if (sse.event === "answer.completed") {
+            await waitForAnswerDrain();
             flushPendingMessageUpdates();
             const data = sse.data as {
               message_id: string;
@@ -750,6 +811,7 @@ export function useConversationManager() {
               );
             }
           } else if (sse.event === "answer.failed") {
+            flushAnswerText();
             flushPendingMessageUpdates();
             const data = sse.data as { message_id: string; code: string; message: string };
             updateMessage(data.message_id, {
@@ -759,6 +821,7 @@ export function useConversationManager() {
           }
         }
       } catch (e) {
+        flushAnswerText();
         flushPendingMessageUpdates();
         if ((e as Error).name === "AbortError") {
           updateMessage(assistantId, { status: "cancelled" as MessageStatus });
@@ -770,6 +833,7 @@ export function useConversationManager() {
           });
         }
       } finally {
+        flushAnswerText();
         flushPendingMessageUpdates();
         abortControllersRef.current.delete(assistantId);
         setStreamingId(null);
