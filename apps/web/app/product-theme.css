@@ -6142,6 +6142,7 @@ body > .hiddenCanvasElement {
   box-sizing: border-box;
   font-size: 15px;
   line-height: 1.9;
+  margin-left: 0;
   max-width: none;
   padding: 20px 24px;
   width: 100%;
