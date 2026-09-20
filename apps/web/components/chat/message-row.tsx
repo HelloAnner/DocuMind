@@ -319,7 +319,7 @@ export function MessageRow({
         <div className="dm-answer-error">
           {cancelled ? "生成已取消" : message.content || "生成失败，请重试"}
         </div>
-      ) : hasContent ? (
+      ) : hasContent && !isStreaming ? (
         <AnswerContent
           content={message.content}
           isStreaming={isStreaming}

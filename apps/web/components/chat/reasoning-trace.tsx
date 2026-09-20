@@ -23,6 +23,7 @@ type RoundStatus = "running" | "completed" | "failed";
 export function ReasoningTrace({
   steps,
   toolCalls,
+  answerContent,
   isStreaming,
   thinking,
   durationMs,
@@ -40,6 +41,7 @@ export function ReasoningTrace({
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
   const hasThinking = Boolean(thinking?.trim());
   const showThinking = hasThinking && (steps?.length ?? 0) === 0;
+  const interimAnswer = isStreaming ? answerContent.trim() : "";
 
   useEffect(() => {
     if (isStreaming) {
@@ -66,7 +68,7 @@ export function ReasoningTrace({
   useEffect(() => {
     const feed = feedRef.current;
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
-  }, [expanded, rounds, thinking]);
+  }, [expanded, interimAnswer, rounds, thinking]);
 
   if (rounds.length === 0 && !showThinking && !isStreaming) return null;
 
@@ -118,18 +120,21 @@ export function ReasoningTrace({
         >
           {showThinking ? (
             <ThoughtGroup
-              hasFollowing={rounds.length > 0}
+              hasFollowing={rounds.length > 0 || Boolean(interimAnswer)}
               isStreaming={isStreaming}
               text={thinking!.trim()}
             />
           ) : null}
           {rounds.map((round, index) => (
             <ProcessGroup
-              hasFollowing={index < rounds.length - 1}
+              hasFollowing={index < rounds.length - 1 || Boolean(interimAnswer)}
               key={round.step}
               round={round}
             />
           ))}
+          {interimAnswer ? (
+            <ThoughtGroup hasFollowing={false} isStreaming text={interimAnswer} />
+          ) : null}
         </div>
       ) : null}
     </section>
