@@ -36,7 +36,7 @@ export function ReasoningTrace({
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
   const rounds = useMemo(
-    () => buildReasoningRounds(steps ?? [], toolCalls ?? []).filter((round) => round.tool_calls.length > 0),
+    () => buildReasoningRounds(steps ?? [], toolCalls ?? []),
     [steps, toolCalls]
   );
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
@@ -128,6 +128,7 @@ export function ReasoningTrace({
           {rounds.map((round, index) => (
             <ProcessGroup
               hasFollowing={index < rounds.length - 1}
+              isActive={isStreaming && index === rounds.length - 1}
               key={round.step}
               round={round}
             />
@@ -141,11 +142,13 @@ export function ReasoningTrace({
 function ProcessGroup({
   round,
   hasFollowing,
+  isActive,
 }: {
   round: ReasoningRound;
   hasFollowing: boolean;
+  isActive: boolean;
 }) {
-  const roundStatus = reasoningRoundStatus(round);
+  const roundStatus = reasoningRoundStatus(round, isActive);
   const note = processNote(round);
   return (
     <div className="dm-process-group" data-reasoning-step={round.step}>
@@ -286,8 +289,9 @@ function buildReasoningRounds(steps: RuntimeReasoningStep[], liveTools: RuntimeT
   return Array.from(rounds.values()).sort((a, b) => a.step - b.step);
 }
 
-function reasoningRoundStatus(round: ReasoningRound): RoundStatus {
+function reasoningRoundStatus(round: ReasoningRound, isActive: boolean): RoundStatus {
   if ((round.warnings?.length ?? 0) > 0 || round.tool_calls.some((tool) => tool.status === "failed" || tool.status === "cancelled")) return "failed";
+  if (isActive && !round.completed_at) return "running";
   if (round.completed_at) return "completed";
   if (round.tool_calls.some((tool) => tool.status === "running")) return "running";
   return "completed";

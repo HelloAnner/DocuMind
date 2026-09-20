@@ -327,7 +327,7 @@ export function useConversationManager() {
         queueMessageUpdate((prev) =>
           prev.map((message) =>
             message.message_id === messageId || message.message_id === assistantTempId
-              ? { ...message, content: message.content + text, thinking: undefined }
+              ? { ...message, content: message.content + text }
               : message
           )
         );
@@ -418,6 +418,21 @@ export function useConversationManager() {
           })
         );
       };
+      const completeActiveReasoningStep = (completedAt: string) => {
+        const stepNumber = activeReasoningStep;
+        if (stepNumber === null) return;
+        activeReasoningStep = null;
+        updateReasoningStepInStream(stepNumber, (step) => ({
+          step: stepNumber,
+          action: step?.action ?? "respond",
+          decision_summary: step?.decision_summary ?? "",
+          output: step?.output,
+          tool_calls: step?.tool_calls ?? [],
+          warnings: step?.warnings,
+          started_at: step?.started_at,
+          completed_at: step?.completed_at ?? completedAt,
+        }));
+      };
       try {
         for await (const sse of streamSse(url, req, controller.signal)) {
           if (controller.signal.aborted) {
@@ -451,38 +466,22 @@ export function useConversationManager() {
               flushAnswerText();
               const stepNumber = runtimeStepNumber(runtime.payload.step);
               if (stepNumber !== null) {
+                if (activeReasoningStep !== null && activeReasoningStep !== stepNumber) {
+                  completeActiveReasoningStep(runtime.occurred_at);
+                }
                 activeReasoningStep = stepNumber;
                 const action = firstRuntimeString(runtime.payload.action, "tool");
                 const decisionSummary = firstRuntimeString(runtime.payload.decision_summary);
-                const messageId = assistantId;
-                queueMessageUpdate((current) =>
-                  current.map((message) => {
-                    if (
-                      message.message_id !== messageId &&
-                      message.message_id !== assistantTempId
-                    ) return message;
-                    const steps = message.reasoning_steps ?? [];
-                    const existing = steps.find((step) => step.step === stepNumber);
-                    const interimOutput = action === "tool" ? message.content.trim() : "";
-                    const nextStep: RuntimeReasoningStep = {
-                      step: stepNumber,
-                      action,
-                      decision_summary: decisionSummary,
-                      output: interimOutput || existing?.output,
-                      tool_calls: existing?.tool_calls ?? [],
-                      warnings: existing?.warnings,
-                      started_at: existing?.started_at ?? runtime.occurred_at,
-                      completed_at: existing?.completed_at,
-                    };
-                    return {
-                      ...message,
-                      content: interimOutput ? "" : message.content,
-                      reasoning_steps: existing
-                        ? steps.map((step) => step.step === stepNumber ? nextStep : step)
-                        : [...steps, nextStep],
-                    };
-                  })
-                );
+                updateReasoningStepInStream(stepNumber, (existing) => ({
+                  step: stepNumber,
+                  action,
+                  decision_summary: decisionSummary,
+                  output: existing?.output,
+                  tool_calls: existing?.tool_calls ?? [],
+                  warnings: existing?.warnings,
+                  started_at: existing?.started_at ?? runtime.occurred_at,
+                  completed_at: existing?.completed_at,
+                }));
               }
               continue;
             }
@@ -490,25 +489,26 @@ export function useConversationManager() {
             if (runtime.event_type === "thinking.delta") {
               const delta = runtime.payload.delta;
               if (typeof delta !== "string") continue;
-              const messageId = runtime.response_message_id;
-              queueMessageUpdate((prev) =>
-                prev.map((m) =>
-                  m.message_id === messageId || m.message_id === assistantTempId
-                    ? m.content
-                      ? m
-                      : { ...m, thinking: (m.thinking ?? "") + delta }
-                    : m
-                )
-              );
+              const stepNumber = activeReasoningStep ?? 1;
+              activeReasoningStep = stepNumber;
+              updateReasoningStepInStream(stepNumber, (step) => ({
+                step: stepNumber,
+                action: step?.action ?? "tool",
+                decision_summary: step?.decision_summary ?? "",
+                output: `${step?.output ?? ""}${delta}`,
+                tool_calls: step?.tool_calls ?? [],
+                warnings: step?.warnings,
+                started_at: step?.started_at ?? runtime.occurred_at,
+                completed_at: step?.completed_at,
+              }));
               continue;
             }
 
             if (runtime.event_type === "response.replace") {
               flushAnswerText();
+              completeActiveReasoningStep(runtime.occurred_at);
               const content = runtime.payload.content;
-              if (typeof content === "string") {
-                updateAssistantInStream({ content, thinking: undefined });
-              }
+              if (typeof content === "string") updateAssistantInStream({ content });
               continue;
             }
 
@@ -592,6 +592,7 @@ export function useConversationManager() {
             if (runtime.event_type === "response.delta") {
               const delta = runtime.payload.delta;
               if (typeof delta !== "string") continue;
+              completeActiveReasoningStep(runtime.occurred_at);
               queueAnswerText(runtime.response_message_id, delta);
               continue;
             }
@@ -619,6 +620,7 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "response.completed") {
+              completeActiveReasoningStep(runtime.occurred_at);
               flushPendingMessageUpdates();
               const confidence = confidenceFromRuntime(runtime.payload.confidence);
               const manualCorrection = runtime.payload.answer_source === "manual_correction";
@@ -643,7 +645,6 @@ export function useConversationManager() {
                     ? runtime.payload.correction_match_score
                     : null,
                 runtime_stage: undefined,
-                thinking: undefined,
               });
               continue;
             }
@@ -712,11 +713,11 @@ export function useConversationManager() {
             }
 
             if (runtime.event_type === "execution.completed") {
+              completeActiveReasoningStep(runtime.occurred_at);
               await waitForAnswerDrain();
               flushPendingMessageUpdates();
               updateMessage(runtime.response_message_id, {
                 status: "completed",
-                thinking: undefined,
                 duration_ms:
                   typeof runtime.payload.duration_ms === "number"
                     ? runtime.payload.duration_ms
@@ -743,7 +744,6 @@ export function useConversationManager() {
               updateMessage(runtime.response_message_id, {
                 status: "failed",
                 content: error?.message ?? "生成失败，请重试",
-                thinking: undefined,
               });
               continue;
             }
