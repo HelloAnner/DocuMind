@@ -1,10 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownUp,
   Bookmark,
+  FileClock,
+  FolderOpen,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -16,6 +18,7 @@ import {
 } from "lucide-react";
 import { IconButton } from "./icon-button";
 import { useAuth } from "@/components/providers/auth-provider";
+import { canAccessAdmin } from "@/lib/auth";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Conversation } from "@/lib/types";
 import { AppWindow, UserAccountMenu } from "./user-account-menu";
@@ -69,6 +72,7 @@ function useAliases(tenantId: string | undefined) {
 }
 
 export function ChatSidebar() {
+  const pathname = usePathname();
   const router = useRouter();
   const { collapsed, mobileOpen, closeMobile, toggleCollapsed } = useChatShell();
   const { me } = useAuth();
@@ -81,6 +85,7 @@ export function ChatSidebar() {
     renameConversation,
     deleteConversation,
   } = useConversation();
+  const canManageKnowledge = me?.scope === "tenant" && canAccessAdmin(me.roles);
 
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -125,6 +130,12 @@ export function ChatSidebar() {
     setCurrentId(null);
     closeMobile();
     router.push("/chat");
+  };
+
+  const handleManagement = (href: string) => {
+    setMenuId(null);
+    closeMobile();
+    router.push(href);
   };
 
   const handleSelect = (id: string) => {
@@ -322,6 +333,20 @@ export function ChatSidebar() {
           <span>新任务</span>
         </button>
       </div>
+
+      {canManageKnowledge ? (
+        <nav aria-label="知识库" className="dm-chat-management">
+          <span className="dm-chat-management-title">知识库</span>
+          <button className={pathname.startsWith("/admin/knowledge") || pathname.startsWith("/admin/documents") ? "active" : ""} onClick={() => handleManagement("/admin/knowledge")} type="button">
+            <FolderOpen size={17} />
+            <span>知识库</span>
+          </button>
+          <button className={pathname.startsWith("/admin/document-jobs") ? "active" : ""} onClick={() => handleManagement("/admin/document-jobs")} type="button">
+            <FileClock size={17} />
+            <span>文档处理</span>
+          </button>
+        </nav>
+      ) : null}
 
       <div className="dm-chat-history-toolbar">
         <span>对话</span>

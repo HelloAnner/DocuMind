@@ -21,12 +21,21 @@ function validation(file: File) {
   if (file.size > MAX_UPLOAD_BYTES) return "单个文件不能超过 100MB";
 }
 
+function randomUuid() {
+  if (typeof globalThis.crypto?.randomUUID === "function") return globalThis.crypto.randomUUID();
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
 export function AdminDocumentUploadModal({ kbId, kbName, onClose, onUploaded }: { kbId: string; kbName: string; onClose: () => void; onUploaded: () => void | Promise<void> }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [items, setItems] = useState<UploadItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [running, setRunning] = useState(false);
-  const batchIdRef = useRef(globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`);
+  const batchIdRef = useRef(randomUuid());
 
   function addFiles(files: FileList | File[]) {
     const selected = Array.from(files);
@@ -36,7 +45,7 @@ export function AdminDocumentUploadModal({ kbId, kbName, onClose, onUploaded }: 
       return [...current, ...selected.filter((file) => !existing.has(`${file.name}:${file.size}:${file.lastModified}`)).slice(0, available).map((file) => {
         const error = validation(file);
         return {
-          id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
+          id: randomUuid(),
           file,
           status: error ? "failed" as const : "ready" as const,
           percent: 0,
