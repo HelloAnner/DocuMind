@@ -37,7 +37,10 @@ export function ReasoningTrace({
   const releaseTimerRef = useRef<number | undefined>(undefined);
   const feedRef = useRef<HTMLDivElement>(null);
   const autoScrollRef = useRef(true);
-  const rounds = useMemo(() => buildReasoningRounds(steps ?? [], toolCalls ?? []), [steps, toolCalls]);
+  const rounds = useMemo(
+    () => buildReasoningRounds(steps ?? [], toolCalls ?? []).filter((round) => round.tool_calls.length > 0),
+    [steps, toolCalls]
+  );
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
   const hasThinking = Boolean(thinking?.trim());
   const showThinking = hasThinking && (steps?.length ?? 0) === 0;
