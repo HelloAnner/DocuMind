@@ -336,7 +336,6 @@ export function ChatSidebar() {
 
       {canManageKnowledge ? (
         <nav aria-label="知识库" className="dm-chat-management">
-          <span className="dm-chat-management-title">知识库</span>
           <button className={pathname.startsWith("/admin/knowledge") || pathname.startsWith("/admin/documents") ? "active" : ""} onClick={() => handleManagement("/admin/knowledge")} type="button">
             <FolderOpen size={17} />
             <span>知识库</span>

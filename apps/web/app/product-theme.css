@@ -1248,28 +1248,22 @@ select:focus-visible {
 .dm-chat-management {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 4px 8px 8px;
-}
-
-.dm-chat-management-title {
-  color: var(--text-muted);
-  font-size: 11px;
-  padding: 4px 10px;
+  gap: 4px;
+  padding: 8px 16px 0;
 }
 
 .dm-chat-management button {
   align-items: center;
   background: transparent;
   border: 0;
-  border-radius: 10px;
-  color: var(--text-tertiary);
+  border-radius: 9px;
+  color: var(--text-muted);
   display: flex;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   gap: 10px;
-  height: 38px;
-  padding: 0 10px;
+  height: 36px;
+  padding: 0 12px;
   text-align: left;
 }
 
@@ -1280,10 +1274,9 @@ select:focus-visible {
 }
 
 .dm-chat-sidebar.collapsed .dm-chat-management {
-  padding: 4px 0 8px;
+  padding: 8px 0 0;
 }
 
-.dm-chat-sidebar.collapsed .dm-chat-management-title,
 .dm-chat-sidebar.collapsed .dm-chat-management button span {
   display: none;
 }
