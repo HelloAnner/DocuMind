@@ -2193,16 +2193,6 @@ select:focus-visible {
   --kb-surface: color-mix(in srgb, #0e7490 9%, var(--surface-raised));
 }
 
-.dm-thinking-toggle {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 6px;
-  color: var(--text-secondary);
-  font: inherit;
-  font-size: 12px;
-  height: 30px;
-}
 
 .chat-model-picker {
   position: relative;
@@ -2239,6 +2229,16 @@ select:focus-visible {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.chat-model-trigger-mode {
+  background: var(--hover-bg);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 18px;
+  padding: 0 5px;
 }
 
 .chat-model-menu {
@@ -2395,6 +2395,30 @@ select:focus-visible {
   color: var(--text-muted);
 }
 
+.chat-model-thinking-options {
+  background: var(--surface-subdued);
+  border-radius: 7px;
+  display: inline-flex;
+  padding: 2px;
+}
+
+.chat-model-thinking-options button {
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.chat-model-thinking-options button[aria-pressed="true"] {
+  background: var(--surface-raised);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
 .chat-model-detail code {
   background: var(--surface-subdued);
   border-radius: 8px;
@@ -2408,28 +2432,9 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.dm-thinking-toggle {
-  cursor: pointer;
-  display: inline-flex;
-  gap: 5px;
-  padding: 0 7px;
-}
 
-.dm-thinking-toggle:hover,
-.dm-thinking-toggle.active {
-  background: var(--bg-tertiary);
-  color: var(--text-primary);
-}
 
-.dm-thinking-toggle input {
-  accent-color: var(--accent);
-  margin: 0;
-}
 
-.dm-thinking-toggle:has(input:disabled) {
-  cursor: default;
-  opacity: 0.65;
-}
 
 
 .dm-send-button {

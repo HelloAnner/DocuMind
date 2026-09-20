@@ -6,7 +6,6 @@ import {
   ArrowUp,
   ArrowUpRight,
   Bookmark,
-  Brain,
   BookOpen,
   Check,
   ChevronUp,
@@ -46,13 +45,15 @@ function thinkingLabel(mode: ChatModelOption["thinking_mode"]) {
 function ModelPicker({
   models,
   value,
+  thinkingEnabled,
   disabled,
   onChange,
 }: {
   models: ChatModelOption[];
   value: string;
+  thinkingEnabled: boolean;
   disabled: boolean;
-  onChange: (model: ChatModelOption) => void;
+  onChange: (model: ChatModelOption, thinkingEnabled: boolean) => void;
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
@@ -96,6 +97,11 @@ function ModelPicker({
         }}
       >
         <span>{selected?.name ?? "选择模型"}</span>
+        {selected ? (
+          <small className="chat-model-trigger-mode">
+            {selected.thinking_mode === "always_on" || thinkingEnabled ? "深度" : "快速"}
+          </small>
+        ) : null}
         <ChevronUp size={14} aria-hidden="true" />
       </button>
       {open ? (
@@ -123,8 +129,11 @@ function ModelPicker({
                   onMouseEnter={() => setPreviewId(model.id)}
                   onFocus={() => setPreviewId(model.id)}
                   onClick={() => {
-                    onChange(model);
-                    setOpen(false);
+                    setPreviewId(model.id);
+                    if (model.id !== value) {
+                      onChange(model, model.thinking_mode === "always_on" || model.thinking_default);
+                    }
+                    if (model.thinking_mode !== "switchable") setOpen(false);
                   }}
                 >
                   <strong>{model.name}</strong>
@@ -145,8 +154,33 @@ function ModelPicker({
               </div>
               <p>{preview.id}</p>
               <div className="chat-model-capability">
-                <span>思考能力</span>
-                <strong>{thinkingLabel(preview.thinking_mode)}</strong>
+                <span>思考模式</span>
+                {preview.thinking_mode === "switchable" ? (
+                  <div className="chat-model-thinking-options" role="group" aria-label={`${preview.name} 思考模式`}>
+                    <button
+                      type="button"
+                      aria-pressed={preview.id === value && !thinkingEnabled}
+                      onClick={() => {
+                        onChange(preview, false);
+                        setOpen(false);
+                      }}
+                    >
+                      快速
+                    </button>
+                    <button
+                      type="button"
+                      aria-pressed={preview.id === value && thinkingEnabled}
+                      onClick={() => {
+                        onChange(preview, true);
+                        setOpen(false);
+                      }}
+                    >
+                      深度思考
+                    </button>
+                  </div>
+                ) : (
+                  <strong>{thinkingLabel(preview.thinking_mode)}</strong>
+                )}
               </div>
               <code>{preview.id}</code>
             </aside>
@@ -554,34 +588,16 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                     onChange={updateKnowledgeBaseSelection}
                   />
                   {chatModels.length > 0 ? (
-                    <>
-                      <ModelPicker
-                        models={chatModels}
-                        value={selectedModel}
-                        disabled={!!streamingId}
-                        onChange={(model) => {
-                          setSelectedModel(model.id);
-                          setThinkingEnabled(model.thinking_default);
-                        }}
-                      />
-                      <label
-                        className={`dm-thinking-toggle ${thinkingEnabled ? "active" : ""}`}
-                        title="开启后实时显示灰色思考文字，正文开始时自动消失"
-                      >
-                        <Brain size={13} aria-hidden="true" />
-                        <span>深度思考</span>
-                        <input
-                          type="checkbox"
-                          checked={selectedModelOption?.thinking_mode === "always_on" || thinkingEnabled}
-                          disabled={
-                            !!streamingId ||
-                            selectedModelOption?.thinking_mode === "always_on" ||
-                            selectedModelOption?.thinking_mode === "unsupported"
-                          }
-                          onChange={(event) => setThinkingEnabled(event.target.checked)}
-                        />
-                      </label>
-                    </>
+                    <ModelPicker
+                      models={chatModels}
+                      value={selectedModel}
+                      thinkingEnabled={thinkingEnabled}
+                      disabled={!!streamingId}
+                      onChange={(model, enabled) => {
+                        setSelectedModel(model.id);
+                        setThinkingEnabled(enabled);
+                      }}
+                    />
                   ) : null}
                   {selectedKnowledgeBases.length > 0 ? (
                     <div className="dm-kb-selection-badges" aria-label="当前对话知识库">
