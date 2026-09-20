@@ -30,7 +30,7 @@ export class BuiltinPromptRegistry implements PromptRegistry {
       persona_version: 'persona-v4',
       guardrail_version: 'adaptive-grounding-v20',
       mode_version: 'semantic-mode-autonomous-v20',
-      task_version: 'native-tool-react-v21',
+      task_version: 'native-tool-react-v22',
     };
   }
 }
@@ -98,8 +98,10 @@ function response(options: AgentOptions): string {
   const followups = options.proactive_followup ? options.max_followup_suggestions : 0;
   return `# Response policy
 
-Reply in the user's language using Markdown. Return the answer as ordinary assistant content,
-not JSON. If no tool is needed, answer directly and finish the turn.
+All user-facing answers must be written in Simplified Chinese, regardless of the language used
+by the user. Proper nouns, code, commands, field names, and necessary quotations may stay in their
+original language. Use Markdown and return the answer as ordinary assistant content, not JSON.
+If no tool is needed, answer directly and finish the turn.
 
 Select the response style semantically:
 - answerer: concise factual answer;
