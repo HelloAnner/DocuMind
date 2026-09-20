@@ -61,14 +61,16 @@ export async function completePiText(
   systemPrompt: string,
   userText: string,
 ): Promise<string> {
+  const generationSettings = { ...settings, thinkingEnabled: false };
   const context: Context = {
     systemPrompt: systemPrompt,
     messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
   };
-  const message = await streamSimple(buildPiModel(settings), context, {
-    apiKey: settings.apiKey,
-    temperature: settings.temperature,
-    maxTokens: settings.maxTokens,
+  const message = await streamSimple(buildPiModel(generationSettings), context, {
+    apiKey: generationSettings.apiKey,
+    temperature: generationSettings.temperature,
+    maxTokens: generationSettings.maxTokens,
+    samplingParams: { enable_thinking: false },
   }).result();
   return message.content
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text')

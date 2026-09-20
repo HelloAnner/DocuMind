@@ -6,7 +6,8 @@ describe('conversation title', () => {
     const due = [...Array(12).keys()].filter((count) => shouldGenerateTitle(count));
     expect(due).toEqual([1, 3, 7, 11]);
   });
-  test('title is single line unquoted and ten chars', () => {
-    expect(normalizeTitle('“企业知识库检索性能优化”\n解释')).toBe('企业知识库检索性能优');
+  test('title is normalized and limited to ten characters', () => {
+    expect(normalizeTitle('标题：“请帮我分析企业知识库检索性能优化”\n解释'))
+      .toBe('分析企业知识库检索性');
   });
 });

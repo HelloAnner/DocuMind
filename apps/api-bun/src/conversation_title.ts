@@ -55,19 +55,33 @@ async function generateAndUpdateTitle(
       })()
     : `请根据以下对话生成一个 10 字以内的中文标题：\n\n${recentConversation(messages)}\n\n请直接输出标题：`;
 
-  const timeout = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('title generation timed out')), TITLE_TIMEOUT_MS));
-  const response = await Promise.race([
-    completePiText(
-      { ...settings, temperature: 0.2, maxTokens: 32 },
-      TITLE_SYSTEM_PROMPT,
-      prompt,
-    ),
-    timeout,
-  ]);
-  const title = response.trim().length > 0 ? normalizeTitle(response) : null;
-  if (title === null) return null;
-  const updated = await repository.updateSessionTitle(tenantId, userId, conversationId, title, false);
+  const fallback = normalizeTitle(
+    messages.find((message) => message.role === 'user')?.content ?? '',
+  ) ?? '新会话';
+  let timer: NodeJS.Timeout | undefined;
+  let title = fallback;
+  try {
+    const response = await Promise.race([
+      completePiText(
+        { ...settings, temperature: 0.2, maxTokens: 32, thinkingEnabled: false },
+        TITLE_SYSTEM_PROMPT,
+        prompt,
+      ),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error('title generation timed out')), TITLE_TIMEOUT_MS);
+      }),
+    ]);
+    title = normalizeTitle(response) ?? fallback;
+  } catch (error) {
+    console.warn(
+      `[documind][title] conversation ${conversationId} model generation failed, using fallback: ${(error as Error).message}`,
+    );
+  } finally {
+    clearTimeout(timer);
+  }
+  const updated = await repository.updateSessionTitle(
+    tenantId, userId, conversationId, title, false);
   return updated ? title : null;
 }
 
@@ -103,8 +117,12 @@ export function normalizeTitle(raw: string): string | null {
   const firstLine = raw.split(/\r?\n/)[0];
   if (firstLine === undefined) return null;
   const clean = firstLine.trim()
-    .replace(/^["'"“”‘’《》。！？]+/, '')
-    .replace(/["'"“”‘’《》。！？]+$/, '')
+    .replace(/^["'“”‘’《》。！？、：:；;]+|["'“”‘’《》。！？、：:；;]+$/gu, '')
+    .replace(/^(?:标题|会话标题)\s*[:：]\s*/u, '')
+    .replace(/^["'“”‘’《》。！？、：:；;]+/u, '')
+    .replace(/^(?:请帮我|帮我|请问|请|麻烦)\s*/u, '')
+    .replace(/["'“”‘’《》。！？、：:；;]+$/u, '')
+    .replace(/\s+/gu, ' ')
     .trim();
   if (clean.length === 0) return null;
   return truncateChars(clean, MAX_TITLE_CHARS);
