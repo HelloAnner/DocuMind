@@ -5,7 +5,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownUp,
   Bookmark,
-  Compass,
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
@@ -384,11 +383,7 @@ export function ChatSidebar() {
       </div>
 
       <div className="dm-chat-sidebar-footer">
-        <button className="dm-chat-explore" onClick={() => setExploreOpen(true)} type="button">
-          <Compass size={18} />
-          <span>探索</span>
-        </button>
-        <UserAccountMenu />
+        <UserAccountMenu onExplore={() => setExploreOpen(true)} />
       </div>
 
       {exploreOpen ? <AppWindow href="/help" onClose={() => setExploreOpen(false)} title="探索" /> : null}

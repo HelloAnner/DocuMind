@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Building2, CheckCheck, Heart, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, UserRound, X } from "lucide-react";
+import { Bell, Building2, CheckCheck, Compass, Heart, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
@@ -13,7 +13,7 @@ const UPDATES = [
   { id: "profile", title: "个人资料同步优化", detail: "头像和展示名称会同步显示在账号菜单与对话中。", date: "3 天前" },
 ];
 
-export function UserAccountMenu() {
+export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
   const { me, logout } = useAuth();
   const [open, setOpen] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
@@ -198,6 +198,19 @@ export function UserAccountMenu() {
             <strong>{displayName}</strong>
             <span>{roleLabel}</span>
           </span>
+        </button>
+        <button
+          aria-label="探索"
+          className={`${styles.bell} dm-user-explore`}
+          onClick={() => {
+            setOpen(false);
+            setUpdatesOpen(false);
+            onExplore();
+          }}
+          title="探索"
+          type="button"
+        >
+          <Compass size={18} />
         </button>
         <button
           aria-expanded={updatesOpen}

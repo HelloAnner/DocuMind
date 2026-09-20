@@ -7029,26 +7029,6 @@ body > .hiddenCanvasElement {
   padding: 8px 12px 12px;
 }
 
-.dm-chat-explore {
-  align-items: center;
-  background: transparent;
-  border: 0;
-  border-radius: 10px;
-  color: var(--text-secondary);
-  cursor: pointer;
-  display: flex;
-  font: inherit;
-  font-size: 14px;
-  gap: 10px;
-  height: 42px;
-  padding: 0 10px;
-  width: 100%;
-}
-
-.dm-chat-explore:hover {
-  background: var(--hover-bg);
-  color: var(--text-primary);
-}
 
 .dm-chat-sidebar.collapsed .dm-chat-workspace-switcher {
   border-bottom: 0;
@@ -7057,8 +7037,7 @@ body > .hiddenCanvasElement {
 }
 
 .dm-chat-sidebar.collapsed .dm-chat-history-toolbar,
-.dm-chat-sidebar.collapsed .dm-chat-history-search,
-.dm-chat-sidebar.collapsed .dm-chat-explore span {
+.dm-chat-sidebar.collapsed .dm-chat-history-search {
   display: none;
 }
 
@@ -7067,11 +7046,6 @@ body > .hiddenCanvasElement {
   width: 56px;
 }
 
-.dm-chat-sidebar.collapsed .dm-chat-explore {
-  justify-content: center;
-  padding: 0;
-  width: 40px;
-}
 
 .dm-chat-sidebar.collapsed .dm-user-menu-root {
   margin-top: 0;
@@ -7104,9 +7078,6 @@ body > .hiddenCanvasElement {
     display: flex;
   }
 
-  .dm-chat-sidebar.collapsed .dm-chat-explore span {
-    display: inline;
-  }
 
   .dm-chat-sidebar.collapsed .dm-chat-sidebar-footer {
     padding: 8px 12px 12px;
@@ -7119,14 +7090,9 @@ body > .hiddenCanvasElement {
   }
 
   .dm-chat-sidebar.collapsed .dm-user-footer-row {
-    grid-template-columns: minmax(0, 1fr) 40px;
+    grid-template-columns: minmax(0, 1fr) 40px 40px;
   }
 
-  .dm-chat-sidebar.collapsed .dm-chat-explore {
-    justify-content: flex-start;
-    padding: 0 10px;
-    width: 100%;
-  }
 }
 
 /* Configuration workspace */
