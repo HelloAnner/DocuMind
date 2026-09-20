@@ -6092,7 +6092,7 @@ body > .hiddenCanvasElement {
 
 .dm-chat-shell {
   --dm-chat-sidebar-width: 288px;
-  --dm-chat-content-width: min(1040px, calc(100vw - 336px));
+  --dm-chat-content-width: min(1040px, 100%);
 }
 
 .dm-chat-sidebar-header {
@@ -6131,19 +6131,20 @@ body > .hiddenCanvasElement {
 
 .dm-question-row,
 .dm-answer-card {
-  max-width: 1160px;
-  width: min(1160px, calc(100% - 48px));
+  max-width: var(--dm-chat-content-width);
+  width: var(--dm-chat-content-width);
 }
 
 .dm-answer-content {
   border: 1px solid var(--border-subtle);
   border-radius: 20px;
   box-shadow: 0 10px 30px color-mix(in srgb, var(--text-primary) 5%, transparent);
+  box-sizing: border-box;
   font-size: 15px;
   line-height: 1.9;
-  max-width: 960px;
+  max-width: none;
   padding: 20px 24px;
-  width: fit-content;
+  width: 100%;
 }
 
 .dm-composer {
@@ -6153,7 +6154,8 @@ body > .hiddenCanvasElement {
 .dm-composer-box {
   border-color: var(--border-subtle);
   border-radius: 16px;
-  max-width: 1040px;
+  max-width: var(--dm-chat-content-width);
+  width: var(--dm-chat-content-width);
 }
 
 .dm-chat-empty {
