@@ -7,7 +7,6 @@ import type { MessageStatus, RuntimeReasoningStep, RuntimeToolCall } from "@/lib
 interface ReasoningTraceProps {
   steps?: RuntimeReasoningStep[];
   toolCalls?: RuntimeToolCall[];
-  answerContent: string;
   thinking?: string;
   isStreaming: boolean;
   durationMs?: number;
@@ -23,7 +22,6 @@ type RoundStatus = "running" | "completed" | "failed";
 export function ReasoningTrace({
   steps,
   toolCalls,
-  answerContent,
   isStreaming,
   thinking,
   durationMs,
@@ -43,8 +41,7 @@ export function ReasoningTrace({
   );
   const toolCount = rounds.reduce((count, round) => count + round.tool_calls.length, 0);
   const hasThinking = Boolean(thinking?.trim());
-  const showThinking = hasThinking && (steps?.length ?? 0) === 0;
-  const interimAnswer = isStreaming ? answerContent.trim() : "";
+  const showThinking = hasThinking;
 
   useEffect(() => {
     if (isStreaming) {
@@ -71,9 +68,9 @@ export function ReasoningTrace({
   useEffect(() => {
     const feed = feedRef.current;
     if (expanded && autoScrollRef.current && feed) feed.scrollTop = feed.scrollHeight;
-  }, [expanded, interimAnswer, rounds, thinking]);
+  }, [expanded, rounds, thinking]);
 
-  if (rounds.length === 0 && !showThinking && !isStreaming) return null;
+  if (rounds.length === 0 && !showThinking) return null;
 
   function toggle() {
     if (isStreaming) return;
@@ -123,21 +120,18 @@ export function ReasoningTrace({
         >
           {showThinking ? (
             <ThoughtGroup
-              hasFollowing={rounds.length > 0 || Boolean(interimAnswer)}
+              hasFollowing={rounds.length > 0}
               isStreaming={isStreaming}
               text={thinking!.trim()}
             />
           ) : null}
           {rounds.map((round, index) => (
             <ProcessGroup
-              hasFollowing={index < rounds.length - 1 || Boolean(interimAnswer)}
+              hasFollowing={index < rounds.length - 1}
               key={round.step}
               round={round}
             />
           ))}
-          {interimAnswer ? (
-            <ThoughtGroup hasFollowing={false} isStreaming text={interimAnswer} />
-          ) : null}
         </div>
       ) : null}
     </section>

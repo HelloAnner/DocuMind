@@ -307,7 +307,6 @@ export function MessageRow({
       <ReasoningTrace
         steps={message.reasoning_steps}
         toolCalls={message.tool_calls}
-        answerContent={message.content}
         thinking={message.thinking}
         isStreaming={isStreaming}
         durationMs={message.duration_ms}
@@ -319,7 +318,7 @@ export function MessageRow({
         <div className="dm-answer-error">
           {cancelled ? "生成已取消" : message.content || "生成失败，请重试"}
         </div>
-      ) : hasContent && !isStreaming ? (
+      ) : hasContent ? (
         <AnswerContent
           content={message.content}
           isStreaming={isStreaming}
