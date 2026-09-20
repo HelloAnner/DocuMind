@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, LoaderCircle, Search, Sparkles } from "lucide-react";
+import { ChevronDown, Handshake, LoaderCircle, Sparkles } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/providers/auth-provider";
 import { switchAccountTenant, type Tenant } from "@/lib/auth";
@@ -8,9 +8,7 @@ import styles from "./tenant-switcher.module.css";
 export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
   const { me } = useAuth();
   const rootRef = useRef<HTMLDivElement>(null);
-  const searchRef = useRef<HTMLInputElement>(null);
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -23,13 +21,6 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
       return left.name.localeCompare(right.name, "zh-CN");
     });
   }, [activeId, me?.tenants]);
-  const filtered = useMemo(() => {
-    const needle = query.trim().toLocaleLowerCase();
-    if (!needle) return tenants;
-    return tenants.filter((tenant) =>
-      `${tenant.name} ${tenant.slug}`.toLocaleLowerCase().includes(needle)
-    );
-  }, [query, tenants]);
   const activeTenant = tenants.find((tenant) => tenant.id === activeId) ?? me?.tenant ?? null;
 
   useEffect(() => {
@@ -42,10 +33,8 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
 
   useEffect(() => {
     if (!open) return;
-    setQuery("");
     setActiveIndex(0);
     setError("");
-    requestAnimationFrame(() => searchRef.current?.focus());
   }, [open]);
 
   if (!me) return null;
@@ -59,6 +48,9 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
       </div>
     );
   }
+
+  const coCreatedTenants = tenants.filter((tenant) => tenant.id !== activeId);
+  const selectableTenants = [activeTenant, ...coCreatedTenants];
 
   const choose = async (tenant: Tenant) => {
     if (tenant.id === activeId) {
@@ -83,12 +75,12 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const direction = event.key === "ArrowDown" ? 1 : -1;
-      setActiveIndex((index) => (index + direction + filtered.length) % Math.max(filtered.length, 1));
+      setActiveIndex((index) => (index + direction + selectableTenants.length) % Math.max(selectableTenants.length, 1));
       return;
     }
-    if (event.key === "Enter" && filtered[activeIndex]) {
+    if (event.key === "Enter" && selectableTenants[activeIndex]) {
       event.preventDefault();
-      void choose(filtered[activeIndex]);
+      void choose(selectableTenants[activeIndex]);
     }
   };
 
@@ -110,35 +102,55 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
 
       {open ? (
         <div className={styles.popover}>
-          <label className={styles.search}>
-            <Search aria-hidden="true" size={15} />
-            <input
-              aria-label="搜索企业空间"
-              onChange={(event) => { setQuery(event.target.value); setActiveIndex(0); }}
-              placeholder="搜索企业空间"
-              ref={searchRef}
-              value={query}
-            />
-          </label>
           <div aria-label="企业空间" className={styles.list} role="listbox">
-            {filtered.map((tenant, index) => (
+            <section className={styles.section}>
+              <div className={styles.sectionLabel}>
+                <Sparkles aria-hidden="true" size={17} />
+                <span>个人空间</span>
+              </div>
               <button
-                aria-selected={tenant.id === activeId}
-                className={`${styles.option} ${index === activeIndex ? styles.optionActive : ""}`}
+                aria-selected="true"
+                className={styles.option}
                 disabled={pendingId !== null}
-                key={tenant.id}
-                onClick={() => void choose(tenant)}
-                onMouseEnter={() => setActiveIndex(index)}
+                onClick={() => void choose(activeTenant)}
+                onMouseEnter={() => setActiveIndex(0)}
                 role="option"
                 type="button"
               >
-                <span className={styles.optionMark}>{tenant.name.trim().slice(0, 1).toUpperCase()}</span>
-                <span className={styles.optionCopy}><strong>{tenant.name}</strong><small>{tenant.slug}</small></span>
-                {tenant.id === activeId ? <Check aria-hidden="true" size={16} /> : null}
-                {pendingId === tenant.id ? <LoaderCircle className={styles.spin} size={16} /> : null}
+                <span className={styles.optionCopy}><strong>{activeTenant.name}</strong></span>
+                <span className={styles.currentBadge}>当前</span>
+                {pendingId === activeTenant.id ? <LoaderCircle className={styles.spin} size={16} /> : null}
               </button>
-            ))}
-            {filtered.length === 0 ? <p className={styles.empty}>没有匹配的企业空间</p> : null}
+            </section>
+            {coCreatedTenants.length > 0 ? (
+              <>
+                <div className={styles.divider} />
+                <section className={styles.section}>
+                  <div className={styles.sectionLabel}>
+                    <Handshake aria-hidden="true" size={17} />
+                    <span>共创空间</span>
+                  </div>
+                  {coCreatedTenants.map((tenant, index) => {
+                    const optionIndex = index + 1;
+                    return (
+                      <button
+                        aria-selected="false"
+                        className={`${styles.option} ${styles.coCreatedOption} ${optionIndex === activeIndex ? styles.optionActive : ""}`}
+                        disabled={pendingId !== null}
+                        key={tenant.id}
+                        onClick={() => void choose(tenant)}
+                        onMouseEnter={() => setActiveIndex(optionIndex)}
+                        role="option"
+                        type="button"
+                      >
+                        <span className={styles.optionCopy}><strong>{tenant.name}</strong></span>
+                        {pendingId === tenant.id ? <LoaderCircle className={styles.spin} size={16} /> : null}
+                      </button>
+                    );
+                  })}
+                </section>
+              </>
+            ) : null}
           </div>
           {error ? <p className={styles.error} role="alert">{error}</p> : null}
         </div>

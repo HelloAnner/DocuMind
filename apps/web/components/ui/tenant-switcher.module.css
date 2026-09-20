@@ -25,24 +25,15 @@
   outline: none;
 }
 
-.mark,
-.optionMark {
+.mark {
   align-items: center;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 9px;
+  background: transparent;
+  border: 0;
   color: var(--text-muted);
   display: inline-flex;
   flex: 0 0 auto;
-  height: 32px;
-  justify-content: center;
-  width: 32px;
-}
-
-.mark {
-  background: transparent;
-  border: 0;
   height: 28px;
+  justify-content: center;
   width: 28px;
 }
 
@@ -54,12 +45,6 @@
   min-width: 0;
 }
 
-.current small,
-.optionCopy small {
-  color: var(--text-muted);
-  font-size: 10px;
-  line-height: 1.35;
-}
 
 .current strong,
 .optionCopy strong {
@@ -83,49 +68,21 @@
 .popover {
   background: var(--bg-secondary);
   border: 1px solid var(--border-subtle);
-  border-radius: 14px;
+  border-radius: 16px;
   box-shadow: var(--panel-shadow);
   left: 0;
-  padding: 8px;
+  padding: 14px 16px 12px;
   position: absolute;
   right: 0;
   top: calc(100% + 7px);
   z-index: 80;
 }
 
-.search {
-  align-items: center;
-  background: var(--bg-primary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 9px;
-  color: var(--text-muted);
-  display: flex;
-  gap: 8px;
-  padding: 0 10px;
-}
-
-.search:focus-within {
-  border-color: var(--accent-action);
-}
-
-.search input {
-  background: transparent;
-  border: 0;
-  color: var(--text-primary);
-  font: inherit;
-  font-size: 12px;
-  height: 36px;
-  min-width: 0;
-  outline: 0;
-  width: 100%;
-}
 
 .list {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  margin-top: 7px;
-  max-height: 280px;
+  max-height: 320px;
   overflow-y: auto;
 }
 
@@ -137,9 +94,9 @@
   color: var(--text-primary);
   cursor: pointer;
   display: flex;
-  gap: 9px;
+  gap: 10px;
   min-height: 48px;
-  padding: 6px 8px;
+  padding: 6px 12px;
   text-align: left;
   width: 100%;
 }
@@ -156,12 +113,49 @@
   opacity: 0.72;
 }
 
-.optionMark {
-  border-radius: 8px;
+.section {
+  display: flex;
+  flex-direction: column;
+}
+
+.sectionLabel {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 14px;
+  font-weight: 600;
+  gap: 10px;
+  padding: 5px 8px 9px;
+}
+
+.sectionLabel svg {
+  flex: 0 0 auto;
+}
+
+.option .optionCopy strong {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.currentBadge {
+  background: #7657ff;
+  border-radius: 999px;
+  color: #fff;
+  flex: 0 0 auto;
   font-size: 12px;
-  font-weight: 700;
-  height: 30px;
-  width: 30px;
+  font-weight: 600;
+  line-height: 22px;
+  padding: 0 10px;
+}
+
+.coCreatedOption {
+  background: var(--bg-tertiary);
+  margin-top: 4px;
+}
+
+.divider {
+  border-top: 1px solid var(--border-subtle);
+  margin: 12px 0;
 }
 
 .collapsed {
@@ -187,19 +181,14 @@
   width: 240px;
 }
 
-.empty,
 .error {
-  color: var(--text-muted);
+  color: var(--color-danger, #c2413b);
   font-size: 12px;
   margin: 0;
-  padding: 14px 10px;
+  padding: 8px 6px 3px;
   text-align: center;
 }
 
-.error {
-  color: var(--color-danger, #c2413b);
-  padding: 8px 6px 3px;
-}
 
 .spin {
   animation: spin 800ms linear infinite;
