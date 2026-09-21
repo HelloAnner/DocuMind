@@ -92,7 +92,7 @@
   cursor: pointer;
   display: flex;
   font: inherit;
-  font-size: 15px;
+  font-size: 13px;
   font-weight: 600;
   gap: 8px;
   justify-content: center;
@@ -118,7 +118,7 @@
   color: var(--text-primary);
   display: flex;
   font-family: "Snell Roundhand", "Segoe Script", cursive;
-  font-size: 24px;
+  font-size: 20px;
   font-style: italic;
   justify-content: center;
   letter-spacing: -0.04em;
@@ -146,7 +146,7 @@
   cursor: pointer;
   display: flex;
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   height: 36px;
   justify-content: center;
   padding: 0 14px;
@@ -200,26 +200,26 @@
   border-radius: 6px;
   color: #9b7bea;
   display: inline-flex;
-  font-size: 12px;
+  font-size: 11px;
   gap: 4px;
   padding: 4px 7px;
 }
 
 .updateMeta time {
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .updateItem > strong {
   display: block;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 650;
   line-height: 1.5;
 }
 
 .updateItem > p {
   color: var(--text-secondary);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.65;
   margin: 3px 0 0;
 }
@@ -236,7 +236,7 @@
 
 .updateEmpty {
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 12px;
   margin: 0;
   padding: 72px 0;
   text-align: center;
@@ -254,11 +254,11 @@
 
 .updateEmptyState strong {
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: 13px;
 }
 
 .updateEmptyState span {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .avatar {
