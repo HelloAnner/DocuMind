@@ -325,14 +325,10 @@ select:focus-visible {
 }
 
 .dm-agent-orb {
-  align-items: center;
-  background: linear-gradient(145deg, #fff7dc, #ffcf70);
-  border: 1px solid color-mix(in srgb, #d97706 22%, var(--border-subtle));
-  border-radius: 50%;
-  box-shadow: 0 10px 28px rgba(180, 83, 9, 0.14);
-  color: #713f12;
-  display: inline-flex;
-  justify-content: center;
+  background: conic-gradient(from -40deg at 42% 48%, #b65ac7 0deg, #ec3d91 85deg, #a955d4 180deg, #635cf6 245deg, #348cf7 310deg, #8c62d0 360deg);
+  border-radius: 44% 45% 46% 42% / 48% 38% 45% 42%;
+  box-shadow: 0 4px 14px rgba(109, 40, 217, 0.16);
+  display: inline-block;
 }
 
 .dm-agent-orb-small {
@@ -350,10 +346,6 @@ select:focus-visible {
   width: 190px;
 }
 
-.dm-agent-orb-face {
-  height: 54%;
-  width: 54%;
-}
 
 /* Shared product shell */
 

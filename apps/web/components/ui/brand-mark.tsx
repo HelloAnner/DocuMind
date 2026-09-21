@@ -1,4 +1,4 @@
-import { BookOpenText, Smile } from "lucide-react";
+import { BookOpenText } from "lucide-react";
 import { clsx } from "clsx";
 
 export function BrandMark({ compact = false, className }: { compact?: boolean; className?: string }) {
@@ -14,8 +14,6 @@ export function BrandMark({ compact = false, className }: { compact?: boolean; c
 
 export function AgentOrb({ size = "medium", className }: { size?: "small" | "medium" | "large"; className?: string }) {
   return (
-    <span className={clsx("dm-agent-orb", `dm-agent-orb-${size}`, className)} aria-label="油条">
-      <Smile aria-hidden className="dm-agent-orb-face" />
-    </span>
+    <span className={clsx("dm-agent-orb", `dm-agent-orb-${size}`, className)} aria-label="油条" />
   );
 }
