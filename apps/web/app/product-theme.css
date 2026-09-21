@@ -328,7 +328,10 @@ select:focus-visible {
   background: conic-gradient(from -40deg at 42% 48%, #b65ac7 0deg, #ec3d91 85deg, #a955d4 180deg, #635cf6 245deg, #348cf7 310deg, #8c62d0 360deg);
   border-radius: 44% 45% 46% 42% / 48% 38% 45% 42%;
   box-shadow: 0 4px 14px rgba(109, 40, 217, 0.16);
+  animation: dm-agent-orb-breathe 4s ease-in-out infinite;
   display: inline-block;
+  transform-origin: center;
+  will-change: border-radius, filter, transform;
 }
 
 .dm-agent-orb-small {
@@ -344,6 +347,26 @@ select:focus-visible {
 .dm-agent-orb-large {
   height: 190px;
   width: 190px;
+}
+
+@keyframes dm-agent-orb-breathe {
+  0%,
+  100% {
+    border-radius: 44% 45% 46% 42% / 48% 38% 45% 42%;
+    filter: saturate(1);
+    transform: rotate(-2deg) scale(1);
+  }
+  50% {
+    border-radius: 48% 42% 43% 47% / 42% 47% 40% 48%;
+    filter: saturate(1.12);
+    transform: rotate(2deg) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dm-agent-orb {
+    animation: none;
+  }
 }
 
 
