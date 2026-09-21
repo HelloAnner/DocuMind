@@ -325,9 +325,14 @@ select:focus-visible {
 }
 
 .dm-agent-orb {
-  display: inline-block;
-  filter: drop-shadow(0 24px 60px color-mix(in srgb, var(--agent-violet) 25%, transparent));
-  position: relative;
+  align-items: center;
+  background: linear-gradient(145deg, #fff7dc, #ffcf70);
+  border: 1px solid color-mix(in srgb, #d97706 22%, var(--border-subtle));
+  border-radius: 50%;
+  box-shadow: 0 10px 28px rgba(180, 83, 9, 0.14);
+  color: #713f12;
+  display: inline-flex;
+  justify-content: center;
 }
 
 .dm-agent-orb-small {
@@ -345,59 +350,9 @@ select:focus-visible {
   width: 190px;
 }
 
-.dm-agent-orb-core {
-  background:
-    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.38), transparent 21%),
-    linear-gradient(145deg, var(--agent-violet) 0%, var(--agent-blue) 58%, var(--agent-cyan) 118%);
-  border-radius: 48% 52% 56% 44% / 44% 38% 62% 56%;
-  box-shadow: inset -18px -16px 36px rgba(30, 30, 80, 0.14);
-  height: 100%;
-  inset: 0;
-  position: absolute;
-  transform: rotate(-7deg);
-  width: 100%;
-}
-
-.dm-agent-orb-core::after {
-  background: var(--agent-pink);
-  border-radius: 50%;
-  content: "";
-  height: 18%;
-  position: absolute;
-  right: 2%;
-  top: -4%;
-  width: 18%;
-}
-
-.dm-agent-orb-glint {
-  background: rgba(255, 255, 255, 0.94);
-  border-radius: 50%;
-  box-shadow: inset -4px -5px 0 rgba(26, 26, 50, 0.88);
-  position: absolute;
-}
-
-.dm-agent-orb-glint-one {
-  height: 17%;
-  left: 28%;
-  top: 37%;
-  width: 17%;
-}
-
-.dm-agent-orb-glint-two {
-  height: 19%;
-  left: 51%;
-  top: 28%;
-  width: 19%;
-}
-
-.dm-agent-orb-small .dm-agent-orb-glint,
-.dm-agent-orb-small .dm-agent-orb-core::after {
-  display: none;
-}
-
-.dm-agent-orb-small .dm-agent-orb-core {
-  border-radius: 50%;
-  transform: none;
+.dm-agent-orb-face {
+  height: 54%;
+  width: 54%;
 }
 
 /* Shared product shell */

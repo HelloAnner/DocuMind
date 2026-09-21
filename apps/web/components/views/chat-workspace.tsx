@@ -543,7 +543,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
               <IconButton aria-label="打开会话导航" className="dm-chat-mobile-menu" onClick={openMobile}>
                 <Menu size={18} />
               </IconButton>
-              <span className="dm-chat-agent-name">DocuMind</span>
+              <span className="dm-chat-agent-name">油条</span>
               <span className="dm-chat-title-separator" aria-hidden="true">/</span>
               <MessageSquareText className="dm-chat-title-icon" size={14} aria-hidden="true" />
               <strong>{currentConversation?.title ?? "新会话"}</strong>

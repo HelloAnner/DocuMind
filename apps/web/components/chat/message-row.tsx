@@ -133,7 +133,7 @@ function AgentMeta({
       </span>
       <div className="dm-answer-head-copy">
         <div className="dm-message-identity">
-          <strong>DocuMind</strong>
+          <strong>油条</strong>
           {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
         </div>
         {meta.length > 0 ? <p>{meta.join(" · ")}</p> : null}
