@@ -115,20 +115,32 @@ export function evaluateExpectations(
       responseFileIds.includes(fileId),
     ));
   }
+  const expectedSuffixes = (expectation.file_extensions ?? []).map(extensionSuffix);
   if (expectation.input_files_modified !== undefined) {
-    // 只要求“至少一个输入文件被写回同一 ID”，不排斥同轮新建的中间文件
-    // （Office 技能会把输入 JSON 写在工作区，它本来就是新文件）。
+    // “至少一个输入文件被写回同一 ID”，不排斥同轮新建的中间文件（Office 技能会把输入
+    // JSON 写在工作区，它本来就是新文件）；但指定了期望扩展名时，被写回的输入文件本身
+    // 必须命中，避免“改了别的输入文件 + 新建一个期望类型的副本”蒙混通过。
     const writtenBack = responseFileIds.filter((fileId) => inputFileIds.includes(fileId));
     const created = responseFileIds.filter((fileId) => !inputFileIds.includes(fileId));
+    const matchedSuffixes = (fileId: string): string[] => {
+      const path = report.response.files.find((file) => file.id === fileId)?.path.toLowerCase() ?? "";
+      return expectedSuffixes.filter((suffix) => path.endsWith(suffix));
+    };
+    const matched = writtenBack.filter((fileId) => matchedSuffixes(fileId).length > 0);
     assertions.push(assertion(
       "input_files_modified",
       true,
-      { input_file_ids: inputFileIds, written_back: writtenBack, created },
-      writtenBack.length > 0,
+      {
+        input_file_ids: inputFileIds,
+        expected_suffixes: expectedSuffixes,
+        written_back: writtenBack,
+        created,
+        matched: matched.map((fileId) => ({ file_id: fileId, suffixes: matchedSuffixes(fileId) })),
+      },
+      expectedSuffixes.length === 0 ? writtenBack.length > 0 : matched.length > 0,
     ));
   }
-  for (const extension of expectation.file_extensions ?? []) {
-    const suffix = extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
+  for (const suffix of expectedSuffixes) {
     assertions.push(assertion(
       `file_extension:${suffix}`,
       suffix,
@@ -205,6 +217,10 @@ function validateScenario(value: unknown): asserts value is Scenario {
       }
     }
   }
+}
+
+function extensionSuffix(extension: string): string {
+  return extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
 }
 
 function assertion(

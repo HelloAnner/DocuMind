@@ -605,7 +605,10 @@ export interface ScenarioExpectation {
   file_extensions?: string[];
   /** 断言这些用户文件 ID 出现在本轮 response.files 中（用于确认改动落在目标文件上）。 */
   file_ids?: string[];
-  /** 断言至少一个输入文件被原地写回（其 ID 出现在 response.files）；同轮新建的中间文件不影响判定。 */
+  /**
+   * 断言至少一个输入文件被原地写回（其 ID 出现在 response.files）。
+   * 同轮新建的中间文件不影响判定；但指定 file_extensions 时，被写回的输入文件本身必须命中期望扩展名。
+   */
   input_files_modified?: boolean;
 }
 

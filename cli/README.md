@@ -304,7 +304,7 @@ documind run examples/dm-be-files-modify-scenario.json --conversation <conversat
 documind files download <xlsx-id> --output ./table-checked.xlsx --force
 ```
 
-场景断言支持 `files_min`、`file_extensions`、`file_ids`（断言这些文件 ID 出现在本轮 `response.files`）、`input_files_modified`（断言至少一个输入文件被原地写回同一 ID；同轮的中间文件如技能输入 JSON 会作为新文件出现在报告里，不影响判定）以及逐轮 `file_ids` 输入。做完原地修改后可用 `files download <file-id> --output ...` 取回文件并本地打开核对内容。
+场景断言支持 `files_min`、`file_extensions`、`file_ids`（断言这些文件 ID 出现在本轮 `response.files`）、`input_files_modified`（断言至少一个输入文件被原地写回同一 ID；同轮新建的中间文件如技能输入 JSON 会作为新文件出现在报告里，不参与判定。若同时指定 `file_extensions`，被写回的输入文件本身必须命中期望扩展名——新建一个期望类型的副本不算）以及逐轮 `file_ids` 输入。断言 `actual` 里会给出 `written_back`、`created` 与 `matched`（被写回且命中扩展名的输入文件及其后缀）明细。做完原地修改后可用 `files download <file-id> --output ...` 取回文件并本地打开核对内容。
 
 ## 向量库诊断
 

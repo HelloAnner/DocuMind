@@ -38,12 +38,63 @@ describe("scenario expectations", () => {
     expect(withScratch[0]!.passed).toBe(true);
   });
 
+  test("rejects in-place claims satisfied only by a new copy of the expected type", () => {
+    const scenario = report();
+    scenario.response.files = [
+      userFile("pptx-input", "in/deck.pptx"),
+      userFile("xlsx-copy", "generated/c/a/result.xlsx"),
+    ];
+    const failed = evaluateExpectations(scenario, {
+      input_files_modified: true,
+      file_extensions: [".xlsx"],
+    }, ["pptx-input"]);
+    const inPlace = failed.find((item) => item.field === "input_files_modified");
+    expect(inPlace?.passed).toBe(false);
+    expect(inPlace?.actual).toMatchObject({
+      written_back: ["pptx-input"],
+      created: ["xlsx-copy"],
+      matched: [],
+    });
+    // 期望扩展名由新建副本满足，不能算作输入文件被原地修改
+    expect(failed.find((item) => item.field === "file_extension:.xlsx")?.passed).toBe(true);
+    // 不指定扩展名时保持“任一输入文件被写回”语义
+    const relaxed = evaluateExpectations(scenario, { input_files_modified: true }, ["pptx-input"]);
+    expect(relaxed[0]!.passed).toBe(true);
+
+    const satisfied = evaluateExpectations({
+      ...scenario,
+      response: {
+        ...scenario.response,
+        files: [userFile("xlsx-input", "in/table.xlsx"), userFile("xlsx-copy", "generated/c/a/result.xlsx")],
+      },
+    }, { input_files_modified: true, file_extensions: [".xlsx"] }, ["xlsx-input"]);
+    const matched = satisfied.find((item) => item.field === "input_files_modified");
+    expect(matched?.passed).toBe(true);
+    expect(matched?.actual).toMatchObject({ matched: [{ file_id: "xlsx-input", suffixes: [".xlsx"] }] });
+  });
+
   test("loads the deterministic Office runner server scenario", async () => {
     const scenario = await loadScenario("examples/dm-be-files-scenario.json");
     expect(scenario.turns).toHaveLength(4);
     expect(scenario.turns[3]!.expect?.file_extensions).toEqual([".docx"]);
   });
 });
+
+function userFile(id: string, path: string): ChatRunReport["response"]["files"][number] {
+  const name = path.split("/").pop() ?? path;
+  return {
+    id,
+    name,
+    path,
+    mime_type: "application/octet-stream",
+    size_bytes: 100,
+    source: "sandbox",
+    conversation_id: "c",
+    created_at: "2026-01-01T00:00:00.000Z",
+    updated_at: "2026-01-01T00:00:00.000Z",
+    download_url: `/api/files/${id}/download`,
+  };
+}
 
 function report(): ChatRunReport {
   return {
