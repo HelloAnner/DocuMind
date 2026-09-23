@@ -25,7 +25,6 @@ REMOTE_REDIS_IMAGE="${REMOTE_REDIS_IMAGE:-m.daocloud.io/docker.io/library/redis:
 REMOTE_RABBITMQ_IMAGE="${REMOTE_RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/rabbitmq:3-management-alpine}"
 REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}"
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
-REMOTE_MINIO_MC_IMAGE="${REMOTE_MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:RELEASE.2024-07-15T19-17-04Z}"
 REMOTE_BASH_RUNNER_IMAGE="${REMOTE_BASH_RUNNER_IMAGE:-documind-bash-runner:latest}"
 
 if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
@@ -351,7 +350,6 @@ redis_image='$REMOTE_REDIS_IMAGE'
 rabbitmq_image='$REMOTE_RABBITMQ_IMAGE'
 es_image='$REMOTE_ES_IMAGE'
 minio_image='$REMOTE_MINIO_IMAGE'
-minio_mc_image='$REMOTE_MINIO_MC_IMAGE'
 bash_runner_image='$REMOTE_BASH_RUNNER_IMAGE'
 
 if [[ ! -f "\$remote_env" ]]; then
@@ -612,13 +610,12 @@ for _ in \$(seq 1 60); do
   sleep 1
 done
 curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null
-docker run --rm --network host \
-  --entrypoint /bin/sh \
+docker exec \
   -e MINIO_USER="\$minio_access_key" \
   -e MINIO_PASSWORD="\$minio_secret_key" \
   -e MINIO_BUCKET="\$minio_bucket" \
-  "\$minio_mc_image" -c '
-    mc alias set local http://127.0.0.1:9010 "\$MINIO_USER" "\$MINIO_PASSWORD" >/dev/null &&
+  "\$minio_container" sh -c '
+    mc alias set local http://127.0.0.1:9000 "\$MINIO_USER" "\$MINIO_PASSWORD" >/dev/null &&
     mc mb --ignore-existing "local/\$MINIO_BUCKET" >/dev/null &&
     mc stat "local/\$MINIO_BUCKET" >/dev/null
   '
