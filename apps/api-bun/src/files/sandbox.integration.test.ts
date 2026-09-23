@@ -33,6 +33,36 @@ integration('real Bash runner acceptance', () => {
     }
   });
 
+  test('modifies existing XLSX and PPTX in place through the Office skills', async () => {
+    const database = fakeDatabase();
+    const storage = memoryStorage();
+    const check = [
+      'from openpyxl import load_workbook',
+      'from pptx import Presentation',
+      'rows = [[cell.value for cell in row] for row in load_workbook("table.xlsx").active.iter_rows()]',
+      'assert rows == [["项目", "数值"], ["产量", 42], ["库存", 7]], rows',
+      'assert len(Presentation("deck.pptx").slides._sldIdLst) == 2',
+      'print("modify-ok")',
+    ].join('\\n');
+    const result = await runBashSandbox(request(
+      database.sql, storage, crypto.randomUUID(),
+      [
+        "python /opt/cnpc-skills/cnpc-excel.py <(printf '%s' '{\"sheets\":[{\"name\":\"数据\",\"rows\":[[\"项目\",\"数值\"],[\"产量\",42]]}]}') table.xlsx",
+        "python /opt/cnpc-skills/cnpc-excel.py <(printf '%s' '{\"source\":\"table.xlsx\",\"sheets\":[{\"name\":\"数据\",\"mode\":\"append\",\"rows\":[[\"库存\",7]]}]}') table.xlsx",
+        "python /opt/cnpc-skills/cnpc-ppt.py <(printf '%s' '{\"slides\":[{\"title\":\"基线\",\"bullets\":[\"基线\"]}]}') deck.pptx",
+        "python /opt/cnpc-skills/cnpc-ppt.py <(printf '%s' '{\"source\":\"deck.pptx\",\"slides\":[{\"title\":\"追加\",\"bullets\":[\"追加通过\"]}]}') deck.pptx",
+        `printf "import sys\\n${check}" > check.py`,
+        'python check.py',
+      ].join(' && '),
+    ));
+    expect({ code: result.exit_code, stderr: result.stderr }).toMatchObject({ code: 0 });
+    expect(result.stdout).toContain('modify-ok');
+    const paths = result.files.map((file) => file.path).sort();
+    expect(paths).toHaveLength(2);
+    expect(paths[0]).toEndWith('/deck.pptx');
+    expect(paths[1]).toEndWith('/table.xlsx');
+  });
+
   test('passes mandatory deployment sync, timeout and symlink acceptance', async () => {
     await expect(runBashRunnerAcceptance(IMAGE!)).resolves.toBeUndefined();
   });
