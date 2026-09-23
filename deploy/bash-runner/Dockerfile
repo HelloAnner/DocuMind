@@ -1,4 +1,6 @@
-FROM python:3.12-slim
+# 服务器无法直连 Docker Hub，部署时用 --build-arg 指定镜像源前缀。
+ARG BASE_IMAGE=python:3.12-slim
+FROM ${BASE_IMAGE}
 
 RUN pip install --no-cache-dir \
     python-docx==1.2.0 \

@@ -27,6 +27,7 @@ REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearc
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
 REMOTE_MINIO_MC_IMAGE="${REMOTE_MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:RELEASE.2024-07-15T19-17-04Z}"
 REMOTE_BASH_RUNNER_IMAGE="${REMOTE_BASH_RUNNER_IMAGE:-documind-bash-runner:latest}"
+REMOTE_BASH_RUNNER_BASE_IMAGE="${REMOTE_BASH_RUNNER_BASE_IMAGE:-m.daocloud.io/docker.io/library/python:3.12-slim}"
 
 if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
@@ -353,6 +354,7 @@ es_image='$REMOTE_ES_IMAGE'
 minio_image='$REMOTE_MINIO_IMAGE'
 minio_mc_image='$REMOTE_MINIO_MC_IMAGE'
 bash_runner_image='$REMOTE_BASH_RUNNER_IMAGE'
+bash_runner_base_image='$REMOTE_BASH_RUNNER_BASE_IMAGE'
 
 if [[ ! -f "\$remote_env" ]]; then
   cp "\$remote_release/.env.default" "\$remote_env"
@@ -448,6 +450,7 @@ chown -R 1000:0 "\$remote_shared/elasticsearch"
 chmod -R g+rwX "\$remote_shared/elasticsearch"
 
 docker build -t "\$bash_runner_image" \
+  --build-arg BASE_IMAGE="\$bash_runner_base_image" \
   -f "\$remote_release/deploy/bash-runner/Dockerfile" "\$remote_release" >/dev/null
 docker run --rm \
   --network none \
