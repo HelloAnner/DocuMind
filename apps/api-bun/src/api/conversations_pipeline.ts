@@ -36,6 +36,8 @@ export interface AgentPipelineOptions {
   assistantMessageId: string;
   originalQuery: string;
   effectiveKbIds: string[];
+  fileIds: string[];
+  fileContext: string;
   ctx: PipelineContext;
   /** 对应 Rust spawn_title_update 的 JoinHandle；重试路径为 null。 */
   titleUpdate: Promise<string | null> | null;
@@ -85,8 +87,10 @@ export async function runAgentPipeline(options: AgentPipelineOptions): Promise<v
 
 async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<void> {
   const { repo, config, ctx, actor } = options;
-  const correction = await findPublishedCorrection(
-    options.sql, actor.tenant_id, options.originalQuery, options.effectiveKbIds);
+  const correction = options.fileIds.length === 0
+    ? await findPublishedCorrection(
+      options.sql, actor.tenant_id, options.originalQuery, options.effectiveKbIds)
+    : null;
   if (correction !== null) {
     await completeWithCorrection(options, correction);
     return;
@@ -101,6 +105,8 @@ async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<voi
     assistant_message_id: options.assistantMessageId,
     original_query: options.originalQuery,
     effective_kb_ids: options.effectiveKbIds,
+    file_ids: options.fileIds,
+    file_context: options.fileContext,
     can_manage_skills: actor.is_super_admin || actor.roles.some((role) =>
       ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role)),
     history: history,
@@ -256,6 +262,7 @@ async function completeWithCorrection(
   const citationOutputs: CitationOutput[] = correction.sources
     .filter((source) => source.doc_id !== null && source.chunk_id !== null)
     .map((source, index) => ({
+      citation_id: newUuid(),
       index: index + 1,
       chunk_id: source.chunk_id!,
       doc_id: source.doc_id!,
@@ -281,7 +288,7 @@ async function completeWithCorrection(
   await repo.updateMessage(message);
 
   const citations: Citation[] = citationOutputs.map((citation) => ({
-    id: newUuid(),
+    id: citation.citation_id,
     assistant_message_id: options.assistantMessageId,
     index: citation.index,
     chunk_id: citation.chunk_id,

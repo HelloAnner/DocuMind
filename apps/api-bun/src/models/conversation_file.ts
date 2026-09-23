@@ -1,5 +1,6 @@
 // 移植自 apps/api-rs/src/models/conversation_file.rs
 import type { CitationAnchor } from './citation.ts';
+import type { UserFile } from './user_file.ts';
 
 export interface ConversationFile {
   doc_id: string; doc_title: string; file_name: string; file_type: string;
@@ -9,5 +10,7 @@ export interface ConversationFile {
   preview_anchor?: CitationAnchor | null;
 }
 export interface ConversationFileListResponse {
-  conversation_id: string; files: ConversationFile[];
+  conversation_id: string;
+  files: ConversationFile[];
+  user_files: UserFile[];
 }

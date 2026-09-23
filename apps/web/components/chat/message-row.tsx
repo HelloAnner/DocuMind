@@ -18,6 +18,7 @@ import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import { copyToClipboard } from "@/lib/clipboard";
 import { SkillCard } from "./skill-card";
+import { ChatFileCard } from "./chat-file-card";
 
 function isCitationDeleted(citation: Citation) {
   return citation.source_status === "deleted";
@@ -86,11 +87,27 @@ function formatRelativeTime(value: string) {
   const minutes = Math.floor(elapsed / 60_000);
   if (minutes < 1) return "刚刚";
   if (minutes < 60) return `${minutes} 分钟前`;
+
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours} 小时前`;
   const days = Math.floor(hours / 24);
   if (days < 7) return `${days} 天前`;
   return new Date(timestamp).toLocaleDateString("zh-CN", { month: "short", day: "numeric" });
+}
+
+function MessageFileCards({ message }: { message: Message }) {
+  if (!message.files || message.files.length === 0) return null;
+  return (
+    <div className="dm-message-files" role="list" aria-label="附件文件">
+      {message.files.map((file) => (
+        <ChatFileCard
+          badge={message.role === "assistant" ? "助手产物" : "用户上传"}
+          file={file}
+          key={file.id}
+        />
+      ))}
+    </div>
+  );
 }
 
 
@@ -276,6 +293,7 @@ export function MessageRow({
             {relativeTime ? <time dateTime={message.created_at}>{relativeTime}</time> : null}
           </div>
           <div className="dm-user-bubble">{message.content}</div>
+          <MessageFileCards message={message} />
           <div className="dm-user-message-actions">
             <IconButton aria-label="复制" onClick={handleCopy}>
               {copied ? <Check size={14} /> : <Copy size={14} />}
@@ -313,6 +331,7 @@ export function MessageRow({
         status={message.status}
       />
       <SkillCard toolCalls={message.tool_calls} />
+      <MessageFileCards message={message} />
 
       {failed || cancelled ? (
         <div className="dm-answer-error">

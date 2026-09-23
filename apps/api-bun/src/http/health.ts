@@ -1,3 +1,4 @@
+import { HeadBucketCommand, S3Client } from '@aws-sdk/client-s3';
 // 移植自 apps/api-rs/src/lib.rs 的依赖探测与 /api/health
 import type Redis from 'ioredis';
 import type { Sql } from 'postgres';
@@ -87,16 +88,33 @@ export async function checkElasticsearch(
     'index', index);
 }
 
-export async function checkObjectStorage(
-  provider: string, endpoint: string | null, bucket: string,
-): Promise<DependencyCheck> {
-  const ep = present(endpoint);
-  if (!ep) return checkFailed('OBJECT_STORAGE_ENDPOINT is not configured');
-  const url = provider.toLowerCase() === 'minio'
-    ? `${ep.replace(/\/+$/, '')}/minio/health/live` : ep;
-  const check = await checkHttpGet(url, 'object storage');
-  withField(check, 'provider', provider);
-  withField(check, 'bucket', bucket);
+export async function checkObjectStorage(config: AppConfig): Promise<DependencyCheck> {
+  const endpoint = present(config.objectStorageEndpoint);
+  const accessKey = present(config.objectStorageAccessKey);
+  const secretKey = present(config.objectStorageSecretKey);
+  if (!endpoint) return checkFailed('OBJECT_STORAGE_ENDPOINT is not configured');
+  if (!accessKey || !secretKey) return checkFailed('object storage credentials are not configured');
+  const client = new S3Client({
+    endpoint,
+    region: config.objectStorageRegion,
+    forcePathStyle: config.objectStorageForcePathStyle,
+    credentials: { accessKeyId: accessKey, secretAccessKey: secretKey },
+  });
+  let check: DependencyCheck;
+  try {
+    await withTimeout(
+      client.send(new HeadBucketCommand({ Bucket: config.objectStorageBucket })),
+      'object storage bucket health check timed out',
+    );
+    check = checkOk();
+  } catch (error) {
+    check = checkFailed((error as Error).message);
+  }
+  finally {
+    client.destroy();
+  }
+  withField(check, 'provider', config.objectStorageProvider);
+  withField(check, 'bucket', config.objectStorageBucket);
   return check;
 }
 
@@ -192,8 +210,7 @@ export async function healthPayload(deps: HealthDeps): Promise<Record<string, un
   const redis = await checkRedis(deps.redis);
   const elasticsearch = await checkElasticsearch(
     config.elasticsearchUrl, config.rag.embedding.indexAlias);
-  const objectStorage = await checkObjectStorage(
-    config.objectStorageProvider, config.objectStorageEndpoint, config.objectStorageBucket);
+  const objectStorage = await checkObjectStorage(config);
   const rabbitmq = await checkTcpUrl(config.rabbitmqUrl, 5672);
   const realLlm = withField(
     await checkOpenAiCompatibleEndpoint(

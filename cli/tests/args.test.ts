@@ -17,11 +17,15 @@ describe("parseArgs", () => {
       "kb-1,kb-2",
       "-k",
       "kb-3",
+      "--file-id",
+      "file-1,file-2",
+      "--file-id=file-3",
       "--trace=full",
     ]);
     expect(args.positionals).toEqual(["chat", "采购合同的付款条件？"]);
     expect(booleanOption(args, "json")).toBe(true);
     expect(listOption(args, "kb")).toEqual(["kb-1", "kb-2", "kb-3"]);
+    expect(listOption(args, "file-id")).toEqual(["file-1", "file-2", "file-3"]);
     expect(stringOption(args, "trace")).toBe("full");
   });
 

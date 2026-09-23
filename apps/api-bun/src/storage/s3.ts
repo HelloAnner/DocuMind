@@ -26,39 +26,39 @@ export class S3Storage implements ObjectStorage {
     this.bucket = bucket;
   }
 
-  async put(key: string, bytes: Uint8Array): Promise<void> {
+  async put(key: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void> {
     try {
       await this.client.send(new PutObjectCommand({
         Bucket: this.bucket,
         Key: key,
         Body: bytes,
-      }));
+      }), { abortSignal: signal });
     } catch (error) {
       throw contextError(error, 'failed to put object s3://' + this.bucket + '/' + key);
     }
   }
 
-  async get(key: string): Promise<Uint8Array> {
+  async get(key: string, signal?: AbortSignal): Promise<Uint8Array> {
     try {
       const output = await this.client.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
-      }));
+      }), { abortSignal: signal });
       if (output.Body === undefined) {
         throw new Error('missing body in get response');
       }
-      return new Uint8Array(await output.Body.transformToByteArray());
+      return await readResponseBody(output.Body, signal);
     } catch (error) {
       throw contextError(error, 'failed to get object s3://' + this.bucket + '/' + key);
     }
   }
 
-  async size(key: string): Promise<number> {
+  async size(key: string, signal?: AbortSignal): Promise<number> {
     try {
       const output = await this.client.send(new HeadObjectCommand({
         Bucket: this.bucket,
         Key: key,
-      }));
+      }), { abortSignal: signal });
       if (output.ContentLength === undefined) {
         throw new Error('missing content-length in head response');
       }
@@ -68,33 +68,81 @@ export class S3Storage implements ObjectStorage {
     }
   }
 
-  async getRange(key: string, start: number, end: number): Promise<Uint8Array> {
+  async getRange(
+    key: string,
+    start: number,
+    end: number,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
     try {
       const output = await this.client.send(new GetObjectCommand({
         Bucket: this.bucket,
         Key: key,
         // S3 range 是闭区间：bytes=start-end（对齐 Rust end.saturating_sub(1)）
         Range: 'bytes=' + start + '-' + Math.max(0, end - 1),
-      }));
+      }), { abortSignal: signal });
       if (output.Body === undefined) {
         throw new Error('missing body in range response');
       }
-      return new Uint8Array(await output.Body.transformToByteArray());
+      return await readResponseBody(output.Body, signal);
     } catch (error) {
       throw contextError(error, 'failed to get range s3://' + this.bucket + '/' + key);
     }
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(key: string, signal?: AbortSignal): Promise<void> {
     try {
       await this.client.send(new DeleteObjectCommand({
         Bucket: this.bucket,
         Key: key,
-      }));
+      }), { abortSignal: signal });
     } catch (error) {
       throw contextError(error, 'failed to delete object s3://' + this.bucket + '/' + key);
     }
   }
+}
+
+interface S3ResponseBody {
+  transformToWebStream(): ReadableStream<Uint8Array>;
+}
+
+export async function readResponseBody(
+  body: S3ResponseBody,
+  signal?: AbortSignal,
+): Promise<Uint8Array> {
+  signal?.throwIfAborted();
+  const reader = body.transformToWebStream().getReader();
+  let rejectAbort!: (error: Error) => void;
+  const aborted = new Promise<never>((_, reject) => { rejectAbort = reject; });
+  const onAbort = () => {
+    const reason = signal?.reason instanceof Error
+      ? signal.reason : new DOMException('The operation was aborted', 'AbortError');
+    void reader.cancel(reason).catch(() => {});
+    rejectAbort(reason);
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    while (true) {
+      const item = signal
+        ? await Promise.race([reader.read(), aborted])
+        : await reader.read();
+      if (item.done) break;
+      chunks.push(item.value);
+      size += item.value.byteLength;
+    }
+  } finally {
+    signal?.removeEventListener('abort', onAbort);
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
 }
 
 function contextError(error: unknown, context: string): Error {

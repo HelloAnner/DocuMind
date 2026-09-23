@@ -42,7 +42,7 @@ const SHORT_OPTIONS: Record<string, string> = {
 };
 
 const REPEATABLE_OPTIONS: Record<string, true> = {
-  alias: true, doc: true, kb: true, scope: true, tag: true,
+  alias: true, doc: true, "file-id": true, kb: true, scope: true, tag: true,
 };
 
 export function parseArgs(argv: string[]): ParsedArgs {

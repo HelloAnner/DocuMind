@@ -15,6 +15,10 @@ import {
   type ToolState,
 } from './support.ts';
 import { getSkill, saveSkill } from '../../api/admin_skills.ts';
+import type { ObjectStorage } from '../../storage/types.ts';
+import {
+  runBashSandbox, type BashSandboxOptions,
+} from '../../files/sandbox.ts';
 
 export interface KnowledgeSearchEffect {
   chunks: import('../../models/rag.ts').RerankedChunk[];
@@ -56,6 +60,7 @@ export interface ToolRunContext {
   retriever: Retriever;
   reranker: Reranker;
   sql: Sql | null;
+  fileRuntime: { storage: ObjectStorage; sandbox: BashSandboxOptions } | null;
   recordApplied(callId: string, applied: AppliedToolEffect): void;
   recordClarification(terminal: TerminalToolEffect): void;
 }
@@ -112,6 +117,12 @@ const skillSaveParameters = Type.Object({
   content: Type.String({ description: '完整 Markdown 执行指令' }),
 }, { additionalProperties: false });
 type SkillSaveParams = Static<typeof skillSaveParameters>;
+
+const bashParameters = Type.Object({
+  command: Type.String({ minLength: 1, maxLength: 20_000 }),
+  timeout_seconds: Type.Optional(Type.Integer({ minimum: 1, maximum: 300 })),
+}, { additionalProperties: false });
+type BashParams = Static<typeof bashParameters>;
 
 
 function textResult(text: string): { type: 'text'; text: string }[] {
@@ -235,6 +246,39 @@ export function createSkillSaveTool(
     },
   };
 }
+
+export function createBashTool(
+  context: ToolRunContext,
+): AgentTool<typeof bashParameters, unknown> {
+  return {
+    name: 'bash',
+    label: 'Sandbox Bash',
+    description: '在无网络、非 root、只读根文件系统的临时 Docker 沙箱中处理当前会话文件。生成或修改的文件会自动同步为当前用户文件。',
+    parameters: bashParameters,
+    execute: async (toolCallId, params: BashParams): Promise<AgentToolResult<unknown>> => {
+      if (!context.sql || !context.fileRuntime) throw new Error('Bash 沙箱不可用');
+      const result = await runBashSandbox({
+        sql: context.sql,
+        storage: context.fileRuntime.storage,
+        tenantId: context.request.tenant_id,
+        userId: context.request.user_id,
+        conversationId: context.request.conversation_id,
+        assistantMessageId: context.request.assistant_message_id,
+        fileIds: context.request.file_ids,
+        command: params.command,
+        ...(params.timeout_seconds === undefined ? {} : { timeoutSeconds: params.timeout_seconds }),
+        options: context.fileRuntime.sandbox,
+      });
+      for (const file of result.files) {
+        if (!context.request.file_ids.includes(file.id)) context.request.file_ids.push(file.id);
+      }
+      const applied = applyToolEffect({ type: 'none' }, result, result, context.state);
+      context.recordApplied(toolCallId, applied);
+      return { content: textResult(JSON.stringify(result)), details: result };
+    },
+  };
+}
+
 
 
 async function runKnowledgeSearch(

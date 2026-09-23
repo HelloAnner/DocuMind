@@ -427,6 +427,7 @@ export function ChatSidebar() {
           void confirmDelete();
         }}
         open={deleteTarget !== null}
+        testId="conversation-delete-dialog"
         title="删除会话"
       />
     </aside>

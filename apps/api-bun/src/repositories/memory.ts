@@ -6,6 +6,7 @@ import type { ConversationFile } from '../models/conversation_file.ts';
 import type { Feedback } from '../models/feedback.ts';
 import type { ConversationMessage } from '../models/message.ts';
 import type { QueryTrace, RetrievalTrace } from '../models/trace.ts';
+import type { UserFile } from '../models/user_file.ts';
 import { nowRfc3339 } from '../infra/time.ts';
 import type { ConversationRepository } from './types.ts';
 import { FileAccumulator } from './conversation_files.ts';
@@ -17,8 +18,8 @@ function timeMs(value: string): number {
 export class InMemoryConversationRepository implements ConversationRepository {
   private readonly sessions = new Map<string, ConversationSession>();
   private readonly titleLocks = new Set<string>();
-  private readonly messages = new Map<string, ConversationMessage>();
-  private readonly clientRequestIds = new Map<string, string>();
+  private messages = new Map<string, ConversationMessage>();
+  private clientRequestIds = new Map<string, string>();
   private readonly queryTraces = new Map<string, QueryTrace>();
   private readonly retrievalTraces = new Map<string, RetrievalTrace[]>();
   private readonly citations = new Map<string, Citation[]>();
@@ -118,6 +119,33 @@ export class InMemoryConversationRepository implements ConversationRepository {
     this.messages.set(message.id, message);
   }
 
+  async createMessagePair(
+    userMessage: ConversationMessage,
+    assistantMessage: ConversationMessage,
+    fileIds: string[],
+  ): Promise<void> {
+    if (fileIds.length > 0) {
+      throw new Error('in-memory repository does not store user files');
+    }
+    if (this.messages.has(userMessage.id) || this.messages.has(assistantMessage.id)) {
+      throw new Error('message already exists');
+    }
+    const messages = new Map(this.messages);
+    const clientRequestIds = new Map(this.clientRequestIds);
+    for (const message of [userMessage, assistantMessage]) {
+      messages.set(message.id, message);
+      if (message.client_request_id !== null) {
+        const key = InMemoryConversationRepository.clientRequestKey(
+          message.tenant_id, message.user_id, message.client_request_id,
+        );
+        if (clientRequestIds.has(key)) throw new Error('client request id already exists');
+        clientRequestIds.set(key, message.id);
+      }
+    }
+    this.messages = messages;
+    this.clientRequestIds = clientRequestIds;
+  }
+
   async getMessage(tenantId: string, messageId: string): Promise<ConversationMessage | null> {
     const message = this.messages.get(messageId);
     if (message === undefined || message.tenant_id !== tenantId) return null;
@@ -142,6 +170,12 @@ export class InMemoryConversationRepository implements ConversationRepository {
     );
     if (id === undefined) return null;
     return this.getMessage(tenantId, id);
+  }
+
+  async getMessageFiles(
+    _tenantId: string, _userId: string, _messageId: string,
+  ): Promise<UserFile[]> {
+    return [];
   }
 
   async saveQueryTrace(trace: QueryTrace): Promise<void> {

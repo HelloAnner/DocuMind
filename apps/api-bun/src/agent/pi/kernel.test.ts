@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { createFauxCore, fauxAssistantMessage, fauxToolCall } from '@earendil-works/pi-ai';
 import type { Context } from '@earendil-works/pi-ai';
 import type { StreamFn } from '@earendil-works/pi-agent-core';
-import { PiAgentKernel } from './kernel.ts';
+import { isAttachmentOnlyQuestion, PiAgentKernel } from './kernel.ts';
 import { GroundedAnswerFinalizer } from '../finalizer.ts';
 import type { AgentProgress } from '../events.ts';
 import { BuiltinPromptRegistry } from '../prompt.ts';
@@ -138,6 +138,49 @@ describe('pi agent kernel', () => {
     expect(citations).toHaveLength(1);
     expect(h.retriever.calls).toEqual([['唯一校验标记', '唯一校验标记是什么？']]);
     expect(run.trace.stop_reason).toBe('grounded_response');
+  });
+
+  test('attachment context does not bypass search for mixed company claims', async () => {
+    const h = harness([
+      fauxAssistantMessage('附件内容符合公司的采购规定。'),
+      fauxAssistantMessage([fauxToolCall('knowledge_search', searchArgs('公司的采购规定'))]),
+      fauxAssistantMessage('建议依据公司的采购规定调整附件方案。[1]'),
+    ]);
+    const query = '请结合附件和公司的采购规定给出建议';
+    expect(isAttachmentOnlyQuestion(query)).toBeFalse();
+    const input = request(query);
+    input.file_context = '<user_files>附件内容</user_files>';
+    const run = await h.kernel.run(input);
+    const { citations } = await collectAnswer(run);
+
+    expect(h.retriever.calls).toHaveLength(1);
+    expect(citations).toHaveLength(1);
+    expect(run.trace.stop_reason).toBe('grounded_response');
+  });
+
+  test('attachment-only question may answer without enterprise search', async () => {
+    const h = harness([fauxAssistantMessage('附件摘要：内容通过。')]);
+    const input = request('请总结这个文件中的内容。');
+    input.file_context = '<user_files>内容通过</user_files>';
+    const run = await h.kernel.run(input);
+    const { answer } = await collectAnswer(run);
+
+    expect(answer).toContain('内容通过');
+    expect(h.retriever.calls).toEqual([]);
+    expect(run.trace.stop_reason).toBe('direct_response');
+  });
+
+  test('positive attachment operation allowlist is conservative', () => {
+    expect(isAttachmentOnlyQuestion('请总结这个文件中的内容。')).toBeTrue();
+    expect(isAttachmentOnlyQuestion('从附件中提取表格')).toBeTrue();
+    expect(isAttachmentOnlyQuestion('把附件翻译成英文')).toBeTrue();
+    expect(isAttachmentOnlyQuestion('把附件整理成 Markdown')).toBeTrue();
+    for (const query of [
+      '请总结附件并对照外部标准',
+      '请提取附件中违反公司政策的内容',
+      '请结合附件与制度给出合规建议',
+      '请比较附件和采购规定',
+    ]) expect(isAttachmentOnlyQuestion(query)).toBeFalse();
   });
 
   test('answer_tokens_stream_without_a_duplicate_response_step', async () => {
@@ -333,6 +376,8 @@ function request(query: string): AgentRequest {
     assistant_message_id: newUuid(),
     original_query: query,
     effective_kb_ids: [newUuid()],
+    file_ids: [],
+    file_context: '',
     history: [],
     options: options,
   };

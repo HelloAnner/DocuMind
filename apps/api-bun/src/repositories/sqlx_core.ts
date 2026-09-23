@@ -11,7 +11,10 @@ import {
 } from '../models/index.ts';
 import { isAgentMode } from '../models/agent.ts';
 import type { PromptVersions } from '../models/agent.ts';
+import type { UserFile } from '../models/user_file.ts';
+import { queryMessageFiles } from '../files/service.ts';
 import { toRfc3339 } from '../infra/time.ts';
+import { AppError } from '../errors.ts';
 
 export type Sql = ReturnType<typeof postgres>;
 export type Row = postgres.Row;
@@ -177,6 +180,35 @@ export function parseMessage(row: Row): ConversationMessage {
 
 export { MESSAGE_COLUMNS };
 
+async function insertMessage(
+  sql: Pick<Sql, 'unsafe'>,
+  message: ConversationMessage,
+): Promise<void> {
+  await sql.unsafe(
+    `INSERT INTO conversation_messages (
+      id, conversation_id, tenant_id, user_id, role, content, status,
+      parent_message_id, retry_of_message_id, client_request_id,
+      confidence, no_answer_reason, error_code, error_message,
+      agent_mode, prompt_versions, answer_source, correction_id, correction_version_id,
+      correction_match_type, correction_match_score, created_at, completed_at
+    ) VALUES (
+      $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+      $15, $16::jsonb, $17, $18, $19, $20, $21, $22, $23
+    )`,
+    [
+      message.id, message.conversation_id, message.tenant_id, message.user_id,
+      message.role, message.content, message.status, message.parent_message_id,
+      message.retry_of_message_id, message.client_request_id, message.confidence,
+      message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason),
+      message.error_code, message.error_message, message.agent_mode,
+      message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions),
+      message.answer_source, message.correction_id, message.correction_version_id,
+      message.correction_match_type, message.correction_match_score,
+      message.created_at, message.completed_at,
+    ],
+  );
+}
+
 /** 会话与消息的 SQL 实现（对应 Rust SqlxConversationRepository 的对应方法）。 */
 export class SqlxConversationCore {
   protected readonly pool: Sql;
@@ -273,24 +305,35 @@ export class SqlxConversationCore {
   }
 
   async createMessage(message: ConversationMessage): Promise<void> {
-    await this.pool`
-      INSERT INTO conversation_messages (
-        id, conversation_id, tenant_id, user_id, role, content, status,
-        parent_message_id, retry_of_message_id, client_request_id,
-        confidence, no_answer_reason, error_code, error_message,
-        agent_mode, prompt_versions, answer_source, correction_id, correction_version_id,
-        correction_match_type, correction_match_score, created_at, completed_at
-      ) VALUES (${message.id}, ${message.conversation_id}, ${message.tenant_id}, ${message.user_id},
-        ${message.role}, ${message.content}, ${message.status},
-        ${message.parent_message_id}, ${message.retry_of_message_id}, ${message.client_request_id},
-        ${message.confidence},
-        ${message.no_answer_reason === null ? null : noAnswerReasonCode(message.no_answer_reason)},
-        ${message.error_code}, ${message.error_message},
-        ${message.agent_mode}, ${message.prompt_versions === null ? null : JSON.stringify(message.prompt_versions)}::jsonb,
-        ${message.answer_source}, ${message.correction_id}, ${message.correction_version_id},
-        ${message.correction_match_type}, ${message.correction_match_score},
-        ${message.created_at}, ${message.completed_at})
-    `;
+    await insertMessage(this.pool, message);
+  }
+
+  async createMessagePair(
+    userMessage: ConversationMessage,
+    assistantMessage: ConversationMessage,
+    fileIds: string[],
+  ): Promise<void> {
+    await this.pool.begin(async (tx) => {
+      await insertMessage(tx, userMessage);
+      if (fileIds.length > 0) {
+        const bound = await tx.unsafe(
+          `UPDATE user_file SET conversation_id = $1, updated_at = NOW()
+           WHERE tenant_id = $2 AND user_id = $3 AND id = ANY($4::uuid[])
+             AND (conversation_id IS NULL OR conversation_id = $1)
+           RETURNING id`,
+          [userMessage.conversation_id, userMessage.tenant_id, userMessage.user_id, fileIds],
+        );
+        if (bound.length !== fileIds.length) {
+          throw AppError.notFound('FILE_NOT_FOUND', '文件不存在或无权限');
+        }
+        await tx.unsafe(
+          `INSERT INTO conversation_message_file (message_id, file_id, tenant_id, user_id)
+           SELECT $1, id, $2, $3 FROM unnest($4::uuid[]) AS id`,
+          [userMessage.id, userMessage.tenant_id, userMessage.user_id, fileIds],
+        );
+      }
+      await insertMessage(tx, assistantMessage);
+    });
   }
 
   async getMessage(tenantId: string, messageId: string): Promise<ConversationMessage | null> {
@@ -346,5 +389,11 @@ export class SqlxConversationCore {
     const row = rows[0];
     if (row === undefined) return null;
     return parseMessage(row);
+  }
+
+  async getMessageFiles(
+    tenantId: string, userId: string, messageId: string,
+  ): Promise<UserFile[]> {
+    return queryMessageFiles(this.pool, tenantId, userId, messageId);
   }
 }

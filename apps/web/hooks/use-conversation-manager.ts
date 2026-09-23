@@ -20,6 +20,7 @@ import {
 import { streamSse } from "@/lib/sse";
 import { getStoredAuth } from "@/lib/auth";
 import type {
+  ChatFile,
   Citation,
   Conversation,
   FeedbackReason,
@@ -93,10 +94,14 @@ export function useConversationManager() {
   const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
   const [updatingKbSelection, setUpdatingKbSelection] = useState(false);
   const [kbSelectionError, setKbSelectionError] = useState<string>();
+  const [sendNotice, setSendNotice] = useState<string>();
   const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
   const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
   const requestActiveRef = useRef(false);
   const skipLoadRef = useRef<string | null>(null);
+  // 当前流属于哪个会话 + 代次：切会话时用它判断该不该中断，也用来让旧的 finally 失效。
+  const activeRequestRef = useRef<{ conversationId: string; generation: number } | null>(null);
+  const generationRef = useRef(0);
 
   const loadConversations = useCallback(async () => {
     try {
@@ -158,6 +163,21 @@ export function useConversationManager() {
     return () => {
       active = false;
     };
+  }, [currentId]);
+
+  // 切换会话：属于旧会话的流必须断开，否则会出现“在新会话点停止去取消旧消息”的错位；
+  // 新建会话发首条消息时 activeRequestRef 已经是新 id，不会被误杀。
+  useEffect(() => {
+    const active = activeRequestRef.current;
+    if (!active || active.conversationId === currentId) return;
+    abortControllersRef.current.forEach((controller) => controller.abort());
+    abortControllersRef.current.clear();
+    activeRequestRef.current = null;
+    requestActiveRef.current = false;
+    generationRef.current += 1;
+    pendingRef.current = null;
+    setStreamingId(null);
+    setSendNotice(undefined);
   }, [currentId]);
 
   const allKbIds = useMemo(() => availableKbs.map((kb) => kb.id), [availableKbs]);
@@ -238,10 +258,14 @@ export function useConversationManager() {
       req: SendMessageRequest | RetryMessageRequest,
       url: string,
       controller: AbortController,
-      isRetry = false
+      isRetry = false,
+      files?: ChatFile[],
+      generation = generationRef.current
     ) => {
       const userTempId = `tmp-user-${Date.now()}`;
       const assistantTempId = `tmp-assistant-${Date.now()}`;
+      // 旧请求（会话已切换 / 已被新请求顶掉）不再写共享状态，避免覆盖新会话的 streaming 态。
+      const isCurrent = () => generationRef.current === generation;
       pendingRef.current = { userTempId, assistantTempId };
 
       if (!isRetry) {
@@ -253,6 +277,7 @@ export function useConversationManager() {
             content: userContent,
             status: "completed",
             citations: [],
+            files,
             created_at: new Date().toISOString(),
           },
           {
@@ -394,7 +419,7 @@ export function useConversationManager() {
               updateMessage(assistantTempId, { message_id: runtimeAssistantId });
               assistantId = runtimeAssistantId;
               abortControllersRef.current.set(assistantId, controller);
-              setStreamingId(assistantId);
+              if (isCurrent()) setStreamingId(assistantId);
               continue;
             }
 
@@ -699,7 +724,7 @@ export function useConversationManager() {
             updateMessage(assistantTempId, { message_id: data.assistant_message_id });
             assistantId = data.assistant_message_id;
             abortControllersRef.current.set(assistantId, controller);
-            setStreamingId(assistantId);
+            if (isCurrent()) setStreamingId(assistantId);
           } else if (sse.event === "answer.delta") {
             const data = sse.data as { message_id: string; text: string };
             appendAnswerText(data.message_id, data.text);
@@ -757,21 +782,27 @@ export function useConversationManager() {
         }
       } catch (e) {
         flushPendingMessageUpdates();
-        if ((e as Error).name === "AbortError") {
-          updateMessage(assistantId, { status: "cancelled" as MessageStatus });
-        } else {
-          console.error("stream error", e);
-          updateMessage(assistantId, {
-            status: "failed",
-            content: "连接中断，请稍后重试。",
-          });
+        if ((e as Error).name !== "AbortError") console.error("stream error", e);
+        if (isCurrent()) {
+          // 会话已切换时结果不属于当前视图，丢弃；旧代次也不写共享状态。
+          if ((e as Error).name === "AbortError") {
+            updateMessage(assistantId, { status: "cancelled" as MessageStatus });
+          } else {
+            updateMessage(assistantId, {
+              status: "failed",
+              content: "连接中断，请稍后重试。",
+            });
+          }
         }
       } finally {
         flushPendingMessageUpdates();
         abortControllersRef.current.delete(assistantId);
-        setStreamingId(null);
-        pendingRef.current = null;
-        loadConversations();
+        if (isCurrent()) {
+          setStreamingId(null);
+          pendingRef.current = null;
+          setSendNotice(undefined);
+          loadConversations();
+        }
       }
     },
     [updateMessage, loadConversations]
@@ -780,22 +811,30 @@ export function useConversationManager() {
   const sendMessage = useCallback(
     async (
       content: string,
-      runtime?: Pick<SendMessageRequest, "model_id" | "thinking_enabled">
-    ) => {
-      if (requestActiveRef.current) return;
+      runtime?: Pick<SendMessageRequest, "model_id" | "thinking_enabled">,
+      files?: ChatFile[]
+    ): Promise<boolean> => {
+      if (requestActiveRef.current) {
+        setSendNotice("当前会话正在生成，请先停止或等待完成");
+        return false;
+      }
       requestActiveRef.current = true;
+      setSendNotice(undefined);
+      const generation = (generationRef.current += 1);
       try {
         let conversationId = currentId;
         if (!conversationId) {
           const created = await createAndSelect();
-          if (!created) return;
+          if (!created) return false;
           conversationId = created;
         }
+        activeRequestRef.current = { conversationId, generation };
 
         const req: SendMessageRequest = {
           content,
           client_request_id: `req-${Date.now()}`,
           stream: true,
+          ...(files && files.length > 0 ? { file_ids: files.map((file) => file.id) } : {}),
           ...runtime,
         };
         const controller = new AbortController();
@@ -805,10 +844,17 @@ export function useConversationManager() {
           req,
           sendMessageStreamUrl(conversationId),
           controller,
-          false
+          false,
+          files,
+          generation
         );
+        return true;
       } finally {
-        requestActiveRef.current = false;
+        // 会话切换会抢先递增代次；此时所有权已交给新请求，旧请求不得回收。
+        if (generationRef.current === generation) {
+          requestActiveRef.current = false;
+          activeRequestRef.current = null;
+        }
       }
     },
     [currentId, createAndSelect, processStream]
@@ -818,13 +864,19 @@ export function useConversationManager() {
     async (messageId: string) => {
       if (!currentId || requestActiveRef.current) return;
       requestActiveRef.current = true;
+      setSendNotice(undefined);
+      const generation = (generationRef.current += 1);
       try {
+        activeRequestRef.current = { conversationId: currentId, generation };
         const controller = new AbortController();
         const url = retryMessageStreamUrl(currentId, messageId);
         const req: RetryMessageRequest = { stream: true };
-        await processStream(currentId, "", req, url, controller, true);
+        await processStream(currentId, "", req, url, controller, true, undefined, generation);
       } finally {
-        requestActiveRef.current = false;
+        if (generationRef.current === generation) {
+          requestActiveRef.current = false;
+          activeRequestRef.current = null;
+        }
       }
     },
     [currentId, processStream]
@@ -978,6 +1030,7 @@ export function useConversationManager() {
     selectedKbIds,
     updatingKbSelection,
     kbSelectionError,
+    sendNotice,
     updateKnowledgeBaseSelection,
     createAndSelect,
     sendMessage,

@@ -32,6 +32,7 @@ export class ChatService {
   async send(request: ChatRequest, observer: ChatObserver = {}): Promise<ChatRunReport> {
     const identity = await this.api.me();
     const kbIds = request.kb_ids ?? this.api.config.chat.kb_ids;
+    const fileIds = request.file_ids ?? [];
     ensureKbScope(identity, kbIds);
     const conversationId = request.conversation_id ??
       await this.createConversation(kbIds, request.title);
@@ -45,6 +46,7 @@ export class ChatService {
       {
         content: request.content,
         kb_ids: kbIds,
+        file_ids: fileIds,
         client_request_id: clientRequestId,
         stream: true,
         ...(request.model_id ? { model_id: request.model_id } : {}),
@@ -143,6 +145,7 @@ export class ChatService {
         conversation_id: conversationId,
         content: request.content,
         kb_ids: kbIds,
+        file_ids: fileIds,
         client_request_id: clientRequestId,
         ...(request.model_id ? { model_id: request.model_id } : {}),
         ...(request.thinking_enabled !== undefined
@@ -156,6 +159,7 @@ export class ChatService {
         status: persisted.status,
         ...(persisted.confidence ? { confidence: persisted.confidence } : {}),
         ...(persisted.no_answer_reason ? { no_answer_reason: persisted.no_answer_reason } : {}),
+        files: persisted.files ?? [],
       },
       timing: {
         total_ms: Math.max(0, Math.round(completed - started)),

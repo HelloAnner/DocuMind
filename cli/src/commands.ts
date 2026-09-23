@@ -70,6 +70,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "kb": return knowledgeBaseCommand(args, api, json);
     case "models": return modelsCommand(api, json);
     case "chat": return chatCommand(args, api, json);
+    case "files": return fileCommand(args, api, json);
     case "run": return runCommand(args, api, json);
     case "conversations": return conversationCommand(args, api, json);
     case "share": return shareCommand(args, api, json);
@@ -549,6 +550,63 @@ async function modelsCommand(api: ApiClient, json: boolean): Promise<number> {
   return 0;
 }
 
+async function fileCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "list";
+  if (subcommand === "list") {
+    const result = await api.listUserFiles(stringOption(args, "conversation"));
+    if (json) printJson(result);
+    else printTable(
+      ["ID", "路径", "类型", "字节", "来源", "会话"],
+      result.items.map((file) => [
+        file.id, file.path, file.mime_type, String(file.size_bytes),
+        file.source, file.conversation_id ?? "",
+      ]),
+    );
+    return 0;
+  }
+  const value = args.positionals[2];
+  if (!value) throw new CliError(`files ${subcommand} 需要文件路径或文件 ID`, 2);
+  if (subcommand === "upload") {
+    const file = Bun.file(value);
+    if (!await file.exists()) throw new CliError(`本地文件不存在: ${value}`, 2);
+    const uploaded = await api.uploadUserFile(
+      file,
+      value.split("/").pop() ?? "file",
+      stringOption(args, "path"),
+      stringOption(args, "conversation"),
+    );
+    if (json) printJson(uploaded);
+    else process.stdout.write(`已上传 ${uploaded.path} · ${uploaded.id}\n`);
+    return 0;
+  }
+  if (subcommand === "show") {
+    const file = await api.getUserFile(value);
+    if (json) printJson(file);
+    else printTable(["字段", "值"], Object.entries(file).map(([key, item]) => [key, String(item)]));
+    return 0;
+  }
+  if (subcommand === "download") {
+    const file = await api.getUserFile(value);
+    const output = stringOption(args, "output") ?? file.name;
+    if (await Bun.file(output).exists() && !booleanOption(args, "force")) {
+      throw new CliError(`输出文件已存在: ${output}；使用 --force 覆盖`, 2);
+    }
+    await writeFile(output, await api.downloadUserFile(value));
+    if (json) printJson({ file, output });
+    else process.stdout.write(`已下载 ${file.path} -> ${output}\n`);
+    return 0;
+  }
+  if (subcommand === "delete") {
+    if (!booleanOption(args, "force")) throw new CliError("files delete 需要 --force", 2);
+    const result = await api.deleteUserFile(value);
+    if (json) printJson(result);
+    else process.stdout.write(`已删除文件 ${value}\n`);
+    return 0;
+  }
+  throw new CliError(`未知 files 子命令: ${subcommand}`, 2);
+}
+
+
 async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   if (booleanOption(args, "interactive")) {
     if (json) throw new CliError("交互模式不能与 --json 同时使用", 2);
@@ -587,6 +645,8 @@ async function chatRequest(args: ParsedArgs, api: ApiClient): Promise<ChatReques
   }
   const requestedKbs = listOption(args, "kb");
   const kbIds = input.kb_ids ?? (requestedKbs.length ? requestedKbs : api.config.chat.kb_ids);
+  const requestedFiles = listOption(args, "file-id");
+  const fileIds = input.file_ids ?? requestedFiles;
   const title = input.title ?? stringOption(args, "title");
   const clientRequestId = input.client_request_id ?? stringOption(args, "request-id");
   const modelId = input.model_id ?? stringOption(args, "model");
@@ -596,6 +656,7 @@ async function chatRequest(args: ParsedArgs, api: ApiClient): Promise<ChatReques
     content,
     ...(conversationId ? { conversation_id: conversationId } : {}),
     kb_ids: kbIds,
+    file_ids: fileIds,
     ...(title ? { title } : {}),
     ...(clientRequestId ? { client_request_id: clientRequestId } : {}),
     ...(modelId ? { model_id: modelId } : {}),
@@ -619,6 +680,7 @@ async function parseChatJson(value: string): Promise<Partial<ChatRequest>> {
 async function interactiveChat(args: ParsedArgs, api: ApiClient): Promise<number> {
   const requestedKbs = listOption(args, "kb");
   let kbIds = requestedKbs.length ? requestedKbs : api.config.chat.kb_ids;
+  const fileIds = listOption(args, "file-id");
   let conversationId = stringOption(args, "conversation");
   if (!conversationId && booleanOption(args, "continue")) conversationId = await api.lastConversationId();
   let trace = traceOption(args, api.config.chat.trace);
@@ -668,6 +730,7 @@ async function interactiveChat(args: ParsedArgs, api: ApiClient): Promise<number
         content: line,
         ...(conversationId ? { conversation_id: conversationId } : {}),
         kb_ids: kbIds,
+        file_ids: fileIds,
         ...(modelId ? { model_id: modelId } : {}),
         ...(thinkingEnabled !== undefined ? { thinking_enabled: thinkingEnabled } : {}),
       }, {
@@ -687,9 +750,10 @@ async function runCommand(args: ParsedArgs, api: ApiClient, json: boolean): Prom
   const path = args.positionals[1];
   if (!path) throw new CliError("run 需要场景 JSON 文件路径，或 - 从 stdin 读取", 2);
   const scenario = await loadScenario(path);
+  const fileIds = listOption(args, "file-id");
   const report = await runScenario(new ChatService(api), scenario, (index, total, content) => {
     if (!json) process.stderr.write(`[${index + 1}/${total}] ${content}\n`);
-  });
+  }, fileIds);
   const output = stringOption(args, "output");
   if (output) await writeFile(output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   if (json) printJson(report); else printScenarioReport(report);

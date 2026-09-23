@@ -8,6 +8,7 @@ import type { ConversationRepository } from './repositories/types.ts';
 import { InMemoryConversationRepository, SqlxConversationRepository } from './repositories/index.ts';
 import type { ObjectStorage } from './storage/types.ts';
 import { buildStorage } from './storage/index.ts';
+import { startObjectCleanupWorker } from './files/service.ts';
 import { seedIdentity } from './auth/seed.ts';
 import { OpenAiClient } from './llm/openai.ts';
 import {
@@ -122,6 +123,8 @@ export async function buildState(config: AppConfig): Promise<AppState> {
     maxTokens: config.rag.generation.maxOutputTokens,
     temperature: config.rag.generation.temperature,
   };
+  const storage = buildStorage(config);
+  startObjectCleanupWorker(sql, storage);
   const agentKernel = new PiAgentKernel({
     settings: modelSettings,
     streamFn: buildPiStreamFn(modelSettings),
@@ -131,9 +134,15 @@ export async function buildState(config: AppConfig): Promise<AppState> {
     promptRegistry: new BuiltinPromptRegistry(),
     answerFinalizer: new GroundedAnswerFinalizer(verifier),
     sql,
+    fileRuntime: {
+      storage,
+      sandbox: {
+        image: config.sandboxImage,
+        maxTimeoutSeconds: config.sandboxMaxTimeoutSeconds,
+      },
+    },
   });
 
-  const storage = buildStorage(config);
   const vectorConsistency = () => quickConsistency(sql, config.rag.embedding, esUrl);
   // 与 Rust 一致：有数据库时启动后台向量 worker（DB 轮询消费，无 AMQP 队列加速）
   startVectorWorker(sql, config.rag.embedding, esUrl, config.rabbitmqUrl);

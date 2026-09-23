@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppError } from '../errors.ts';
+import { withObjectStorageTimeout } from '../files/service.ts';
 import type { AppState } from '../state.ts';
 import {
   isOfficePreviewType, mimeTypeForDocument, parseByteRange, rangeNotSatisfiable,
@@ -118,7 +119,9 @@ export async function ensureOfficePreviewPdf(state: AppState, doc: DocumentRecor
     throw internalError('failed to create office preview cache dir', error);
   }
 
-  const bytes = await state.storage.get(doc.storage_key);
+  const bytes = await withObjectStorageTimeout(
+    'get', (signal) => state.storage.get(doc.storage_key, signal),
+  );
   const inputPath = join(cacheDir, `source.${doc.file_type}`);
   try {
     await writeFile(inputPath, bytes);
@@ -182,7 +185,9 @@ export async function downloadOfficePreviewPdf(
 export async function downloadDocumentContent(
   state: AppState, doc: DocumentRecord, reqHeaders: Headers, inline: boolean,
 ): Promise<Response> {
-  const totalSize = await state.storage.size(doc.storage_key);
+  const totalSize = await withObjectStorageTimeout(
+    'head', (signal) => state.storage.size(doc.storage_key, signal),
+  );
   const contentType = mimeTypeForDocument(doc);
 
   const range = reqHeaders.get('range');
@@ -190,7 +195,10 @@ export async function downloadDocumentContent(
     const parsed = parseByteRange(range, totalSize);
     if (parsed !== null) {
       const [start, end] = parsed;
-      const bytes = await state.storage.getRange(doc.storage_key, start, end);
+      const bytes = await withObjectStorageTimeout(
+        'get range',
+        (signal) => state.storage.getRange(doc.storage_key, start, end, signal),
+      );
       const headers = new Headers({
         'Content-Type': contentType,
         'Accept-Ranges': 'bytes',
@@ -202,7 +210,9 @@ export async function downloadDocumentContent(
     return rangeNotSatisfiable(totalSize);
   }
 
-  const bytes = await state.storage.get(doc.storage_key);
+  const bytes = await withObjectStorageTimeout(
+    'get', (signal) => state.storage.get(doc.storage_key, signal),
+  );
   const disposition = inline ? 'inline' : 'attachment';
   const headers = new Headers({
     'Content-Type': contentType,

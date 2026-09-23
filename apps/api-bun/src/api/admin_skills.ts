@@ -12,6 +12,9 @@ import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { newUuid } from '../infra/uuid.ts';
 import type { CurrentActor } from '../models/identity.ts';
+import {
+  BUILTIN_SKILL_NAMES, builtinSkill, builtinSkillSummaries,
+} from '../skills/builtin.ts';
 
 const MAX_CONTENT_BYTES = 64 * 1024;
 const MAX_ARCHIVE_BYTES = 5 * 1024 * 1024;
@@ -25,7 +28,7 @@ export interface SkillSummary {
   display_name: string;
   description: string;
   revision: number;
-  source: 'editor' | 'upload' | 'import' | 'conversation';
+  source: 'builtin' | 'editor' | 'upload' | 'import' | 'conversation';
   source_url: string | null;
   created_by: string;
   updated_by: string;
@@ -44,7 +47,7 @@ export interface SkillInput {
   display_name: string;
   description: string;
   content: string;
-  source?: SkillRecord['source'];
+  source?: Exclude<SkillRecord['source'], 'builtin'>;
   source_url?: string | null;
   files?: SkillRecord['files'];
 }
@@ -71,10 +74,15 @@ export async function listSkills(sql: Sql, tenantId: string, search = ''): Promi
       AND (${value} = '' OR display_name ILIKE '%' || ${value} || '%' OR name ILIKE '%' || ${value} || '%' OR description ILIKE '%' || ${value} || '%')
     ORDER BY updated_at DESC
   `;
-  return rows.map(skillSummary);
+  return [
+    ...builtinSkillSummaries(value),
+    ...rows.map(skillSummary).filter((skill) => !BUILTIN_SKILL_NAMES[skill.name]),
+  ];
 }
 
 export async function getSkill(sql: Sql, tenantId: string, idOrName: string): Promise<SkillRecord> {
+  const builtIn = builtinSkill(idOrName);
+  if (builtIn) return builtIn;
   const rows = await sql`
     SELECT id, name, display_name, description, content, revision, content_sha256, source,
            source_url, created_by, updated_by, created_at, updated_at
@@ -99,6 +107,9 @@ export async function saveSkill(
   sql: Sql, tenantId: string, userId: string, input: SkillInput, skillId?: string,
 ): Promise<SkillRecord> {
   const value = validateSkillInput(input);
+  if (BUILTIN_SKILL_NAMES[value.name]) {
+    throw AppError.conflictWith('BUILTIN_SKILL_READ_ONLY', '内置技能不可覆盖');
+  }
   const id = skillId ?? newUuid();
   const digest = createHash('sha256').update(value.content).digest('hex');
   await sql.begin(async (tx) => {
@@ -243,7 +254,10 @@ async function readSkillJson(c: Context<AppEnv>): Promise<unknown> {
   catch { throw invalidSkill('请求须为有效 JSON'); }
 }
 
-function validateSkillInput(input: SkillInput): SkillInput & { source: SkillRecord['source']; source_url: string | null } {
+function validateSkillInput(input: SkillInput): SkillInput & {
+  source: Exclude<SkillRecord['source'], 'builtin'>;
+  source_url: string | null;
+} {
   if (!input || typeof input !== 'object') throw invalidSkill('技能数据须为对象');
   for (const key of ['name', 'display_name', 'description', 'content'] as const) {
     if (typeof input[key] !== 'string') throw invalidSkill(`${key} 须为文本`);

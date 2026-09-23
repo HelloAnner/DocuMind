@@ -31,7 +31,8 @@ export interface AppConfig {
   objectStorageProvider: string; objectStorageEndpoint: string | null; objectStorageRegion: string; objectStorageBucket: string;
   objectStorageAccessKey: string | null; objectStorageSecretKey: string | null;
   objectStorageForcePathStyle: boolean; objectStorageTlsVerify: boolean; objectStoragePresignExpireSeconds: number;
-  blobStorageDir: string; jwtSecret: string; authTokenExpireHours: number; authLoginMode: string;
+  blobStorageDir: string; sandboxImage: string; sandboxMaxTimeoutSeconds: number;
+  jwtSecret: string; authTokenExpireHours: number; authLoginMode: string;
   portalBaseUrl: string; portalExchangeEndpoint: string;
   defaultTenantId: string; defaultUserId: string; defaultRole: string; defaultKbIds: string[];
   defaultTenantName: string; defaultTenantSlug: string;
@@ -223,6 +224,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     objectStorageTlsVerify: envBool('OBJECT_STORAGE_TLS_VERIFY', false),
     objectStoragePresignExpireSeconds: envNum(['OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS'], 900),
     blobStorageDir: envStr('BLOB_STORAGE_DIR', 'OBJECT_STORAGE_LOCAL_DIR') ?? './data/objects',
+    sandboxImage: envStr('BASH_RUNNER_IMAGE') ?? 'documind-bash-runner:latest',
+    sandboxMaxTimeoutSeconds: clamp(envNum(['BASH_RUNNER_MAX_TIMEOUT_SECONDS'], 120), 1, 300),
     jwtSecret: envStr('JWT_SECRET') ?? 'documind-dev-secret-change-me',
     authTokenExpireHours: envNum(['AUTH_TOKEN_EXPIRE_HOURS', 'JWT_EXPIRE_HOURS'], 24),
     authLoginMode,
@@ -258,6 +261,10 @@ function validateConfig(config: AppConfig): void {
   if (config.rag.embedding.dimension === 0) throw new Error('EMBED_DIM must be greater than zero');
   if (config.rag.embedding.batchSize === 0 || config.rag.embedding.batchSize > 100) throw new Error('EMBED_BATCH_SIZE must be between 1 and 100');
   if (config.rag.embedding.retryMax < 1 || config.rag.embedding.retryMax > 20) throw new Error('EMBED_RETRY_MAX must be between 1 and 20');
+  if (!config.sandboxImage.trim()) throw new Error('BASH_RUNNER_IMAGE is required');
+  if (!Number.isInteger(config.sandboxMaxTimeoutSeconds)) {
+    throw new Error('BASH_RUNNER_MAX_TIMEOUT_SECONDS must be an integer');
+  }
   if (!isProduction(config)) return;
 
   const missing: string[] = [];
@@ -268,6 +275,11 @@ function validateConfig(config: AppConfig): void {
   if (!config.objectStorageEndpoint) missing.push('OBJECT_STORAGE_ENDPOINT');
   if (!config.objectStorageAccessKey) missing.push('OBJECT_STORAGE_ACCESS_KEY');
   if (!config.objectStorageSecretKey) missing.push('OBJECT_STORAGE_SECRET_KEY');
+  if (config.objectStorageAccessKey === 'documind'
+    || config.objectStorageSecretKey === 'documind'
+    || (config.objectStorageSecretKey?.length ?? 0) < 16) {
+    missing.push('strong OBJECT_STORAGE credentials');
+  }
   if (!config.rag.generation.useRealLlm) missing.push('USE_REAL_LLM=true');
   if (!config.rag.generation.apiKey || config.rag.generation.apiKey === 'ollama') missing.push('LLM_API_KEY');
   if (!config.rag.embedding.enabled) missing.push('EMBED_ENABLED=true');

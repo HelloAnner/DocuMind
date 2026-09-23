@@ -1,5 +1,7 @@
 import { getAuthHeaders } from "./auth";
 import type {
+  ChatFile,
+  ChatFileListResponse,
   Conversation,
   ConversationFileListResponse,
   CreateConversationRequest,
@@ -13,6 +15,38 @@ import type {
 
 const BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
+/** 后端限制（apps/api-bun/src/files/service.ts）：单文件 25 MB、单条消息最多 10 个文件。 */
+export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+export const MAX_MESSAGE_FILES = 10;
+
+/** 上传前的本地校验，避免白传一次再被后端拒绝。 */
+export function uploadPreflightError(file: File): string | null {
+  if (file.size <= 0) return "文件为空，无法上传";
+  if (file.size > MAX_UPLOAD_BYTES) return "文件超过 25 MB，无法上传";
+  return null;
+}
+
+function errorDetail(status: number, body: string): string {
+  if (status === 401) return "登录已过期，请重新登录";
+  if (status === 0) return "无法连接服务器，请检查网络";
+  try {
+    const parsed = JSON.parse(body) as { message?: unknown };
+    if (typeof parsed?.message === "string" && parsed.message.trim()) return parsed.message;
+  } catch {
+    // 非 JSON 响应（网关错误页等）保留原文
+  }
+  return body || "Unknown error";
+}
+
+function apiError(status: number, body: string): Error {
+  return new Error(`API error ${status}: ${errorDetail(status, body)}`);
+}
+
+export function apiErrorMessage(error: unknown, fallback: string): string {
+  if (!(error instanceof Error) || !error.message) return fallback;
+  return error.message.replace(/^API error \d+: /, "") || fallback;
+}
+
 export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T> {
   const headers =
     init?.body instanceof FormData
@@ -24,8 +58,7 @@ export async function fetchJson<T>(input: string, init?: RequestInit): Promise<T
     headers,
   });
   if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    throw new Error(`API error ${response.status}: ${text}`);
+    throw apiError(response.status, await response.text().catch(() => ""));
   }
   return response.json() as Promise<T>;
 }
@@ -112,12 +145,137 @@ export async function getMessages(conversationId: string): Promise<MessageListRe
   return fetchJson(`/api/conversations/${conversationId}/messages`);
 }
 
+
+export async function listFiles(conversationId?: string): Promise<ChatFileListResponse> {
+  const qs = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+  const response = await fetchJson<{ items: ChatFile[] }>(`/api/files${qs}`);
+  return { files: response.items };
+}
+
+export async function deleteFile(fileId: string): Promise<{ id: string; status?: string }> {
+  return fetchJson(`/api/files/${encodeURIComponent(fileId)}`, { method: "DELETE" });
+}
+
+export async function fetchFileDownloadBlob(fileId: string): Promise<Blob> {
+  const response = await fetch(
+    `${BASE}/api/files/${encodeURIComponent(fileId)}/download`,
+    { headers: getAuthHeaders() }
+  );
+  if (!response.ok) {
+    throw apiError(response.status, await response.text().catch(() => ""));
+  }
+  return response.blob();
+}
+
+export async function downloadChatFile(file: Pick<ChatFile, "id" | "name">): Promise<void> {
+  const blob = await fetchFileDownloadBlob(file.id);
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = file.name || "download";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+export interface FileUploadProgress {
+  loaded: number;
+  total: number;
+  percent: number;
+}
+
+interface XhrUploadOptions<T> {
+  url: string;
+  form: FormData;
+  /** 进度兜底用的字节数：部分浏览器不带 lengthComputable。 */
+  byteLength: number;
+  onProgress: (progress: FileUploadProgress) => void;
+  signal?: AbortSignal;
+  parse: (responseText: string) => T;
+}
+
+/** 所有带进度的上传走同一条 XHR 路径：鉴权头、进度、错误、取消语义只有一份。 */
+function uploadWithProgress<T>({
+  url,
+  form,
+  byteLength,
+  onProgress,
+  signal,
+  parse,
+}: XhrUploadOptions<T>): Promise<T> {
+  const { promise, resolve, reject } = Promise.withResolvers<T>();
+  const request = new XMLHttpRequest();
+  const abortRequest = () => request.abort();
+  const cleanup = () => signal?.removeEventListener("abort", abortRequest);
+
+  request.open("POST", url);
+  Object.entries(getAuthHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
+
+  request.upload.addEventListener("progress", (event) => {
+    const total = event.lengthComputable && event.total > 0 ? event.total : byteLength;
+    const loaded = Math.min(event.loaded, total);
+    const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+    onProgress({ loaded, total, percent });
+  });
+
+  request.addEventListener("load", () => {
+    cleanup();
+    if (request.status < 200 || request.status >= 300) {
+      reject(apiError(request.status, request.responseText));
+      return;
+    }
+    try {
+      resolve(parse(request.responseText));
+    } catch {
+      reject(new Error("上传响应格式无效"));
+    }
+  });
+  request.addEventListener("error", () => {
+    cleanup();
+    reject(new Error("网络连接异常，文件上传失败"));
+  });
+  request.addEventListener("abort", () => {
+    cleanup();
+    reject(new DOMException("上传已取消", "AbortError"));
+  });
+
+  if (signal?.aborted) {
+    reject(new DOMException("上传已取消", "AbortError"));
+    return promise;
+  }
+  signal?.addEventListener("abort", abortRequest, { once: true });
+  onProgress({ loaded: 0, total: byteLength, percent: 0 });
+  request.send(form);
+  return promise;
+}
+
+export function uploadChatFile(
+  file: File,
+  onProgress: (progress: FileUploadProgress) => void,
+  signal?: AbortSignal,
+  conversationId?: string
+): Promise<ChatFile> {
+  const preflight = uploadPreflightError(file);
+  if (preflight) return Promise.reject(new Error(preflight));
+  const form = new FormData();
+  form.set("file", file);
+  if (conversationId) form.set("conversation_id", conversationId);
+  return uploadWithProgress<ChatFile>({
+    url: `${BASE}/api/files`,
+    form,
+    byteLength: file.size,
+    onProgress,
+    signal,
+    parse: (text) => JSON.parse(text) as ChatFile,
+  });
+}
+
 export async function getConversationFiles(
   conversationId: string
 ): Promise<ConversationFileListResponse> {
   return fetchJson(`/api/conversations/${conversationId}/files`);
 }
-
 export async function deleteConversation(
   conversationId: string
 ): Promise<{ conversation_id: string; status: string }> {
@@ -956,8 +1114,7 @@ export async function fetchAdminDocumentOriginalBlob(docId: string): Promise<Blo
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
-      const text = await response.text().catch(() => "Unknown error");
-      throw new Error(`API error ${response.status}: ${text}`);
+      throw apiError(response.status, await response.text().catch(() => ""));
     }
     return response.blob();
   })();
@@ -980,8 +1137,7 @@ export async function fetchFilePreviewBlob(
     signal,
   });
   if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    throw new Error(`API error ${response.status}: ${text}`);
+    throw apiError(response.status, await response.text().catch(() => ""));
   }
   return response.blob();
 }
@@ -1086,52 +1242,16 @@ export function uploadAdminDocumentWithProgress(
   signal?: AbortSignal,
   uploadBatchId?: string
 ): Promise<UploadDocumentResponse> {
-  return new Promise((resolve, reject) => {
-    const form = new FormData();
-    if (uploadBatchId) form.set("upload_batch_id", uploadBatchId);
-    form.set("file", file);
-    const request = new XMLHttpRequest();
-    const abortRequest = () => request.abort();
-    const cleanup = () => signal?.removeEventListener("abort", abortRequest);
-
-    request.open("POST", `${BASE}/api/knowledge-bases/${kbId}/documents`);
-    Object.entries(getAuthHeaders()).forEach(([name, value]) => request.setRequestHeader(name, value));
-
-    request.upload.addEventListener("progress", (event) => {
-      const total = event.lengthComputable && event.total > 0 ? event.total : file.size;
-      const loaded = Math.min(event.loaded, total);
-      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
-      onProgress({ loaded, total, percent });
-    });
-
-    request.addEventListener("load", () => {
-      cleanup();
-      if (request.status < 200 || request.status >= 300) {
-        reject(new Error(`API error ${request.status}: ${request.responseText || "上传失败"}`));
-        return;
-      }
-      try {
-        resolve(JSON.parse(request.responseText) as UploadDocumentResponse);
-      } catch {
-        reject(new Error("上传响应格式无效"));
-      }
-    });
-    request.addEventListener("error", () => {
-      cleanup();
-      reject(new Error("网络连接异常，文件上传失败"));
-    });
-    request.addEventListener("abort", () => {
-      cleanup();
-      reject(new DOMException("上传已取消", "AbortError"));
-    });
-
-    if (signal?.aborted) {
-      reject(new DOMException("上传已取消", "AbortError"));
-      return;
-    }
-    signal?.addEventListener("abort", abortRequest, { once: true });
-    onProgress({ loaded: 0, total: file.size, percent: 0 });
-    request.send(form);
+  const form = new FormData();
+  if (uploadBatchId) form.set("upload_batch_id", uploadBatchId);
+  form.set("file", file);
+  return uploadWithProgress<UploadDocumentResponse>({
+    url: `${BASE}/api/knowledge-bases/${kbId}/documents`,
+    form,
+    byteLength: file.size,
+    onProgress,
+    signal,
+    parse: (text) => JSON.parse(text) as UploadDocumentResponse,
   });
 }
 
@@ -1153,8 +1273,7 @@ export async function replaceAdminDocumentFile(
     body: form,
   });
   if (!response.ok) {
-    const text = await response.text().catch(() => "Unknown error");
-    throw new Error(`API error ${response.status}: ${text}`);
+    throw apiError(response.status, await response.text().catch(() => ""));
   }
   return response.json() as Promise<ReplaceDocumentFileResponse>;
 }

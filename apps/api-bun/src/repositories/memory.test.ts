@@ -71,6 +71,30 @@ describe('InMemoryConversationRepository', () => {
     expect(dup?.id).toBe(msg.id);
   });
 
+  test('creates a user message and assistant placeholder atomically', async () => {
+    const repo = new InMemoryConversationRepository();
+    const conversationId = newUuid();
+    const tenantId = newUuid();
+    const userId = newUuid();
+    const userMessage = testMessage(newUuid(), conversationId, tenantId, userId, 'user');
+    const assistantMessage = testMessage(
+      newUuid(), conversationId, tenantId, userId, 'assistant',
+    );
+    assistantMessage.parent_message_id = userMessage.id;
+    await repo.createMessagePair(userMessage, assistantMessage, []);
+    expect(await repo.getMessages(tenantId, conversationId)).toHaveLength(2);
+
+    const duplicate = testMessage(
+      assistantMessage.id, conversationId, tenantId, userId, 'assistant',
+    );
+    await expect(repo.createMessagePair(
+      testMessage(newUuid(), conversationId, tenantId, userId, 'user'),
+      duplicate,
+      [],
+    )).rejects.toThrow('message already exists');
+    expect(await repo.getMessages(tenantId, conversationId)).toHaveLength(2);
+  });
+
   test('manual_title_prevents_later_automatic_updates', async () => {
     const repo = new InMemoryConversationRepository();
     const tenant = newUuid();

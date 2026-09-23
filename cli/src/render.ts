@@ -68,7 +68,14 @@ export class LiveChatRenderer {
 export function printChatReport(report: ChatRunReport, options: HumanChatOptions): void {
   if (!options.streamed) process.stdout.write(report.response.content);
   process.stdout.write("\n");
-  if (options.quiet || options.trace === "off") return;
+  if (options.quiet) return;
+  if (report.response.files.length > 0) {
+    process.stdout.write(`\n${ansi.bold(`生成文件 (${report.response.files.length})`)}\n`);
+    for (const line of generatedFileLines(report.server, report.response.files)) {
+      process.stdout.write(`${line}\n`);
+    }
+  }
+  if (options.trace === "off") return;
 
   const usage = report.execution.usage;
   const usageText = usage
@@ -133,6 +140,7 @@ export function printChatReport(report: ChatRunReport, options: HumanChatOptions
   if (report.citations.length === 0) process.stdout.write(`${ansi.yellow("未返回引用")}\n`);
   for (const citation of report.citations) {
     const pages = citation.page_range.length ? ` · p.${citation.page_range.join("-")}` : "";
+
     const score = citation.score === undefined ? "" : ` · score=${citation.score.toFixed(4)}`;
     process.stdout.write(
       `[${citation.index}] ${citation.doc_title}${pages}${score}${citationLocationSuffix(citation)}` +
@@ -140,6 +148,13 @@ export function printChatReport(report: ChatRunReport, options: HumanChatOptions
     );
     process.stdout.write(`  ${truncate(citation.quote.replaceAll(/\s+/g, " "), 260)}\n`);
   }
+}
+export function generatedFileLines(
+  server: string,
+  files: ChatRunReport["response"]["files"],
+): string[] {
+  return files.map((file) =>
+    `${file.path} · id=${file.id} · ${server}${file.download_url}`);
 }
 
 /** 引用定位能力：CLI 直接暴露锚点定位等级与可用定位数据。 */

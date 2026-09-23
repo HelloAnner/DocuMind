@@ -26,6 +26,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(FEEDBACK_HELP);
     return;
   }
+  if (topic === "files") {
+    process.stdout.write(FILES_HELP);
+    return;
+  }
   if (topic === "chat") {
     process.stdout.write(CHAT_HELP);
     return;
@@ -74,6 +78,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `对话与评测\n` +
   `  chat|ask <问题>              真实 SSE 对话并合并落库 trace\n` +
   `  models                       列出可选模型与深度思考能力\n` +
+  `  files list|upload|show|download|delete  管理当前用户隔离文件\n` +
   `  chat --interactive           多轮交互 REPL\n` +
   `  run <scenario.json>          运行 JSON 多轮评测场景\n` +
   `  conversations list|create|show|messages|update|delete\n` +
@@ -89,7 +94,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  --json, -j                   机器可读 JSON 输出\n` +
   `  --help, -h                   查看帮助\n` +
   `  --version, -V                查看版本\n\n` +
-  `运行 documind help system|admin|chat|run|kb|documents|skills|vector 查看详细帮助。\n`;
+  `运行 documind help system|admin|chat|run|files|kb|documents|skills|vector 查看详细帮助。\n`;
 
 const SKILLS_HELP = `用法: documind skills <subcommand> [options]\n\n` +
   `  list [--search TEXT] | show <技能ID或名称>\n` +
@@ -144,6 +149,7 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --conversation, -c <id>      在指定会话继续多轮对话\n` +
   `  --continue                   使用本地记录的上一次会话\n` +
   `  --kb, -k <id[,id]>           指定知识库，可重复\n` +
+  `  --file-id <id[,id]>          关联当前用户文件，可重复；文件不会进入公共知识库\n` +
   `  --title <title>              新会话标题\n` +
   `  --model <id>                 指定本次问答模型（省略时使用服务端 ENV 默认）\n` +
   `  --thinking / --no-thinking   开启或关闭本次深度思考\n` +
@@ -154,6 +160,16 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --input-json <json|@file|->  用 JSON 提供 content/conversation_id/kb_ids\n` +
   `  --interactive, -i            多轮 REPL\n` +
   `  --quiet, -q                  只输出回答正文\n`;
+
+const FILES_HELP = `用法: documind files <subcommand> [options]\n\n` +
+  `  list [--conversation ID]     列出当前用户全部文件或指定会话文件\n` +
+  `  upload <本地文件> [--path 相对路径] [--conversation ID]\n` +
+  `  show <文件ID>                查看文件元数据和下载地址\n` +
+  `  download <文件ID> [--output 本地路径] [--force]\n` +
+  `  delete <文件ID> --force      删除当前用户文件\n\n` +
+  `对话使用: documind chat \"问题\" --file-id <文件ID>；沙箱生成物自动出现在 files list。\n` +
+  `Office 技能验收: 在 chat 中要求使用 cnpc-word、cnpc-excel 或 cnpc-ppt 生成文件。\n`;
+
 
 const CONVERSATIONS_HELP = `用法: documind conversations <subcommand> [options]\n\n` +
   `  list [--limit N]             列出会话\n` +
@@ -181,16 +197,19 @@ const VECTOR_HELP = `用法: documind vector <subcommand> [options]\n\n` +
   `所有查询都强制附加当前登录身份的 tenant_id 和 allowed_kb_ids。\n` +
   `真实稠密向量召回请使用 chat，并查看 trace.retrieval_traces 中的 dense 结果。\n`;
 
-const RUN_HELP = `用法: documind run <scenario.json|-> [--json] [--output report.json]\n\n` +
+const RUN_HELP = `用法: documind run <scenario.json|-> [--file-id ID] [--json] [--output report.json]\n\n` +
   `场景示例:\n` +
   `{\n` +
   `  "name": "采购制度多轮测试",\n` +
   `  "conversation": {"kb_ids": ["..."]},\n` +
   `  "turns": [\n` +
-  `    {"content": "付款条件是什么？", "expect": {"status": "completed", "citations_min": 1}},\n` +
-  `    {"content": "刚才提到的期限呢？", "expect": {"retrievals_min": 1}}\n` +
+  `    {"content": "分析上传文件", "file_ids": ["..."], "expect": {"status": "completed"}},\n` +
+  `    {"content": "生成 Word 汇总", "expect": {"react_rounds_min": 1}}\n` +
   `  ]\n` +
-  `}\n`;
+  `}\n` +
+  `命令行 --file-id 应用于未在 turn.file_ids 中单独指定的每一轮。\n` +
+  `文件断言支持 expect.files_min 与 expect.file_extensions。\n` +
+  `服务端验收: documind run cli/examples/dm-be-files-scenario.json --json\n`;
 
 const KB_HELP = `用法: documind kb <subcommand> [options]\n\n` +
   `  list                         列出租户全部知识库（需要管理权限）\n` +

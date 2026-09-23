@@ -25,6 +25,7 @@ export async function runScenario(
   service: ChatService,
   scenario: Scenario,
   onTurn?: (index: number, total: number, content: string) => void,
+  fileIds: string[] = [],
 ): Promise<ScenarioReport> {
   const startedAt = new Date();
   const started = performance.now();
@@ -40,6 +41,7 @@ export async function runScenario(
       content: turn.content,
       conversation_id: conversationId,
       kb_ids: turn.kb_ids ?? conversationKbIds,
+      file_ids: turn.file_ids ?? fileIds,
     });
     const assertions = evaluateExpectations(report, turn.expect);
     turns.push({
@@ -92,6 +94,16 @@ export function evaluateExpectations(
     expectation.react_rounds_min,
     report.execution.react_round_count,
   );
+  minimum(assertions, "files_min", expectation.files_min, report.response.files.length);
+  for (const extension of expectation.file_extensions ?? []) {
+    const suffix = extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
+    assertions.push(assertion(
+      `file_extension:${suffix}`,
+      suffix,
+      report.response.files.map((file) => file.path),
+      report.response.files.some((file) => file.path.toLowerCase().endsWith(suffix)),
+    ));
+  }
   if (expectation.max_duration_ms !== undefined) {
     assertions.push(assertion(
       "max_duration_ms",
@@ -130,6 +142,26 @@ function validateScenario(value: unknown): asserts value is Scenario {
         typeof (item as Record<string, unknown>).content !== "string" ||
         !(item as Record<string, unknown>).content) {
       throw new CliError(`场景 turns[${index}].content 必须是非空字符串`, 2);
+    }
+    const fileIds = (item as Record<string, unknown>).file_ids;
+    if (fileIds !== undefined &&
+        (!Array.isArray(fileIds) || fileIds.some((id) => typeof id !== "string" || !id))) {
+      throw new CliError(`场景 turns[${index}].file_ids 必须是非空字符串数组`, 2);
+    }
+    const expectation = (item as Record<string, unknown>).expect;
+    if (expectation && typeof expectation === "object") {
+      const fields = expectation as Record<string, unknown>;
+      if (fields.files_min !== undefined &&
+          (!Number.isInteger(fields.files_min) || Number(fields.files_min) < 0)) {
+        throw new CliError(`场景 turns[${index}].expect.files_min 必须是非负整数`, 2);
+      }
+      if (fields.file_extensions !== undefined &&
+          (!Array.isArray(fields.file_extensions) ||
+            fields.file_extensions.some((extension) => typeof extension !== "string" || !extension))) {
+        throw new CliError(
+          `场景 turns[${index}].expect.file_extensions 必须是非空字符串数组`, 2,
+        );
+      }
     }
   }
 }

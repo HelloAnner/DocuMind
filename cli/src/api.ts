@@ -38,6 +38,7 @@ import type {
   SessionState,
   TenantProfile,
   UploadDocumentResponse,
+  UserFile,
   VectorIndexSummary,
 } from "./types.ts";
 
@@ -387,6 +388,40 @@ export class ApiClient {
     return this.requestJson(
       this.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
     );
+  }
+
+  async listUserFiles(conversationId?: string): Promise<{ items: UserFile[] }> {
+    const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+    return this.requestJson(`/api/files${query}`);
+  }
+
+  async getUserFile(id: string): Promise<UserFile> {
+    return this.requestJson(`/api/files/${encodeURIComponent(id)}`);
+  }
+
+  async uploadUserFile(
+    file: Blob,
+    fileName: string,
+    path?: string,
+    conversationId?: string,
+  ): Promise<UserFile> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    if (path) form.set("path", path);
+    if (conversationId) form.set("conversation_id", conversationId);
+    return this.requestJson("/api/files", { method: "POST", body: form });
+  }
+
+  async downloadUserFile(id: string): Promise<Uint8Array> {
+    const response = await this.request(
+      `/api/files/${encodeURIComponent(id)}/download`,
+      { headers: { Accept: "application/octet-stream" } },
+    );
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async deleteUserFile(id: string): Promise<unknown> {
+    return this.requestJson(`/api/files/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
   async getMessageTrace(

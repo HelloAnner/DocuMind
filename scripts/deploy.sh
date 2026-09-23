@@ -25,6 +25,8 @@ REMOTE_REDIS_IMAGE="${REMOTE_REDIS_IMAGE:-m.daocloud.io/docker.io/library/redis:
 REMOTE_RABBITMQ_IMAGE="${REMOTE_RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/rabbitmq:3-management-alpine}"
 REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}"
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
+REMOTE_MINIO_MC_IMAGE="${REMOTE_MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:RELEASE.2024-07-15T19-17-04Z}"
+REMOTE_BASH_RUNNER_IMAGE="${REMOTE_BASH_RUNNER_IMAGE:-documind-bash-runner:latest}"
 
 if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
@@ -94,6 +96,15 @@ jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || date +%
 remote_env_value() {
   printf '%s\n' "$remote_env_content" | grep -E "^$1=" | tail -1 | cut -d= -f2- || true
 }
+minio_access_key="$(remote_env_value OBJECT_STORAGE_ACCESS_KEY)"
+minio_secret_key="$(remote_env_value OBJECT_STORAGE_SECRET_KEY)"
+if [[ ${#minio_access_key} -lt 3 || ${#minio_secret_key} -lt 16 \
+  || ! "$minio_access_key" =~ ^[A-Za-z0-9_-]+$ || ! "$minio_secret_key" =~ ^[A-Za-z0-9_-]+$ \
+  || "$minio_access_key" == "documind" || "$minio_secret_key" == "documind" ]]; then
+  minio_access_key="documind_$(openssl rand -hex 8)"
+  minio_secret_key="$(openssl rand -hex 32)"
+fi
+
 
 llm_api_key="$(remote_env_value LLM_API_KEY)"
 if [[ -z "$llm_api_key" ]]; then
@@ -197,12 +208,14 @@ OBJECT_STORAGE_PROVIDER=minio
 OBJECT_STORAGE_ENDPOINT=$REMOTE_MINIO_ENDPOINT
 OBJECT_STORAGE_REGION=us-east-1
 OBJECT_STORAGE_BUCKET=documind
-OBJECT_STORAGE_ACCESS_KEY=documind
-OBJECT_STORAGE_SECRET_KEY=documind
+OBJECT_STORAGE_ACCESS_KEY=$minio_access_key
+OBJECT_STORAGE_SECRET_KEY=$minio_secret_key
 OBJECT_STORAGE_FORCE_PATH_STYLE=true
 OBJECT_STORAGE_TLS_VERIFY=false
 OBJECT_STORAGE_PRESIGN_EXPIRE_SECONDS=900
 BLOB_STORAGE_DIR=$REMOTE_ROOT/shared/objects
+BASH_RUNNER_IMAGE=$REMOTE_BASH_RUNNER_IMAGE
+BASH_RUNNER_MAX_TIMEOUT_SECONDS=120
 
 LLM_BASE_URL=$llm_base_url
 LLM_API=$llm_api_key
@@ -306,9 +319,13 @@ copy_to_remote "$LOCAL_BINARY" "$REMOTE_RELEASE/bin/documind"
 copy_to_remote "$TMP_ENV" "$REMOTE_RELEASE/.env.default"
 
 if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
-  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | tar -xzf - -C "$REMOTE_RELEASE"
+  COPYFILE_DISABLE=1 tar -czf - \
+    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner \
+    | tar -xzf - -C "$REMOTE_RELEASE"
 else
-  COPYFILE_DISABLE=1 tar -czf - apps/api-bun/migrations | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
+  COPYFILE_DISABLE=1 tar -czf - \
+    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner \
+    | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
 fi
 
 run_remote_bash <<REMOTE
@@ -334,6 +351,8 @@ redis_image='$REMOTE_REDIS_IMAGE'
 rabbitmq_image='$REMOTE_RABBITMQ_IMAGE'
 es_image='$REMOTE_ES_IMAGE'
 minio_image='$REMOTE_MINIO_IMAGE'
+minio_mc_image='$REMOTE_MINIO_MC_IMAGE'
+bash_runner_image='$REMOTE_BASH_RUNNER_IMAGE'
 
 if [[ ! -f "\$remote_env" ]]; then
   cp "\$remote_release/.env.default" "\$remote_env"
@@ -352,7 +371,6 @@ ensure_env_var() {
   fi
 }
 
-ensure_env_var DOCUMIND_ENV production
 
 upsert_env_var() {
   local key="\$1"
@@ -372,6 +390,9 @@ upsert_env_var() {
   cat "\$temp_file" > "\$remote_env"
   rm -f "\$temp_file"
 }
+ensure_env_var DOCUMIND_ENV production
+upsert_env_var OBJECT_STORAGE_ACCESS_KEY '$minio_access_key'
+upsert_env_var OBJECT_STORAGE_SECRET_KEY '$minio_secret_key'
 
 release_env_value() {
   grep -E "^\$1=" "\$remote_release/.env.default" | tail -1 | cut -d= -f2-
@@ -389,6 +410,21 @@ for agent_key in \
   AGENT_MAX_HISTORY_CHARS AGENT_MAX_CONTEXT_CHARS; do
   ensure_env_var "\$agent_key" "\$(release_env_value "\$agent_key")"
 done
+ensure_env_var BASH_RUNNER_IMAGE '$REMOTE_BASH_RUNNER_IMAGE'
+ensure_env_var BASH_RUNNER_MAX_TIMEOUT_SECONDS 120
+bash_runner_image="\$(grep -E '^BASH_RUNNER_IMAGE=' "\$remote_env" | tail -1 | cut -d= -f2-)"
+if [[ -z "\$bash_runner_image" ]]; then
+  echo "BASH_RUNNER_IMAGE missing from \$remote_env" >&2
+  exit 1
+fi
+
+minio_access_key="\$(grep -E '^OBJECT_STORAGE_ACCESS_KEY=' "\$remote_env" | tail -1 | cut -d= -f2-)"
+minio_secret_key="\$(grep -E '^OBJECT_STORAGE_SECRET_KEY=' "\$remote_env" | tail -1 | cut -d= -f2-)"
+minio_bucket="\$(grep -E '^OBJECT_STORAGE_BUCKET=' "\$remote_env" | tail -1 | cut -d= -f2-)"
+if [[ -z "\$minio_access_key" || -z "\$minio_secret_key" || -z "\$minio_bucket" ]]; then
+  echo "MinIO credentials or bucket missing from \$remote_env" >&2
+  exit 1
+fi
 
 chmod +x "\$remote_release/bin/documind"
 remote_sha256="\$(sha256sum "\$remote_release/bin/documind" | awk '{print \$1}')"
@@ -410,6 +446,27 @@ mkdir -p \
   "\$remote_shared/objects"
 chown -R 1000:0 "\$remote_shared/elasticsearch"
 chmod -R g+rwX "\$remote_shared/elasticsearch"
+
+docker build -t "\$bash_runner_image" \
+  -f "\$remote_release/deploy/bash-runner/Dockerfile" "\$remote_release" >/dev/null
+docker run --rm \
+  --network none \
+  --user 65532:65532 \
+  --read-only \
+  --security-opt no-new-privileges \
+  --cap-drop ALL \
+  --cpus 1 \
+  --memory 512m \
+  --pids-limit 64 \
+  --ulimit nofile=128:128 \
+  --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+  --tmpfs /workspace:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532,mode=0770 \
+  --workdir /workspace \
+  --entrypoint /usr/local/bin/python \
+  "\$bash_runner_image" /opt/cnpc-skills/smoke.py \
+  | grep -qx runner-smoke-ok
+"\$remote_release/bin/documind" --runner-acceptance "\$bash_runner_image" \
+  | grep -qx runner-acceptance-ok
 
 ensure_office_preview_dependencies() {
   if command -v soffice >/dev/null 2>&1 || command -v libreoffice >/dev/null 2>&1; then
@@ -521,10 +578,19 @@ elif ! container_running "\$es_container"; then
   docker start "\$es_container" >/dev/null
 fi
 
+if container_exists "\$minio_container"; then
+  configured_user="\$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "\$minio_container" \
+    | grep '^MINIO_ROOT_USER=' | tail -1 | cut -d= -f2-)"
+  configured_password="\$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "\$minio_container" \
+    | grep '^MINIO_ROOT_PASSWORD=' | tail -1 | cut -d= -f2-)"
+  if [[ "\$configured_user" != "\$minio_access_key" || "\$configured_password" != "\$minio_secret_key" ]]; then
+    docker rm -f "\$minio_container" >/dev/null
+  fi
+fi
 if ! container_exists "\$minio_container"; then
   docker run -d --name "\$minio_container" \
-    -e MINIO_ROOT_USER=documind \
-    -e MINIO_ROOT_PASSWORD=documind \
+    -e MINIO_ROOT_USER="\$minio_access_key" \
+    -e MINIO_ROOT_PASSWORD="\$minio_secret_key" \
     -p 127.0.0.1:9010:9000 \
     -p 127.0.0.1:9011:9001 \
     -v "\$remote_shared/minio:/data" \
@@ -546,8 +612,16 @@ for _ in \$(seq 1 60); do
   sleep 1
 done
 curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null
-docker exec "\$minio_container" sh -c \
-  "mc alias set local http://127.0.0.1:9000 documind documind >/dev/null && mc mb -p local/documind >/dev/null 2>&1 || true"
+docker run --rm --network host \
+  --entrypoint /bin/sh \
+  -e MINIO_USER="\$minio_access_key" \
+  -e MINIO_PASSWORD="\$minio_secret_key" \
+  -e MINIO_BUCKET="\$minio_bucket" \
+  "\$minio_mc_image" -c '
+    mc alias set local http://127.0.0.1:9010 "\$MINIO_USER" "\$MINIO_PASSWORD" >/dev/null &&
+    mc mb --ignore-existing "local/\$MINIO_BUCKET" >/dev/null &&
+    mc stat "local/\$MINIO_BUCKET" >/dev/null
+  '
 
 printf '%s\n' \
   "CREATE SCHEMA IF NOT EXISTS documind AUTHORIZATION \$pg_user;" \
@@ -565,9 +639,11 @@ for migration in "\$remote_release"/apps/api-bun/migrations/*.up.sql; do
     continue
   fi
   {
+    echo "BEGIN;"
     echo "SET search_path TO documind, public;"
     cat "\$migration"
     echo "INSERT INTO documind._deploy_migrations(id) VALUES ('\$migration_id');"
+    echo "COMMIT;"
   } | docker exec -i "\$pg_container" psql -v ON_ERROR_STOP=1 -U "\$pg_user" -d "\$pg_database" >/dev/null
 done
 

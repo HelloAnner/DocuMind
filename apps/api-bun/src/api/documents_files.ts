@@ -3,6 +3,7 @@ import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { requirePermission } from '../auth/permissions.ts';
+import { withObjectStorageTimeout } from '../files/service.ts';
 import {
   contextualPreviewUrl, fetchPreviewDocument, fetchReadableDocument, requiredSql,
   signedPreviewUrl, encodePreviewAccessToken,
@@ -54,14 +55,18 @@ export async function downloadOriginal(c: Context<AppEnv>): Promise<Response> {
   }
   const fileName = String(row.file_name);
   const storageKey = String(row.storage_key);
-  const totalSize = await state.storage.size(storageKey);
+  const totalSize = await withObjectStorageTimeout(
+    'head', (signal) => state.storage.size(storageKey, signal),
+  );
 
   const range = c.req.header('range') ?? null;
   if (range !== null) {
     const parsed = parseByteRange(range, totalSize);
     if (parsed !== null) {
       const [start, end] = parsed;
-      const bytes = await state.storage.getRange(storageKey, start, end);
+      const bytes = await withObjectStorageTimeout(
+        'get range', (signal) => state.storage.getRange(storageKey, start, end, signal),
+      );
       const headers = new Headers({
         'Content-Type': 'application/octet-stream',
         'Accept-Ranges': 'bytes',
@@ -73,7 +78,9 @@ export async function downloadOriginal(c: Context<AppEnv>): Promise<Response> {
     return rangeNotSatisfiable(totalSize);
   }
 
-  const bytes = await state.storage.get(storageKey);
+  const bytes = await withObjectStorageTimeout(
+    'get', (signal) => state.storage.get(storageKey, signal),
+  );
   const headers = new Headers({
     'Content-Type': 'application/octet-stream',
     'Accept-Ranges': 'bytes',

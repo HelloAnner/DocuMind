@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { evaluateExpectations } from "../src/scenario.ts";
+import { evaluateExpectations, loadScenario } from "../src/scenario.ts";
 import type { ChatRunReport } from "../src/types.ts";
 
 describe("scenario expectations", () => {
@@ -13,9 +13,17 @@ describe("scenario expectations", () => {
       contains: "30 天",
       not_contains: "不知道",
       max_duration_ms: 10_000,
+      files_min: 1,
+      file_extensions: [".docx"],
     });
-    expect(assertions).toHaveLength(8);
+    expect(assertions).toHaveLength(10);
     expect(assertions.every((item) => item.passed)).toBe(true);
+  });
+
+  test("loads the deterministic Office runner server scenario", async () => {
+    const scenario = await loadScenario("examples/dm-be-files-scenario.json");
+    expect(scenario.turns).toHaveLength(4);
+    expect(scenario.turns[3]!.expect?.file_extensions).toEqual([".docx"]);
   });
 });
 
@@ -35,6 +43,18 @@ function report(): ChatRunReport {
       content: "付款期限为 30 天。",
       status: "completed",
       confidence: "high",
+      files: [{
+        id: "file",
+        name: "result.docx",
+        path: "generated/c/a/result.docx",
+        mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        size_bytes: 100,
+        source: "sandbox",
+        conversation_id: "c",
+        created_at: "2026-01-01T00:00:00.000Z",
+        updated_at: "2026-01-01T00:00:00.000Z",
+        download_url: "/api/files/file/download",
+      }],
     },
     timing: { total_ms: 9000 },
     execution: {

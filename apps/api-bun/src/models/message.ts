@@ -3,6 +3,7 @@ import type { AgentMode, PromptVersions, ReactStepTrace } from './agent.ts';
 import type { Citation, CitationAnchor } from './citation.ts';
 import type { FeedbackResponse } from './feedback.ts';
 import type { Confidence, MessageRole, MessageStatus, NoAnswerReason } from './index.ts';
+import type { UserFile } from './user_file.ts';
 
 export type AnswerSource = 'rag' | 'manual_correction';
 export type CorrectionMatchType = 'exact' | 'alias' | 'semantic';
@@ -40,6 +41,7 @@ export interface MessageResponse {
   confidence: string | null; no_answer_reason: string | null; agent_mode: string | null;
   prompt_versions: PromptVersions | null;
   citations: CitationResponse[]; reasoning_steps: ReactStepTrace[];
+  files: UserFile[];
   feedback?: FeedbackResponse | null;
   answer_source: AnswerSource; correction_id: string | null; correction_version_id: string | null;
   correction_match_type: CorrectionMatchType | null; correction_match_score: number | null;
@@ -48,7 +50,8 @@ export interface MessageResponse {
 }
 
 export interface SendMessageRequest {
-  content: string; kb_ids?: string[]; client_request_id?: string | null; stream?: boolean;
+  content: string; kb_ids?: string[]; file_ids?: string[];
+  client_request_id?: string | null; stream?: boolean;
   model_id?: string; thinking_enabled?: boolean;
 }
 export interface MessageListResponse { conversation_id: string; messages: MessageResponse[]; }

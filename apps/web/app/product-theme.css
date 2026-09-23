@@ -7689,3 +7689,297 @@ body > .hiddenCanvasElement {
     padding: 22px 18px;
   }
 }
+
+/* Chat file attachments */
+
+.dm-composer-file-input {
+  display: none;
+}
+
+.dm-composer-box {
+  position: relative;
+}
+
+.dm-composer-box.dm-drag-active {
+  border-color: var(--accent-action);
+}
+
+.dm-composer-drop-overlay {
+  align-items: center;
+  background: color-mix(in srgb, var(--surface-panel) 82%, transparent);
+  border: 1.5px dashed var(--accent-action);
+  border-radius: 14px;
+  color: var(--accent-action);
+  display: flex;
+  font-size: 13px;
+  gap: 8px;
+  inset: 6px;
+  justify-content: center;
+  pointer-events: none;
+  position: absolute;
+  z-index: 5;
+}
+
+.dm-composer-attachments {
+  border-bottom: 1px solid var(--border-faint);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px;
+}
+
+.dm-composer-notice {
+  color: var(--feedback-negative);
+  font-size: 11px;
+  line-height: 16px;
+  margin: 0;
+  padding: 8px 12px 0;
+}
+
+.dm-composer-attachment {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  min-height: 52px;
+  padding: 8px 10px;
+}
+
+.dm-composer-attachment .dm-conversation-file-icon {
+  height: 34px;
+  width: 34px;
+}
+
+.dm-composer-attachment-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dm-composer-attachment-copy > strong {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-composer-attachment-meta {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.dm-composer-attachment-error {
+  align-items: center;
+  color: var(--feedback-negative);
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  line-height: 14px;
+}
+
+.dm-composer-attachment-progress {
+  background: var(--hover-bg);
+  border-radius: 999px;
+  display: block;
+  height: 4px;
+  overflow: hidden;
+}
+
+.dm-composer-attachment-progress > span {
+  background: var(--accent-action);
+  border-radius: 999px;
+  display: block;
+  height: 100%;
+  transition: width 180ms ease;
+}
+
+.dm-composer-attachment-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+}
+
+.dm-composer-attachment-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--text-muted);
+  display: inline-flex;
+  height: 26px;
+  justify-content: center;
+  width: 26px;
+}
+
+.dm-composer-attachment-actions button:hover {
+  background: var(--hover-bg-strong);
+  color: var(--text-primary);
+}
+
+.dm-message-files {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-width: min(520px, 100%);
+}
+
+.dm-file-card-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dm-file-card {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  padding: 8px 10px;
+  text-align: left;
+  transition: background 150ms ease, border-color 150ms ease;
+  width: 100%;
+}
+
+.dm-file-card:hover:not(:disabled) {
+  background: var(--hover-bg-strong);
+  border-color: color-mix(in srgb, var(--accent-action) 28%, var(--border-subtle));
+  color: var(--text-primary);
+}
+
+.dm-file-card:focus-visible {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent-action) 58%, transparent);
+  outline: none;
+}
+
+.dm-file-card:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.dm-file-card .dm-conversation-file-icon {
+  height: 36px;
+  width: 36px;
+}
+
+.dm-file-card-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dm-file-card-copy > strong {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dm-file-card-meta {
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 14px;
+}
+
+.dm-file-card-action {
+  color: var(--text-placeholder);
+}
+
+.dm-conversation-files-tabs {
+  margin: 2px 2px 10px;
+}
+
+.dm-my-files-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 0 2px 10px;
+}
+
+.dm-my-files-upload {
+  align-items: center;
+  background: var(--surface-subdued);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+}
+
+.dm-my-files-upload:hover {
+  background: var(--hover-bg-strong);
+  color: var(--text-primary);
+}
+
+.dm-chat-file-row {
+  align-items: center;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  display: grid;
+  gap: 11px;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  min-height: 60px;
+  padding: 8px 10px;
+  transition: background 150ms ease;
+}
+
+.dm-chat-file-row:hover {
+  background: var(--hover-bg-strong);
+}
+
+.dm-chat-file-row-actions {
+  align-items: center;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.dm-chat-file-row:hover .dm-chat-file-row-actions,
+.dm-chat-file-row:focus-within .dm-chat-file-row-actions {
+  opacity: 1;
+}
+
+.dm-chat-file-row-actions .dm-icon-button,
+.dm-chat-file-row-actions button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: var(--text-muted);
+  display: inline-flex;
+  height: 28px;
+  justify-content: center;
+  width: 28px;
+}
+
+.dm-chat-file-row-actions button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .dm-chat-file-row-actions {
+    opacity: 1;
+  }
+}

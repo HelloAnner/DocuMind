@@ -73,6 +73,7 @@ export async function messageToResponse(
     prompt_versions: message.prompt_versions,
     citations: citations.map((citation: Citation) => citationToResponse(citation)),
     reasoning_steps: reasoningSteps,
+    files: await repo.getMessageFiles(message.tenant_id, currentUserId, message.id),
     // Rust 侧 feedback 是 skip_serializing_if=Option::is_none：没有反馈时不能出现该键
     feedback: feedback === null ? undefined : feedback,
     answer_source: message.answer_source,

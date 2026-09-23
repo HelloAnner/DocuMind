@@ -2,6 +2,7 @@
 import type { Context } from 'hono';
 import type { TransactionSql } from 'postgres';
 import { AppError } from '../errors.ts';
+import { withObjectStorageTimeout } from '../files/service.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
 import { requireKbPermission, requirePermission } from '../auth/permissions.ts';
 import { PARSER_VERSION } from '../document/types.ts';
@@ -138,7 +139,9 @@ export async function sendToOcr(c: Context<AppEnv>): Promise<Response> {
 
   let bytes: Uint8Array;
   try {
-    bytes = await state.storage.get(doc.storage_key);
+    bytes = await withObjectStorageTimeout(
+      'get', (signal) => state.storage.get(doc.storage_key, signal),
+    );
   } catch (error) {
     throw AppError.badRequest(
       'ORIGINAL_FILE_MISSING',

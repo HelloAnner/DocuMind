@@ -5,6 +5,7 @@ import type { ConversationFile } from '../models/conversation_file.ts';
 import type { ConversationListResponse, ConversationSession } from '../models/conversation.ts';
 import type { Feedback } from '../models/feedback.ts';
 import type { ConversationMessage } from '../models/message.ts';
+import type { UserFile } from '../models/user_file.ts';
 import type { QueryTrace, RetrievalTrace } from '../models/trace.ts';
 
 export interface ConversationRepository {
@@ -23,12 +24,20 @@ export interface ConversationRepository {
   ): Promise<boolean>;
 
   createMessage(message: ConversationMessage): Promise<void>;
+  createMessagePair(
+    userMessage: ConversationMessage,
+    assistantMessage: ConversationMessage,
+    fileIds: string[],
+  ): Promise<void>;
   getMessage(tenantId: string, messageId: string): Promise<ConversationMessage | null>;
   getMessages(tenantId: string, conversationId: string): Promise<ConversationMessage[]>;
   updateMessage(message: ConversationMessage): Promise<void>;
   findMessageByClientRequestId(
     tenantId: string, userId: string, clientRequestId: string,
   ): Promise<ConversationMessage | null>;
+  getMessageFiles(
+    tenantId: string, userId: string, messageId: string,
+  ): Promise<UserFile[]>;
 
   saveQueryTrace(trace: QueryTrace): Promise<void>;
   getQueryTrace(messageId: string): Promise<QueryTrace | null>;

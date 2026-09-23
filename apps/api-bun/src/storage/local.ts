@@ -15,25 +15,36 @@ export class LocalStorage implements ObjectStorage {
     return join(this.root, key);
   }
 
-  async put(key: string, bytes: Uint8Array): Promise<void> {
+  async put(key: string, bytes: Uint8Array, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const path = this.keyToPath(key);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, bytes);
+    signal?.throwIfAborted();
   }
 
-  async get(key: string): Promise<Uint8Array> {
+  async get(key: string, signal?: AbortSignal): Promise<Uint8Array> {
+    signal?.throwIfAborted();
     const path = this.keyToPath(key);
-    const buffer = await readFile(path);
+    const buffer = await readFile(path, { signal });
     return new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   }
 
-  async size(key: string): Promise<number> {
+  async size(key: string, signal?: AbortSignal): Promise<number> {
+    signal?.throwIfAborted();
     const path = this.keyToPath(key);
     const meta = await stat(path);
+    signal?.throwIfAborted();
     return meta.size;
   }
 
-  async getRange(key: string, start: number, end: number): Promise<Uint8Array> {
+  async getRange(
+    key: string,
+    start: number,
+    end: number,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array> {
+    signal?.throwIfAborted();
     const path = this.keyToPath(key);
     const handle = await open(path, 'r');
     try {
@@ -41,20 +52,24 @@ export class LocalStorage implements ObjectStorage {
       const buffer = Buffer.alloc(length);
       let read = 0;
       while (read < length) {
+        signal?.throwIfAborted();
         const { bytesRead } = await handle.read(buffer, read, length - read, start + read);
         if (bytesRead === 0) break;
         read += bytesRead;
       }
+      signal?.throwIfAborted();
       return new Uint8Array(buffer.buffer, buffer.byteOffset, read);
     } finally {
       await handle.close();
     }
   }
 
-  async delete(key: string): Promise<void> {
+  async delete(key: string, signal?: AbortSignal): Promise<void> {
+    signal?.throwIfAborted();
     const path = this.keyToPath(key);
     try {
       await rm(path);
+      signal?.throwIfAborted();
     } catch (error) {
       if (isNotFound(error)) return;
       console.error('[documind][storage] failed to delete local file ' + path + ':', error);

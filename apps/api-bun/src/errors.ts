@@ -27,6 +27,9 @@ export class AppError extends Error {
   static badRequest(code: string, message: string): AppError { return new AppError('bad_request', 400, code, message); }
   static unauthorizedWith(code: string, message: string): AppError { return new AppError('unauthorized', 401, code, message); }
   static rateLimited(code: string, message: string): AppError { return new AppError('rate_limited', 429, code, message); }
+  static payloadTooLarge(code: string, message: string): AppError {
+    return new AppError('bad_request', 413, code, message);
+  }
 
   static conversationNotFound(): AppError {
     return AppError.notFound('CONVERSATION_NOT_FOUND', '会话不存在或无权限');

@@ -12,6 +12,9 @@ import { chatModelCatalog, resolveChatModel } from '../chat_models.ts';
 import { AppError } from '../errors.ts';
 import { nowRfc3339 } from '../infra/time.ts';
 import { newUuid } from '../infra/uuid.ts';
+import {
+  listOwnedUserFiles, prepareMessageFiles, type PreparedMessageFiles,
+} from '../files/service.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { ConversationFileListResponse } from '../models/conversation_file.ts';
 import type { ConversationSession, CreateConversationRequest } from '../models/conversation.ts';
@@ -226,7 +229,13 @@ async function listConversationFilesHandler(c: Context<AppEnv>): Promise<Respons
   const effectiveKbIds = intersectKbIds(configuredKbIds, actor.allowed_kb_ids);
   const files = await state.repository.listConversationFiles(
     actor.tenant_id, session.id, effectiveKbIds);
-  const body: ConversationFileListResponse = { conversation_id: session.id, files: files };
+  const body: ConversationFileListResponse = {
+    conversation_id: session.id,
+    files,
+    user_files: state.sql
+      ? await listOwnedUserFiles(state.sql, actor.tenant_id, actor.user_id, session.id)
+      : [],
+  };
   return c.json(body);
 }
 
@@ -260,9 +269,17 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
       throw AppError.clientRequestConflict();
     }
   }
+  const userMessageId = newUuid();
+  let preparedFiles: PreparedMessageFiles = { file_ids: [], files: [], context: '' };
+  if (request.file_ids !== undefined) {
+    if (!state.sql) throw AppError.badRequest('DATABASE_REQUIRED', '用户文件需要 PostgreSQL');
+    preparedFiles = await prepareMessageFiles(
+      state.sql, state.storage, actor.tenant_id, actor.user_id, session.id, request.file_ids);
+  }
+
 
   const userMessage: ConversationMessage = {
-    id: newUuid(),
+    id: userMessageId,
     conversation_id: session.id,
     tenant_id: actor.tenant_id,
     user_id: actor.user_id,
@@ -286,11 +303,13 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
     created_at: nowRfc3339(),
     completed_at: nowRfc3339(),
   };
-  await state.repository.createMessage(userMessage);
-
   const assistantMessageId = newUuid();
-  await state.repository.createMessage(
-    assistantPlaceholder(session, actor, userMessage.id, assistantMessageId, null));
+  const assistantMessage = assistantPlaceholder(
+    session, actor, userMessage.id, assistantMessageId, null,
+  );
+  await state.repository.createMessagePair(
+    userMessage, assistantMessage, preparedFiles.file_ids,
+  );
 
   const protocol = sseProtocolFromHeaders(c.req.raw.headers);
   // Rust 在返回 SSE 之前就 spawn 标题任务，管线跑完后再推 conversation.title.updated
@@ -313,6 +332,8 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
         assistantMessageId: assistantMessageId,
         originalQuery: content,
         effectiveKbIds: scope.effectiveKbIds,
+        fileIds: preparedFiles.file_ids,
+        fileContext: preparedFiles.context,
         ctx: ctx,
         titleUpdate: titleUpdate,
       });
@@ -357,12 +378,19 @@ async function retryMessageHandler(c: Context<AppEnv>): Promise<Response> {
   const parentId = failedMessage.parent_message_id;
   if (parentId === null) throw AppError.invalidMessageState();
 
+  const userMessage = await state.repository.getMessage(actor.tenant_id, parentId);
+  if (userMessage === null) throw AppError.messageNotFound();
+  const parentFiles = await state.repository.getMessageFiles(
+    actor.tenant_id, actor.user_id, parentId);
+  const preparedFiles = parentFiles.length > 0 && state.sql
+    ? await prepareMessageFiles(
+      state.sql, state.storage, actor.tenant_id, actor.user_id, session.id,
+      parentFiles.map((file) => file.id))
+    : { file_ids: [], files: [], context: '' };
+
   const assistantMessageId = newUuid();
   await state.repository.createMessage(
     assistantPlaceholder(session, actor, parentId, assistantMessageId, messageId));
-
-  const userMessage = await state.repository.getMessage(actor.tenant_id, parentId);
-  if (userMessage === null) throw AppError.messageNotFound();
 
   const protocol = sseProtocolFromHeaders(c.req.raw.headers);
   return streamSSE(c, async (stream) => {
@@ -380,6 +408,8 @@ async function retryMessageHandler(c: Context<AppEnv>): Promise<Response> {
         assistantMessageId: assistantMessageId,
         originalQuery: userMessage.content,
         effectiveKbIds: scope.effectiveKbIds,
+        fileIds: preparedFiles.file_ids,
+        fileContext: preparedFiles.context,
         ctx: ctx,
         titleUpdate: null,
       });

@@ -2,6 +2,7 @@
 export { documentsRouter } from './documents.ts';
 export { knowledgeRouter } from './knowledge.ts';
 export { conversationsRouter } from './conversations.ts';
+export { filesRouter } from './files.ts';
 export { externalApiRouter } from './external_routes.ts';
 export { historyRouter } from './history.ts';
 export { sharesRouter } from './shares.ts';

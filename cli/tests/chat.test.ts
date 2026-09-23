@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { executionRounds } from "../src/chat.ts";
+import { generatedFileLines } from "../src/render.ts";
 import type { ObservedEvent, RuntimeEventEnvelope } from "../src/types.ts";
 
 describe("executionRounds", () => {
@@ -36,6 +37,24 @@ describe("executionRounds", () => {
         status: "succeeded",
         duration_ms: 800,
       }),
+    ]);
+  });
+
+  test("renders generated file id, path and download URL", () => {
+    expect(generatedFileLines("https://documind.test", [{
+      id: "file-1",
+      name: "result.docx",
+      path: "generated/conversation/message/result.docx",
+      mime_type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size_bytes: 100,
+      source: "sandbox",
+      conversation_id: "conversation",
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      download_url: "/api/files/file-1/download",
+    }])).toEqual([
+      "generated/conversation/message/result.docx · id=file-1 · " +
+        "https://documind.test/api/files/file-1/download",
     ]);
   });
 });

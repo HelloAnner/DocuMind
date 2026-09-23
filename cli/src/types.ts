@@ -175,6 +175,19 @@ export interface Citation {
   anchor?: CitationAnchor;
 }
 
+export interface UserFile {
+  id: string;
+  name: string;
+  path: string;
+  mime_type: string;
+  size_bytes: number;
+  source: "upload" | "sandbox";
+  conversation_id?: string;
+  created_at: string;
+  updated_at: string;
+  download_url: string;
+}
+
 export interface Message {
   message_id: string;
   role: "user" | "assistant";
@@ -185,6 +198,7 @@ export interface Message {
   agent_mode?: string;
   prompt_versions?: Record<string, string>;
   citations: Citation[];
+  files: UserFile[];
   feedback?: {
     id: string;
     rating: "up" | "down";
@@ -331,6 +345,7 @@ export interface ChatRequest {
   content: string;
   conversation_id?: string;
   kb_ids?: string[];
+  file_ids?: string[];
   title?: string;
   client_request_id?: string;
   model_id?: string;
@@ -350,6 +365,7 @@ export interface ChatRunReport {
     conversation_id: string;
     content: string;
     kb_ids: string[];
+    file_ids?: string[];
     client_request_id: string;
     model_id?: string;
     thinking_enabled?: boolean;
@@ -361,6 +377,7 @@ export interface ChatRunReport {
     status: string;
     confidence?: string;
     no_answer_reason?: string;
+    files: UserFile[];
   };
   timing: {
     total_ms: number;
@@ -584,11 +601,14 @@ export interface ScenarioExpectation {
   contains?: string | string[];
   not_contains?: string | string[];
   max_duration_ms?: number;
+  files_min?: number;
+  file_extensions?: string[];
 }
 
 export interface ScenarioTurn {
   content: string;
   kb_ids?: string[];
+  file_ids?: string[];
   expect?: ScenarioExpectation;
 }
 

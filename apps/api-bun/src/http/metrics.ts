@@ -102,8 +102,7 @@ export async function metricsPayload(deps: HealthDeps): Promise<string> {
   const redis = await checkRedis(deps.redis);
   const elasticsearch = await checkElasticsearch(
     config.elasticsearchUrl, config.rag.embedding.indexAlias);
-  const objectStorage = await checkObjectStorage(
-    config.objectStorageProvider, config.objectStorageEndpoint, config.objectStorageBucket);
+  const objectStorage = await checkObjectStorage(config);
   const rabbitmq = await checkTcpUrl(config.rabbitmqUrl, 5672);
   const realLlm = await checkOpenAiCompatibleEndpoint(
     config.rag.generation.useRealLlm, config.rag.generation.baseUrl,

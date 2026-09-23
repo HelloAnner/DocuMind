@@ -13,6 +13,7 @@ import {
   Folder,
   Menu,
   MessageSquareText,
+  Paperclip,
   Share2,
   Sparkles,
   Square,
@@ -26,6 +27,7 @@ import {
   type DocumentPreviewTarget,
 } from "@/components/chat/document-preview";
 import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
+import { PendingAttachmentList, useAttachmentQueue } from "@/components/chat/pending-attachments";
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
@@ -330,6 +332,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     selectedKbIds,
     updatingKbSelection,
     kbSelectionError,
+    sendNotice,
     updateKnowledgeBaseSelection,
     sendMessage,
     retryMessage,
@@ -358,6 +361,18 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     copied: false,
     error: "",
   });
+  const {
+    attachments,
+    addFiles,
+    removeAttachment,
+    retryAttachment,
+    consumeReady,
+    restore,
+    uploadingCount,
+  } = useAttachmentQueue(currentId);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const dragDepthRef = useRef(0);
+  const [dragActive, setDragActive] = useState(false);
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
   const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
@@ -372,6 +387,17 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     model_id: selectedModel || undefined,
     thinking_enabled: thinkingMode === "auto" ? undefined : thinkingMode === "deep",
   };
+
+  useEffect(() => {
+    // 拖到输入区以外时浏览器默认会直接打开文件，这里统一拦掉；输入区自己的处理不受影响。
+    const preventFileDrop = (event: DragEvent) => event.preventDefault();
+    window.addEventListener("dragover", preventFileDrop);
+    window.addEventListener("drop", preventFileDrop);
+    return () => {
+      window.removeEventListener("dragover", preventFileDrop);
+      window.removeEventListener("drop", preventFileDrop);
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -441,9 +467,26 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
 
   const handleSend = async () => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || uploadingCount > 0) return;
+    const ready = consumeReady();
     setInput("");
-    await sendMessage(text, runtimeOptions);
+    const accepted = await sendMessage(
+      text,
+      runtimeOptions,
+      ready.flatMap((item) => (item.uploaded ? [item.uploaded] : []))
+    );
+    if (accepted) return;
+    // 请求没有真正发出（并发发送或被拦截）时，把正文和附件还给用户，避免静默丢失。
+    restore(ready);
+    setInput((current) => (current.trim() ? current : text));
+  };
+
+  const handleDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    dragDepthRef.current = 0;
+    setDragActive(false);
+    const dropped = event.dataTransfer?.files;
+    if (dropped && dropped.length > 0) addFiles(dropped);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -600,7 +643,38 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
           ) : null}
 
           <div className="dm-composer">
-            <div className="dm-composer-box">
+            <div
+              className={`dm-composer-box ${dragActive ? "dm-drag-active" : ""}`}
+              onDragEnter={(event) => {
+                event.preventDefault();
+                if (!event.dataTransfer?.types.includes("Files")) return;
+                dragDepthRef.current += 1;
+                setDragActive(true);
+              }}
+              onDragLeave={(event) => {
+                event.preventDefault();
+                dragDepthRef.current = Math.max(0, dragDepthRef.current - 1);
+                if (dragDepthRef.current === 0) setDragActive(false);
+              }}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={handleDrop}
+            >
+              {dragActive ? (
+                <div className="dm-composer-drop-overlay" aria-hidden="true">
+                  <Paperclip size={16} />
+                  松开以上传文件
+                </div>
+              ) : null}
+              <PendingAttachmentList
+                attachments={attachments}
+                onRemove={removeAttachment}
+                onRetry={retryAttachment}
+              />
+              {sendNotice ? (
+                <p className="dm-composer-notice" role="status">
+                  {sendNotice}
+                </p>
+              ) : null}
               <div className="dm-composer-input-row">
                 <textarea
                   aria-label="消息输入框"
@@ -610,11 +684,40 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                   onKeyDown={handleKeyDown}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
+                  onPaste={(event) => {
+                    const pasted = Array.from(event.clipboardData?.files ?? []);
+                    if (pasted.length > 0) {
+                      event.preventDefault();
+                      addFiles(pasted);
+                    }
+                  }}
                   rows={1}
                 />
               </div>
               <div className="dm-composer-toolbar">
                 <div className="dm-composer-tools">
+                  <input
+                    aria-hidden="true"
+                    className="dm-composer-file-input"
+                    multiple
+                    onChange={(event) => {
+                      if (event.target.files && event.target.files.length > 0) {
+                        addFiles(event.target.files);
+                      }
+                      event.target.value = "";
+                    }}
+                    ref={fileInputRef}
+                    tabIndex={-1}
+                    type="file"
+                  />
+                  <IconButton
+                    aria-label="上传文件"
+                    className="dm-composer-tool dm-composer-attach"
+                    onClick={() => fileInputRef.current?.click()}
+                    title="上传文件"
+                  >
+                    <Paperclip size={17} />
+                  </IconButton>
                   <KnowledgeBasePicker
                     knowledgeBases={availableKbs}
                     value={selectedKbIds}
@@ -665,8 +768,14 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                 <button
                   className={`dm-send-button ${streamingId ? "running" : ""}`}
                   aria-label={streamingId ? "停止" : "发送"}
-                  onClick={streamingId ? () => streamingId && cancelMessage(streamingId) : handleSend}
-                  disabled={!streamingId && !input.trim()}
+                  onClick={
+                    streamingId
+                      ? () => {
+                          void cancelMessage(streamingId);
+                        }
+                      : handleSend
+                  }
+                  disabled={!streamingId && (!input.trim() || uploadingCount > 0)}
                 >
                   {streamingId ? <Square size={14} fill="currentColor" /> : <ArrowUp size={18} />}
                 </button>

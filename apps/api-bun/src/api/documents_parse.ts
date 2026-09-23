@@ -3,6 +3,7 @@
 //   build_parse_artifacts / resume_pending_document_jobs / recover_interrupted_document_jobs）
 import type { Sql, TransactionSql } from 'postgres';
 import { AppError } from '../errors.ts';
+import { withObjectStorageTimeout } from '../files/service.ts';
 import { parseDocument } from '../document/mod.ts';
 import type { CleanedBlock, CleanStats } from '../document/cleaning.ts';
 import type { ParsedBundle } from '../document/types.ts';
@@ -341,7 +342,9 @@ export async function resumePendingDocumentJobs(state: AppState): Promise<number
     const storageKey = String(row.storage_key);
     let bytes: Uint8Array;
     try {
-      bytes = await state.storage.get(storageKey);
+      bytes = await withObjectStorageTimeout(
+        'get', (signal) => state.storage.get(storageKey, signal),
+      );
     } catch (error) {
       await sql.unsafe(
         `UPDATE document_parse_jobs SET status = 'failed', error_code = 'ORIGINAL_FILE_MISSING',

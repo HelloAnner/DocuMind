@@ -1,0 +1,25 @@
+{
+  "name": "DM-BE private files and Office runner acceptance",
+  "conversation": {
+    "title": "DM-BE CLI acceptance",
+    "kb_ids": []
+  },
+  "turns": [
+    {
+      "content": "必须读取并使用 cnpc-word 技能，生成标题为“DM-BE Word 验收”、正文为“通过”的 DOCX 文件。",
+      "expect": { "status": "completed", "react_rounds_min": 2, "files_min": 1, "file_extensions": [".docx"] }
+    },
+    {
+      "content": "必须读取并使用 cnpc-excel 技能，生成包含表头“项目,数值”和数据“产量,42”的 XLSX 文件。",
+      "expect": { "status": "completed", "react_rounds_min": 2, "files_min": 1, "file_extensions": [".xlsx"] }
+    },
+    {
+      "content": "必须读取并使用 cnpc-ppt 技能，生成标题为“DM-BE PPT 验收”、要点为“通过”的 PPTX 文件。",
+      "expect": { "status": "completed", "react_rounds_min": 2, "files_min": 1, "file_extensions": [".pptx"] }
+    },
+    {
+      "content": "再次读取并使用 cnpc-word 技能，生成标题为“DM-BE Word 重复验收”、正文为“第二次通过”的 DOCX 文件，不得覆盖第一次文件。",
+      "expect": { "status": "completed", "react_rounds_min": 2, "files_min": 1, "file_extensions": [".docx"] }
+    }
+  ]
+}

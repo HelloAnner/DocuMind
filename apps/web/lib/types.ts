@@ -79,6 +79,25 @@ export interface ConversationFileListResponse {
   conversation_id: UUID;
   files: ConversationFile[];
 }
+export type ChatFileSource = "upload" | "sandbox";
+
+export interface ChatFile {
+  id: UUID;
+  name: string;
+  path: string;
+  mime_type: string;
+  size_bytes: number;
+  source: ChatFileSource;
+  conversation_id?: UUID | null;
+  created_at: string;
+  updated_at: string;
+  download_url?: string;
+}
+
+export interface ChatFileListResponse {
+  files: ChatFile[];
+}
+
 
 export interface PromptVersions {
   persona: string;
@@ -108,6 +127,7 @@ export interface Message {
   correction_match_type?: CorrectionMatchType | null;
   correction_match_score?: number | null;
   follow_up_questions?: FollowUpQuestion[];
+  files?: ChatFile[];
   duration_ms?: number;
   usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number };
   parent_message_id?: UUID;
@@ -161,6 +181,7 @@ export interface SendMessageRequest {
   stream?: boolean;
   model_id?: string;
   thinking_enabled?: boolean;
+  file_ids?: string[];
 }
 
 export interface RetryMessageRequest {
