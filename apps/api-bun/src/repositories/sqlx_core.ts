@@ -316,10 +316,11 @@ export class SqlxConversationCore {
     await this.pool.begin(async (tx) => {
       await insertMessage(tx, userMessage);
       if (fileIds.length > 0) {
+        // 文件归属最新的会话：同一份用户文件可以在别的会话里继续使用（重新绑定），
+        // 否则第二次 chat --file-id 会误报“文件不存在或无权限”。
         const bound = await tx.unsafe(
           `UPDATE user_file SET conversation_id = $1, updated_at = NOW()
            WHERE tenant_id = $2 AND user_id = $3 AND id = ANY($4::uuid[])
-             AND (conversation_id IS NULL OR conversation_id = $1)
            RETURNING id`,
           [userMessage.conversation_id, userMessage.tenant_id, userMessage.user_id, fileIds],
         );
