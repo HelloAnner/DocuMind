@@ -55,16 +55,20 @@ describe('private user files', () => {
   });
 
 
-  test('a file already bound to another conversation is hidden', async () => {
+  test('a file bound to another conversation can be reused', async () => {
     const originalConversation = crypto.randomUUID();
-    await expect(prepareMessageFiles(
+    const targetConversation = crypto.randomUUID();
+    const prepared = await prepareMessageFiles(
       fileSql(originalConversation),
-      {} as ObjectStorage,
+      { get: async () => new TextEncoder().encode('private') } as unknown as ObjectStorage,
       TENANT_ID,
       USER_ID,
-      crypto.randomUUID(),
+      targetConversation,
       [FILE_ID],
-    )).rejects.toMatchObject({ code: 'FILE_NOT_FOUND', httpStatus: 404 });
+    );
+    expect(prepared.file_ids).toEqual([FILE_ID]);
+    expect(prepared.files[0]!.conversation_id).toBe(targetConversation);
+    expect(prepared.context).toContain('private');
   });
   test('virtual paths stay relative and traversal-free', () => {
     expect(normalizeUserFilePath('reports/2026/', 'result.docx')).toBe('reports/2026/result.docx');

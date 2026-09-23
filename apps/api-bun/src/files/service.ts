@@ -205,9 +205,6 @@ export async function prepareMessageFiles(
   const fileIds = validateFileIds(rawFileIds);
   if (fileIds.length === 0) return { file_ids: [], files: [], context: '' };
   const files = await loadOwnedFiles(sql, tenantId, userId, fileIds);
-  for (const file of files) {
-    if (file.conversation_id && file.conversation_id !== conversationId) throw fileNotFound();
-  }
 
   let remaining = MAX_TOTAL_FILE_CONTEXT_CHARS;
   let totalTruncated = false;
