@@ -460,7 +460,7 @@ docker run --rm \
   --pids-limit 64 \
   --ulimit nofile=128:128 \
   --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
-  --tmpfs /workspace:rw,noexec,nosuid,nodev,size=64m,uid=65532,gid=65532,mode=0770 \
+  --tmpfs /workspace:rw,noexec,nosuid,nodev,size=64m \
   --workdir /workspace \
   --entrypoint /usr/local/bin/python \
   "\$bash_runner_image" /opt/cnpc-skills/smoke.py \
