@@ -126,7 +126,14 @@ function ThinkingModePicker({
   const rootRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   const options = [
-    { value: "auto" as const, label: "自动", description: "由模型自行判断是否需要深度思考", icon: Sparkles },
+    {
+      value: "auto" as const,
+      label: "自动",
+      description: model
+        ? `按模型默认：${model.thinking_default ? "开启" : "关闭"}深度思考`
+        : "按模型默认设置",
+      icon: Sparkles,
+    },
     { value: "deep" as const, label: "深度思考", description: "强制启用深度思考，推理更准确", icon: Brain },
     { value: "fast" as const, label: "快速", description: "跳过深度思考，响应更快", icon: Zap },
   ];

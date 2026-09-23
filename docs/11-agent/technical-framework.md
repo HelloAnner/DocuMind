@@ -76,6 +76,10 @@ streamFn = (_model, context, options) =>
 
 对话页与 CLI 可以逐请求选择 `CHAT_MODELS` 中的模型；凭据、Base URL 和
 默认模型仍由 ENV 控制。DeepSeek / Qwen 的深度思考可切换，GLM 始终开启。
+可切换模型不传 `thinking_enabled` 时按目录里的 `thinking_default` 取值（当前为关闭），
+Web 的“自动”就是这个默认值；解析出的布尔值会作为 `enable_thinking` 显式发给生成端点，
+若省略该参数，端点默认开启推理，首字前会先产出不可见的 reasoning
+（实测同一 Office 修改任务首 token 从 1.3s 变为 14.9s）。
 开启后，`thinking.delta` 只在生成期间以灰色临时文字展示；第一个正文增量
 到达后立即清除，且不写入最终消息正文。
 

@@ -54,9 +54,13 @@ export function resolveChatModel(
   if (option.thinking_mode === 'unsupported' && requestedThinking === true) {
     throw AppError.badRequest('THINKING_UNSUPPORTED', `${option.name} 不支持深度思考`);
   }
+  // switchable 模型必须显式给出最终值：undefined 会让 OpenAI 兼容请求不带任何 thinking 参数，
+  // 端点默认按“思考开启”推理，先产出不可见的 reasoning 再吐首字（实测 TTFT 14.9s → 1.3s）。
   const thinkingEnabled = option.thinking_mode === 'always_on'
     ? true
-    : option.thinking_mode === 'switchable' ? requestedThinking : false;
+    : option.thinking_mode === 'switchable'
+      ? requestedThinking ?? option.thinking_default
+      : false;
   const generation = config.rag.generation;
   return {
     model: id,
