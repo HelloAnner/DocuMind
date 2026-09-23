@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/deploy-secrets.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/deploy-secrets.sh"
+
 DEPLOY_HOST="${DEPLOY_HOST:-documind}"
 DEPLOY_PORT="${DEPLOY_PORT:-8089}"
 REMOTE_ROOT="${REMOTE_ROOT:-/opt/documind}"
@@ -95,6 +98,30 @@ jwt_secret="${existing_jwt_secret:-$(openssl rand -hex 32 2>/dev/null || date +%
 remote_env_value() {
   printf '%s\n' "$remote_env_content" | grep -E "^$1=" | tail -1 | cut -d= -f2- || true
 }
+
+# 种子账户：口令复用远端强值，弱值轮换；用户名同样不接受空值或 1。
+seed_identifier() {
+  local current="${1:-}" fallback="$2"
+  if [[ -z "$current" || "$current" == "1" ]]; then
+    printf '%s' "$fallback"
+    return 0
+  fi
+  printf '%s' "$current"
+}
+super_admin_email="$(seed_identifier "$(remote_env_value SUPER_ADMIN_EMAIL)" 'Anner')"
+enterprise_admin_email="$(seed_identifier "$(remote_env_value ENTERPRISE_ADMIN_EMAIL)" 'admin@documind.local')"
+standard_user_email="$(seed_identifier "$(remote_env_value STANDARD_USER_EMAIL)" 'user@documind.local')"
+super_admin_password="$(resolve_strong_secret "$(remote_env_value SUPER_ADMIN_PASSWORD)")"
+enterprise_admin_password="$(resolve_strong_secret "$(remote_env_value ENTERPRISE_ADMIN_PASSWORD)")"
+standard_user_password="$(resolve_strong_secret "$(remote_env_value STANDARD_USER_PASSWORD)")"
+report_rotation() {
+  if [[ "$2" != "$3" ]]; then
+    echo "种子口令 $1 缺失或过弱，已轮换为随机值（新值见服务器 $REMOTE_ENV，本脚本不打印口令）"
+  fi
+}
+report_rotation SUPER_ADMIN_PASSWORD "$(remote_env_value SUPER_ADMIN_PASSWORD)" "$super_admin_password"
+report_rotation ENTERPRISE_ADMIN_PASSWORD "$(remote_env_value ENTERPRISE_ADMIN_PASSWORD)" "$enterprise_admin_password"
+report_rotation STANDARD_USER_PASSWORD "$(remote_env_value STANDARD_USER_PASSWORD)" "$standard_user_password"
 minio_access_key="$(remote_env_value OBJECT_STORAGE_ACCESS_KEY)"
 minio_secret_key="$(remote_env_value OBJECT_STORAGE_SECRET_KEY)"
 if [[ ${#minio_access_key} -lt 3 || ${#minio_secret_key} -lt 16 \
@@ -248,12 +275,12 @@ DEFAULT_ROLE=enterprise_admin
 DEFAULT_KB_IDS=00000000-0000-0000-0000-000000000010,00000000-0000-0000-0000-000000000011,00000000-0000-0000-0000-000000000012
 DEFAULT_TENANT_NAME=AcmeCorp
 DEFAULT_TENANT_SLUG=acme
-SUPER_ADMIN_EMAIL=Anner
-SUPER_ADMIN_PASSWORD=1
-ENTERPRISE_ADMIN_EMAIL=admin@documind.local
-ENTERPRISE_ADMIN_PASSWORD=documind123
-STANDARD_USER_EMAIL=user@documind.local
-STANDARD_USER_PASSWORD=documind123
+SUPER_ADMIN_EMAIL=$super_admin_email
+SUPER_ADMIN_PASSWORD=$super_admin_password
+ENTERPRISE_ADMIN_EMAIL=$enterprise_admin_email
+ENTERPRISE_ADMIN_PASSWORD=$enterprise_admin_password
+STANDARD_USER_EMAIL=$standard_user_email
+STANDARD_USER_PASSWORD=$standard_user_password
 
 RUST_LOG=documind=info,tower_http=info
 LOG_FORMAT=json
@@ -391,6 +418,17 @@ upsert_env_var() {
 ensure_env_var DOCUMIND_ENV production
 upsert_env_var OBJECT_STORAGE_ACCESS_KEY '$minio_access_key'
 upsert_env_var OBJECT_STORAGE_SECRET_KEY '$minio_secret_key'
+upsert_env_var SUPER_ADMIN_EMAIL '$super_admin_email'
+upsert_env_var SUPER_ADMIN_PASSWORD '$super_admin_password'
+upsert_env_var ENTERPRISE_ADMIN_EMAIL '$enterprise_admin_email'
+upsert_env_var ENTERPRISE_ADMIN_PASSWORD '$enterprise_admin_password'
+upsert_env_var STANDARD_USER_EMAIL '$standard_user_email'
+upsert_env_var STANDARD_USER_PASSWORD '$standard_user_password'
+seed_password="\$(grep -E '^SUPER_ADMIN_PASSWORD=' "\$remote_env" | tail -1 | cut -d= -f2-)"
+if [[ \${#seed_password} -lt 16 || "\$seed_password" == "1" ]]; then
+  echo "SUPER_ADMIN_PASSWORD 仍为弱值，拒绝部署" >&2
+  exit 1
+fi
 
 release_env_value() {
   grep -E "^\$1=" "\$remote_release/.env.default" | tail -1 | cut -d= -f2-
