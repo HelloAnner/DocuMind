@@ -263,6 +263,36 @@ documind documents wait <document-id> --until indexed --timeout 300 --interval 1
 
 遇到 `parse_failed`、`embedding_failed`、`parse_low_confidence` 或 `excluded_from_search` 时，等待命令会立即以非零状态退出并报告最终文档；这使上传和解析可直接作为自动化闭环测试步骤。
 
+## 用户私有文件与沙箱
+
+`files` 管理当前用户自己的文件，与公共知识库完全隔离（同一租户的其他用户看不到）。支持 txt/md/csv/json/docx/xlsx/pptx，单文件不超过 25MB：
+
+```bash
+documind files upload ./policy.md --json
+documind files upload ./table.csv --path fixtures/table.csv --conversation <conversation-id>
+documind files list [--conversation <conversation-id>]
+documind files show <file-id>
+documind files download <file-id> --output ./policy.md --force
+documind files delete <file-id> --force
+```
+
+对话时用 `--file-id` 把文件带入上下文（可重复，文件内容不进入公共知识库）：
+
+```bash
+documind chat --file-id <file-id> '依据这个文件回答：一线城市住宿每晚上限是多少？'
+documind chat --json --file-id <id1> --file-id <id2> '对比这两份文件'
+```
+
+对话中 Agent 也可以使用 Bash 沙箱处理会话文件：沙箱无网络、非 root、只读根文件系统，工作目录是 `/workspace`，只有 `/workspace` 下新建或修改的文件会同步为当前用户文件（写入 `/tmp` 不会同步）。生成的 Office 文件出现在 `files list` 的 `generated/<conversation>/<message>/...` 路径下，并在 `chat` 报告的 `response.files` 中列出。
+
+内置 Office 技能 `cnpc-word`、`cnpc-excel`、`cnpc-ppt` 可直接在对话中调用，也可以作为回归场景批量验收：
+
+```bash
+documind run examples/dm-be-files-scenario.json --json --output report.json
+```
+
+场景断言支持 `files_min`、`file_extensions`、`file_ids` 以及逐轮 `file_ids` 输入。
+
 ## 向量库诊断
 
 ```bash
