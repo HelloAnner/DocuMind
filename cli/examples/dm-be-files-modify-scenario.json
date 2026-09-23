@@ -1,0 +1,26 @@
+{
+  "name": "DM-BE 用户文件原地修改验收",
+  "conversation": {
+    "title": "CLI 原地修改验收"
+  },
+  "turns": [
+    {
+      "content": "必须读取并使用 cnpc-excel 技能，在会话文件中的 XLSX 表格的“数据”表末尾追加一行“库存/7”，必须原地修改这个已存在的文件，不要新建文件。",
+      "expect": {
+        "status": "completed",
+        "files_min": 1,
+        "file_extensions": [".xlsx"],
+        "input_files_modified": true
+      }
+    },
+    {
+      "content": "必须读取并使用 cnpc-ppt 技能，在会话文件中的 PPTX 演示文稿末尾追加一页，标题“验收页”，正文“原地修改通过”，必须原地修改这个已存在的文件，不要新建文件。",
+      "expect": {
+        "status": "completed",
+        "files_min": 1,
+        "file_extensions": [".pptx"],
+        "input_files_modified": true
+      }
+    }
+  ]
+}

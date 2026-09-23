@@ -197,7 +197,7 @@ const VECTOR_HELP = `用法: documind vector <subcommand> [options]\n\n` +
   `所有查询都强制附加当前登录身份的 tenant_id 和 allowed_kb_ids。\n` +
   `真实稠密向量召回请使用 chat，并查看 trace.retrieval_traces 中的 dense 结果。\n`;
 
-const RUN_HELP = `用法: documind run <scenario.json|-> [--file-id ID] [--json] [--output report.json]\n\n` +
+const RUN_HELP = `用法: documind run <scenario.json|-> [--file-id ID] [--conversation ID] [--json] [--output report.json]\n\n` +
   `场景示例:\n` +
   `{\n` +
   `  "name": "采购制度多轮测试",\n` +
@@ -208,8 +208,10 @@ const RUN_HELP = `用法: documind run <scenario.json|-> [--file-id ID] [--json]
   `  ]\n` +
   `}\n` +
   `命令行 --file-id 应用于未在 turn.file_ids 中单独指定的每一轮。\n` +
-  `文件断言支持 expect.files_min 与 expect.file_extensions。\n` +
-  `服务端验收: documind run cli/examples/dm-be-files-scenario.json --json\n`;
+  `会话文件（file_ids）只在所属会话内可用，验收既有文件时需要 --conversation 指向上传该文件的会话。\n` +
+  `文件断言支持 expect.files_min、expect.file_extensions、expect.file_ids（断言这些文件 ID 出现在本轮 response.files）与 expect.input_files_modified（断言本轮产物都是输入文件本身，即原地修改而非新建副本）。\n` +
+  `服务端验收: documind run cli/examples/dm-be-files-scenario.json --json\n` +
+  `原地修改验收: documind run cli/examples/dm-be-files-modify-scenario.json --file-id <id> --json\n`;
 
 const KB_HELP = `用法: documind kb <subcommand> [options]\n\n` +
   `  list                         列出租户全部知识库（需要管理权限）\n` +

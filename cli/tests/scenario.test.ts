@@ -20,6 +20,21 @@ describe("scenario expectations", () => {
     expect(assertions.every((item) => item.passed)).toBe(true);
   });
 
+  test("verifies that the inputs were modified in place instead of copied", () => {
+    const passed = evaluateExpectations(report(), {
+      file_ids: ["file"],
+      input_files_modified: true,
+    }, ["file", "other"]);
+    expect(passed).toHaveLength(2);
+    expect(passed.every((item) => item.passed)).toBe(true);
+
+    const copied = evaluateExpectations(report(), {
+      file_ids: ["other"],
+      input_files_modified: true,
+    }, ["other"]);
+    expect(copied.map((item) => item.passed)).toEqual([false, false]);
+  });
+
   test("loads the deterministic Office runner server scenario", async () => {
     const scenario = await loadScenario("examples/dm-be-files-scenario.json");
     expect(scenario.turns).toHaveLength(4);

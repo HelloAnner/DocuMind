@@ -283,15 +283,28 @@ documind chat --file-id <file-id> '依据这个文件回答：一线城市住宿
 documind chat --json --file-id <id1> --file-id <id2> '对比这两份文件'
 ```
 
-对话中 Agent 也可以使用 Bash 沙箱处理会话文件：沙箱无网络、非 root、只读根文件系统，工作目录是 `/workspace`，只有 `/workspace` 下新建或修改的文件会同步为当前用户文件（写入 `/tmp` 不会同步）。生成的 Office 文件出现在 `files list` 的 `generated/<conversation>/<message>/...` 路径下，并在 `chat` 报告的 `response.files` 中列出。
+对话中 Agent 也可以使用 Bash 沙箱处理会话文件：沙箱无网络、非 root、只读根文件系统，工作目录是 `/workspace`，只有 `/workspace` 下新建或修改的文件会同步为当前用户文件（写入 `/tmp` 不会同步）。会话文件按上传时的相对路径挂载进 `/workspace`；沙箱把同一路径改回来后，用户文件保持同一个 ID 并被原地更新（`source` 变为 `sandbox`），只有新路径才会生成 `generated/<conversation>/<message>/...` 新文件，两者都会出现在 `chat` 报告的 `response.files` 中。
 
-内置 Office 技能 `cnpc-word`、`cnpc-excel`、`cnpc-ppt` 可直接在对话中调用，也可以作为回归场景批量验收：
+内置 Office 技能 `cnpc-word`、`cnpc-excel`、`cnpc-ppt` 既支持新建，也支持在既有文件上原地修改（输入 JSON 里带 `source` 指向既有文件，输出路径写成同一路径即可写回原文件），可直接在对话中调用，也可以作为回归场景批量验收：
 
 ```bash
+# 新建 DOCX/XLSX/PPTX
 documind run examples/dm-be-files-scenario.json --json --output report.json
+
+# 原地修改：先把文件上传到某个会话，记下会话 ID 与文件 ID
+documind conversations create --title '原地修改验收'
+documind files upload ./table.xlsx --conversation <conversation-id> --path table.xlsx
+documind files upload ./deck.pptx --conversation <conversation-id> --path deck.pptx
+
+# 会话文件只在所属会话内可用，验收同一文件 ID 的原地修改要带上 --conversation
+documind run examples/dm-be-files-modify-scenario.json --conversation <conversation-id> \
+  --file-id <xlsx-id> --file-id <pptx-id> --json --output modify.json
+
+# 取回文件并本地打开核对内容
+documind files download <xlsx-id> --output ./table-checked.xlsx --force
 ```
 
-场景断言支持 `files_min`、`file_extensions`、`file_ids` 以及逐轮 `file_ids` 输入。
+场景断言支持 `files_min`、`file_extensions`、`file_ids`（断言这些文件 ID 出现在本轮 `response.files`）、`input_files_modified`（断言本轮产物都是输入文件本身，即原地修改既有文件而非新建副本）以及逐轮 `file_ids` 输入。做完原地修改后可用 `files download <file-id> --output ...` 取回文件并本地打开核对内容。
 
 ## 向量库诊断
 

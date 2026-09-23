@@ -751,9 +751,14 @@ async function runCommand(args: ParsedArgs, api: ApiClient, json: boolean): Prom
   if (!path) throw new CliError("run 需要场景 JSON 文件路径，或 - 从 stdin 读取", 2);
   const scenario = await loadScenario(path);
   const fileIds = listOption(args, "file-id");
-  const report = await runScenario(new ChatService(api), scenario, (index, total, content) => {
-    if (!json) process.stderr.write(`[${index + 1}/${total}] ${content}\n`);
-  }, fileIds);
+  const conversationId = stringOption(args, "conversation");
+  const report = await runScenario(new ChatService(api), scenario, {
+    onTurn: (index, total, content) => {
+      if (!json) process.stderr.write(`[${index + 1}/${total}] ${content}\n`);
+    },
+    fileIds,
+    ...(conversationId ? { conversationId } : {}),
+  });
   const output = stringOption(args, "output");
   if (output) await writeFile(output, `${JSON.stringify(report, null, 2)}\n`, "utf8");
   if (json) printJson(report); else printScenarioReport(report);

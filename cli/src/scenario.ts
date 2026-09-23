@@ -21,29 +21,39 @@ export async function loadScenario(path: string): Promise<Scenario> {
   return parsed;
 }
 
+export interface ScenarioRunOptions {
+  onTurn?: (index: number, total: number, content: string) => void;
+  /** 命令行 --file-id 提供的文件，应用于未在 turn.file_ids 中单独指定的每一轮。 */
+  fileIds?: string[];
+  /** 在既有会话中运行；会话文件（file_ids）只有属于该会话时才能在沙箱内读写。 */
+  conversationId?: string;
+}
+
 export async function runScenario(
   service: ChatService,
   scenario: Scenario,
-  onTurn?: (index: number, total: number, content: string) => void,
-  fileIds: string[] = [],
+  options: ScenarioRunOptions = {},
 ): Promise<ScenarioReport> {
+  const { onTurn, fileIds = [], conversationId: requestedConversationId } = options;
   const startedAt = new Date();
   const started = performance.now();
   const conversationKbIds = scenario.conversation?.kb_ids ?? [];
-  const conversationId = scenario.conversation?.id ?? await service.createConversation(
-    conversationKbIds,
-    scenario.conversation?.title ?? scenario.name ?? "CLI 场景测试",
-  );
+  const conversationId = requestedConversationId ?? scenario.conversation?.id ??
+    await service.createConversation(
+      conversationKbIds,
+      scenario.conversation?.title ?? scenario.name ?? "CLI 场景测试",
+    );
   const turns: ScenarioReport["turns"] = [];
   for (const [index, turn] of scenario.turns.entries()) {
     onTurn?.(index, scenario.turns.length, turn.content);
+    const turnFileIds = turn.file_ids ?? fileIds;
     const report = await service.send({
       content: turn.content,
       conversation_id: conversationId,
       kb_ids: turn.kb_ids ?? conversationKbIds,
-      file_ids: turn.file_ids ?? fileIds,
+      file_ids: turnFileIds,
     });
-    const assertions = evaluateExpectations(report, turn.expect);
+    const assertions = evaluateExpectations(report, turn.expect, turnFileIds);
     turns.push({
       report,
       assertions,
@@ -65,6 +75,7 @@ export async function runScenario(
 export function evaluateExpectations(
   report: ChatRunReport,
   expectation: ScenarioExpectation | undefined,
+  inputFileIds: string[] = [],
 ): AssertionResult[] {
   if (!expectation) return [];
   const assertions: AssertionResult[] = [];
@@ -95,6 +106,24 @@ export function evaluateExpectations(
     report.execution.react_round_count,
   );
   minimum(assertions, "files_min", expectation.files_min, report.response.files.length);
+  const responseFileIds = report.response.files.map((file) => file.id);
+  for (const fileId of expectation.file_ids ?? []) {
+    assertions.push(assertion(
+      `file_id:${fileId}`,
+      fileId,
+      responseFileIds,
+      responseFileIds.includes(fileId),
+    ));
+  }
+  if (expectation.input_files_modified !== undefined) {
+    const created = responseFileIds.filter((fileId) => !inputFileIds.includes(fileId));
+    assertions.push(assertion(
+      "input_files_modified",
+      true,
+      { input_file_ids: inputFileIds, returned_file_ids: responseFileIds, created },
+      inputFileIds.length > 0 && responseFileIds.length > 0 && created.length === 0,
+    ));
+  }
   for (const extension of expectation.file_extensions ?? []) {
     const suffix = extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
     assertions.push(assertion(
@@ -161,6 +190,15 @@ function validateScenario(value: unknown): asserts value is Scenario {
         throw new CliError(
           `场景 turns[${index}].expect.file_extensions 必须是非空字符串数组`, 2,
         );
+      }
+      if (fields.file_ids !== undefined &&
+          (!Array.isArray(fields.file_ids) ||
+            fields.file_ids.some((id) => typeof id !== "string" || !id))) {
+        throw new CliError(`场景 turns[${index}].expect.file_ids 必须是非空字符串数组`, 2);
+      }
+      if (fields.input_files_modified !== undefined &&
+          typeof fields.input_files_modified !== "boolean") {
+        throw new CliError(`场景 turns[${index}].expect.input_files_modified 必须是布尔值`, 2);
       }
     }
   }

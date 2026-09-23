@@ -603,6 +603,10 @@ export interface ScenarioExpectation {
   max_duration_ms?: number;
   files_min?: number;
   file_extensions?: string[];
+  /** 断言这些用户文件 ID 出现在本轮 response.files 中（用于确认改动落在目标文件上）。 */
+  file_ids?: string[];
+  /** 断言本轮产物全部是输入文件本身（原地修改既有会话文件），没有新建副本。 */
+  input_files_modified?: boolean;
 }
 
 export interface ScenarioTurn {

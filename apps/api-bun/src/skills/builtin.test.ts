@@ -16,6 +16,11 @@ describe('CNPC built-in skills', () => {
         expect(skill.files).toHaveLength(1);
         expect(skill.files[0]!.content).toStartWith('#!/usr/bin/env python3');
       }
+      for (const name of ['cnpc-excel', 'cnpc-ppt']) {
+        const skill = await getSkill(emptySql, tenantId, name);
+        expect(skill.content).toContain('"source"');
+        expect(skill.content).toContain('原地修改');
+      }
     }
   });
 });
