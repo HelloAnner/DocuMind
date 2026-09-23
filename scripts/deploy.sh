@@ -27,7 +27,6 @@ REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearc
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
 REMOTE_MINIO_MC_IMAGE="${REMOTE_MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:RELEASE.2024-07-15T19-17-04Z}"
 REMOTE_BASH_RUNNER_IMAGE="${REMOTE_BASH_RUNNER_IMAGE:-documind-bash-runner:latest}"
-REMOTE_BASH_RUNNER_BASE_IMAGE="${REMOTE_BASH_RUNNER_BASE_IMAGE:-m.daocloud.io/docker.io/library/python:3.12-slim}"
 
 if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
@@ -354,7 +353,6 @@ es_image='$REMOTE_ES_IMAGE'
 minio_image='$REMOTE_MINIO_IMAGE'
 minio_mc_image='$REMOTE_MINIO_MC_IMAGE'
 bash_runner_image='$REMOTE_BASH_RUNNER_IMAGE'
-bash_runner_base_image='$REMOTE_BASH_RUNNER_BASE_IMAGE'
 
 if [[ ! -f "\$remote_env" ]]; then
   cp "\$remote_release/.env.default" "\$remote_env"
@@ -437,7 +435,7 @@ if [[ "\$remote_sha256" != "\$local_sha256" ]]; then
   exit 1
 fi
 printf '%s  %s\n' "\$remote_sha256" "\$remote_release/bin/documind" > "\$remote_release/bin/documind.sha256"
-ln -sfn "\$remote_release" "\$remote_current"
+previous_release="\$(readlink -f "\$remote_current" 2>/dev/null || true)"
 
 mkdir -p \
   "\$remote_shared/postgres" \
@@ -450,7 +448,6 @@ chown -R 1000:0 "\$remote_shared/elasticsearch"
 chmod -R g+rwX "\$remote_shared/elasticsearch"
 
 docker build -t "\$bash_runner_image" \
-  --build-arg BASE_IMAGE="\$bash_runner_base_image" \
   -f "\$remote_release/deploy/bash-runner/Dockerfile" "\$remote_release" >/dev/null
 docker run --rm \
   --network none \
@@ -650,6 +647,8 @@ for migration in "\$remote_release"/apps/api-bun/migrations/*.up.sql; do
   } | docker exec -i "\$pg_container" psql -v ON_ERROR_STOP=1 -U "\$pg_user" -d "\$pg_database" >/dev/null
 done
 
+ln -sfn "\$remote_release" "\$remote_current"
+
 if [[ -f "\$remote_pid" ]]; then
   old_pid="\$(cat "\$remote_pid" 2>/dev/null || true)"
   if [[ -n "\$old_pid" ]] && kill -0 "\$old_pid" 2>/dev/null; then
@@ -691,5 +690,9 @@ done
 
 echo "DocuMind did not pass health check. Recent log:"
 tail -80 "\$remote_log" || true
+if [[ -n "\$previous_release" && "\$previous_release" != "\$remote_release" ]]; then
+  ln -sfn "\$previous_release" "\$remote_current"
+  echo "current 已回滚到 \$previous_release"
+fi
 exit 1
 REMOTE
