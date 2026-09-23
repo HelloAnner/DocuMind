@@ -33,6 +33,9 @@ describe("scenario expectations", () => {
       input_files_modified: true,
     }, ["other"]);
     expect(copied.map((item) => item.passed)).toEqual([false, false]);
+
+    const withScratch = evaluateExpectations(report(), { input_files_modified: true }, ["file"]);
+    expect(withScratch[0]!.passed).toBe(true);
   });
 
   test("loads the deterministic Office runner server scenario", async () => {

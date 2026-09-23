@@ -209,7 +209,7 @@ const RUN_HELP = `用法: documind run <scenario.json|-> [--file-id ID] [--conve
   `}\n` +
   `命令行 --file-id 应用于未在 turn.file_ids 中单独指定的每一轮。\n` +
   `会话文件（file_ids）只在所属会话内可用，验收既有文件时需要 --conversation 指向上传该文件的会话。\n` +
-  `文件断言支持 expect.files_min、expect.file_extensions、expect.file_ids（断言这些文件 ID 出现在本轮 response.files）与 expect.input_files_modified（断言本轮产物都是输入文件本身，即原地修改而非新建副本）。\n` +
+  `文件断言支持 expect.files_min、expect.file_extensions、expect.file_ids（断言这些文件 ID 出现在本轮 response.files）与 expect.input_files_modified（断言至少一个输入文件被原地写回同一 ID，同轮新建的中间文件不影响判定）。\n` +
   `服务端验收: documind run cli/examples/dm-be-files-scenario.json --json\n` +
   `原地修改验收: documind run cli/examples/dm-be-files-modify-scenario.json --file-id <id> --json\n`;
 

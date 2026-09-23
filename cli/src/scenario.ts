@@ -116,12 +116,15 @@ export function evaluateExpectations(
     ));
   }
   if (expectation.input_files_modified !== undefined) {
+    // 只要求“至少一个输入文件被写回同一 ID”，不排斥同轮新建的中间文件
+    // （Office 技能会把输入 JSON 写在工作区，它本来就是新文件）。
+    const writtenBack = responseFileIds.filter((fileId) => inputFileIds.includes(fileId));
     const created = responseFileIds.filter((fileId) => !inputFileIds.includes(fileId));
     assertions.push(assertion(
       "input_files_modified",
       true,
-      { input_file_ids: inputFileIds, returned_file_ids: responseFileIds, created },
-      inputFileIds.length > 0 && responseFileIds.length > 0 && created.length === 0,
+      { input_file_ids: inputFileIds, written_back: writtenBack, created },
+      writtenBack.length > 0,
     ));
   }
   for (const extension of expectation.file_extensions ?? []) {
