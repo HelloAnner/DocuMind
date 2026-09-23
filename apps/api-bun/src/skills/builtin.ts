@@ -63,6 +63,7 @@ export function builtinSkill(idOrName: string): SkillRecord | null {
       '仅在用户明确要求生成对应 Office 文件时使用。先根据用户内容生成 UTF-8 JSON 输入文件，再调用 bash 工具执行内置脚本。',
       `输入 JSON 示例：\`${skill.input}\``,
       `执行：\`python ${skill.imagePath} input.json ${skill.output}\``,
+      '输入 JSON 与输出文件都必须使用当前工作目录（/workspace）下的相对路径，例如 input.json、result.docx；不要写到 /tmp 或任何绝对路径，只有工作目录下的文件会被同步为当前用户文件。',
       '脚本生成的文件会由沙箱自动同步为当前用户文件。不要访问网络，不要读取未随当前会话提供的文件。',
     ].join('\n'),
     content_sha256: new Bun.CryptoHasher('sha256').update(skill.script).digest('hex'),
