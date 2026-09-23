@@ -132,17 +132,33 @@ export async function runBashSandbox(request: BashSandboxRequest): Promise<BashS
     ]).finally(() => clearTimeout(timer));
     await (shutdown ?? ensureDockerContainerRemoved(containerName, false));
 
-    const files = await synchronizeWorkspace(request, workspace, originals);
+    // 只有正常结束才同步工作区改动：命令失败（非零退出/超时/输出超限被杀）时工作区里
+    // 可能是半写状态，同步回去会覆盖用户已上传的原文件，属于数据完整性事故。
+    const unsynced = unsyncedReason(timedOut, outputState.exceeded, exitCode);
+    const files = unsynced === null ? await synchronizeWorkspace(request, workspace, originals) : [];
     const suffix = outputState.exceeded ? '\n[输出已截断：stdout+stderr 最多 1 MB]' : '';
     return {
       exit_code: timedOut ? 124 : exitCode,
       stdout: stdout + (outputState.exceeded ? suffix : ''),
-      stderr: stderr + (timedOut ? `\n[执行超时：${timeoutSeconds} 秒]` : ''),
+      stderr: stderr + (timedOut ? `\n[执行超时：${timeoutSeconds} 秒]` : '')
+        + (unsynced === null ? '' : `\n[工作区改动未同步：${unsynced}]`),
       files,
     };
   } finally {
     await rm(workspace, { recursive: true, force: true });
   }
+}
+
+/** 工作区改动不同步的原因；null 表示正常结束（exit=0）可以同步回用户文件。 */
+export function unsyncedReason(
+  timedOut: boolean,
+  outputExceeded: boolean,
+  exitCode: number,
+): string | null {
+  if (timedOut) return '执行超时';
+  if (outputExceeded) return '输出超限';
+  if (exitCode !== 0) return `命令退出码 ${exitCode}`;
+  return null;
 }
 
 async function synchronizeWorkspace(

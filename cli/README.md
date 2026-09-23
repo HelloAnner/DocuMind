@@ -283,7 +283,7 @@ documind chat --file-id <file-id> '依据这个文件回答：一线城市住宿
 documind chat --json --file-id <id1> --file-id <id2> '对比这两份文件'
 ```
 
-对话中 Agent 也可以使用 Bash 沙箱处理会话文件：沙箱无网络、非 root、只读根文件系统，工作目录是 `/workspace`，只有 `/workspace` 下新建或修改的文件会同步为当前用户文件（写入 `/tmp` 不会同步）。会话文件按上传时的相对路径挂载进 `/workspace`；沙箱把同一路径改回来后，用户文件保持同一个 ID 并被原地更新（`source` 变为 `sandbox`），只有新路径才会生成 `generated/<conversation>/<message>/...` 新文件，两者都会出现在 `chat` 报告的 `response.files` 中。
+对话中 Agent 也可以使用 Bash 沙箱处理会话文件：沙箱无网络、非 root、只读根文件系统，工作目录是 `/workspace`，只有 `/workspace` 下新建或修改的文件会同步为当前用户文件（写入 `/tmp` 不会同步），且**只有命令以 0 退出时才会同步**——命令非零退出、超时或输出超过 1 MB 上限时工作区改动全部丢弃，已上传的会话文件保持原样。会话文件按上传时的相对路径挂载进 `/workspace`；沙箱把同一路径改回来后，用户文件保持同一个 ID 并被原地更新（`source` 变为 `sandbox`），只有新路径才会生成 `generated/<conversation>/<message>/...` 新文件，两者都会出现在 `chat` 报告的 `response.files` 中。
 
 内置 Office 技能 `cnpc-word`、`cnpc-excel`、`cnpc-ppt` 既支持新建，也支持在既有文件上原地修改（输入 JSON 里带 `source` 指向既有文件，输出路径写成同一路径即可写回原文件），可直接在对话中调用，也可以作为回归场景批量验收：
 

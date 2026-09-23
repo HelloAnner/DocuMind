@@ -51,8 +51,9 @@ integration('real Bash runner acceptance', () => {
         "python /opt/cnpc-skills/cnpc-excel.py <(printf '%s' '{\"source\":\"table.xlsx\",\"sheets\":[{\"name\":\"数据\",\"mode\":\"append\",\"rows\":[[\"库存\",7]]}]}') table.xlsx",
         "python /opt/cnpc-skills/cnpc-ppt.py <(printf '%s' '{\"slides\":[{\"title\":\"基线\",\"bullets\":[\"基线\"]}]}') deck.pptx",
         "python /opt/cnpc-skills/cnpc-ppt.py <(printf '%s' '{\"source\":\"deck.pptx\",\"slides\":[{\"title\":\"追加\",\"bullets\":[\"追加通过\"]}]}') deck.pptx",
-        `printf "import sys\\n${check}" > check.py`,
-        'python check.py',
+        `CHECK='${check}'`,
+        'printf "import sys\\n%b" "$CHECK" > /tmp/check.py',
+        'python /tmp/check.py',
       ].join(' && '),
     ));
     expect({ code: result.exit_code, stderr: result.stderr }).toMatchObject({ code: 0 });
@@ -90,20 +91,66 @@ integration('real Bash runner acceptance', () => {
   });
 
   test('kills and removes a timed-out container before synchronizing', async () => {
-    const database = fakeDatabase();
-    const storage = memoryStorage();
+    const seeded = seedOriginalFile();
     // Integration exception: this deliberately exercises the host timer and Docker kill path.
     const result = await runBashSandbox({
-      ...request(database.sql, storage, crypto.randomUUID(), 'sleep 5; printf late > late.txt'),
+      ...request(
+        seeded.database.sql, seeded.storage, crypto.randomUUID(),
+        'printf partial > table.xlsx; sleep 5; printf late > late.txt',
+        [seeded.fileId],
+      ),
       timeoutSeconds: 1,
     });
     expect(result.exit_code).toBe(124);
     expect(result.files).toEqual([]);
-    expect(database.links).toEqual([]);
+    expect(result.stderr).toContain('工作区改动未同步：执行超时');
+    expect(seeded.database.links).toEqual([]);
+    expect(seeded.database.updates).toEqual([]);
+    expect([...seeded.storage.objects.keys()]).toEqual([seeded.storageKey]);
+    expect(new TextDecoder().decode(seeded.storage.objects.get(seeded.storageKey)!))
+      .toBe('original-bytes');
+  });
+
+  test('keeps the uploaded original untouched when the command exits non-zero', async () => {
+    const seeded = seedOriginalFile();
+    const result = await runBashSandbox(request(
+      seeded.database.sql, seeded.storage, crypto.randomUUID(),
+      'printf half-written > table.xlsx; printf scratch > extra.txt; exit 3',
+      [seeded.fileId],
+    ));
+    expect(result.exit_code).toBe(3);
+    expect(result.files).toEqual([]);
+    expect(result.stderr).toContain('工作区改动未同步：命令退出码 3');
+    expect(seeded.database.updates).toEqual([]);
+    expect(seeded.database.links).toEqual([]);
+    expect([...seeded.storage.objects.keys()]).toEqual([seeded.storageKey]);
+    expect(new TextDecoder().decode(seeded.storage.objects.get(seeded.storageKey)!))
+      .toBe('original-bytes');
+  });
+
+  test('keeps the uploaded original untouched when output exceeds the cap', async () => {
+    const seeded = seedOriginalFile();
+    const result = await runBashSandbox(request(
+      seeded.database.sql, seeded.storage, crypto.randomUUID(),
+      `printf partial > table.xlsx; python -c "import sys; sys.stdout.write('a' * 2000000)"`,
+      [seeded.fileId],
+    ));
+    expect(result.files).toEqual([]);
+    expect(result.stdout).toContain('输出已截断');
+    expect(result.stderr).toContain('工作区改动未同步：输出超限');
+    expect(seeded.database.updates).toEqual([]);
+    expect(seeded.database.links).toEqual([]);
+    expect([...seeded.storage.objects.keys()]).toEqual([seeded.storageKey]);
   });
 });
 
-function request(sql: Sql, storage: ObjectStorage, messageId: string, command: string) {
+function request(
+  sql: Sql,
+  storage: ObjectStorage,
+  messageId: string,
+  command: string,
+  fileIds: string[] = [],
+) {
   return {
     sql,
     storage,
@@ -111,10 +158,35 @@ function request(sql: Sql, storage: ObjectStorage, messageId: string, command: s
     userId: USER,
     conversationId: CONVERSATION,
     assistantMessageId: messageId,
-    fileIds: [],
+    fileIds,
     command,
     options: { image: IMAGE!, maxTimeoutSeconds: 30 },
   };
+}
+
+/** 预置一个已上传的会话文件（storage 里放原始字节，DB 能按 id 查回），用于验证失败时不被半写覆盖。 */
+function seedOriginalFile() {
+  const fileId = crypto.randomUUID();
+  const storageKey = `tenants/${TENANT}/users/${USER}/files/${fileId}/v1/table.xlsx`;
+  const storage = memoryStorage();
+  storage.objects.set(storageKey, new TextEncoder().encode('original-bytes'));
+  const database = fakeDatabase({
+    id: fileId,
+    tenant_id: TENANT,
+    user_id: USER,
+    conversation_id: CONVERSATION,
+    name: 'table.xlsx',
+    path: 'table.xlsx',
+    mime_type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    size_bytes: 14,
+    source: 'upload',
+    storage_key: storageKey,
+    extracted_text: null,
+    extraction_truncated: false,
+    created_at: new Date(),
+    updated_at: new Date(),
+  });
+  return { database, storage, fileId, storageKey };
 }
 
 function memoryStorage(): ObjectStorage & { objects: Map<string, Uint8Array> } {
@@ -129,12 +201,20 @@ function memoryStorage(): ObjectStorage & { objects: Map<string, Uint8Array> } {
   };
 }
 
-function fakeDatabase(): { sql: Sql; links: string[] } {
+function fakeDatabase(seededFile?: Record<string, unknown>): {
+  sql: Sql;
+  links: string[];
+  updates: unknown[];
+} {
   const cleanup = new Set<string>();
   const paths = new Set<string>();
   const links: string[] = [];
+  const updates: unknown[] = [];
   const sql = {
     async unsafe(query: string, values: unknown[]) {
+      if (query.includes('FROM user_file WHERE id = $1')) {
+        return seededFile && values[0] === seededFile.id ? [seededFile] : [];
+      }
       if (query.includes('INSERT INTO user_file_object_cleanup')) {
         cleanup.add(String(values[0]));
         return [{ id: cleanup.size }];
@@ -150,6 +230,13 @@ function fakeDatabase(): { sql: Sql; links: string[] } {
           if (query.startsWith('SELECT storage_key')) {
             return nextCleanup.has(String(values[0]))
               ? [{ storage_key: values[0] }] : [];
+          }
+          if (query.includes('UPDATE user_file SET size_bytes')) {
+            updates.push(values);
+            return seededFile ? [{ ...seededFile, size_bytes: values[0], source: 'sandbox' }] : [];
+          }
+          if (query.includes('INSERT INTO user_file_object_cleanup')) {
+            return [];
           }
           if (query.includes('INSERT INTO user_file\n')) {
             const path = String(values[5]);
@@ -182,5 +269,5 @@ function fakeDatabase(): { sql: Sql; links: string[] } {
       return result;
     },
   } as unknown as Sql;
-  return { sql, links };
+  return { sql, links, updates };
 }

@@ -72,7 +72,7 @@ export function builtinSkill(idOrName: string): SkillRecord | null {
       skill.modifyHint,
       `执行：\`python ${skill.imagePath} input.json ${skill.output}\``,
       '输入 JSON 与输出文件都必须使用当前工作目录（/workspace）下的相对路径，例如 input.json、result.docx；不要写到 /tmp 或任何绝对路径，只有工作目录下的文件会被同步为当前用户文件。',
-      '脚本新建或修改的文件会由沙箱自动同步为当前用户文件；原地修改既有的会话文件时不要另存为新文件。不要访问网络，不要读取未随当前会话提供的文件。',
+      '脚本新建或修改的文件会由沙箱自动同步为当前用户文件（仅当命令以 0 退出时；失败、超时或输出超限会丢弃工作区改动，既有文件保持原样）；原地修改既有的会话文件时不要另存为新文件。不要访问网络，不要读取未随当前会话提供的文件。',
     ].join('\n'),
     content_sha256: new Bun.CryptoHasher('sha256').update(skill.script).digest('hex'),
     files: [{ path: skill.scriptPath, content: skill.script, size_bytes: Buffer.byteLength(skill.script) }],

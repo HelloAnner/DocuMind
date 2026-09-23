@@ -6,6 +6,7 @@ import {
   buildDockerArgs,
   ensureDockerContainerRemoved,
   readWorkspaceOutputs,
+  unsyncedReason,
 } from './sandbox.ts';
 
 describe('bash sandbox', () => {
@@ -65,6 +66,15 @@ describe('bash sandbox', () => {
         : { exitCode: 1, stderr: 'Error response from daemon: No such container: container' },
       async () => {}, 1,
     )).resolves.toBeUndefined();
+  });
+
+  test('only a clean exit may sync workspace changes back to user files', () => {
+    expect(unsyncedReason(false, false, 0)).toBeNull();
+    expect(unsyncedReason(false, false, 1)).toBe('命令退出码 1');
+    expect(unsyncedReason(false, false, 137)).toBe('命令退出码 137');
+    expect(unsyncedReason(true, false, 0)).toBe('执行超时');
+    expect(unsyncedReason(false, true, 0)).toBe('输出超限');
+    expect(unsyncedReason(true, true, 137)).toBe('执行超时');
   });
 
   test('opens output through O_NOFOLLOW and rejects symlinks', async () => {

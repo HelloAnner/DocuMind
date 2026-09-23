@@ -253,7 +253,7 @@ export function createBashTool(
   return {
     name: 'bash',
     label: 'Sandbox Bash',
-    description: '在无网络、非 root、只读根文件系统的临时 Docker 沙箱中处理当前会话文件。工作目录是 /workspace，只有 /workspace 下新建或修改的文件会同步为当前用户文件；写到 /tmp 或绝对路径不会同步。生成或修改的文件会自动同步为当前用户文件。',
+    description: '在无网络、非 root、只读根文件系统的临时 Docker 沙箱中处理当前会话文件。工作目录是 /workspace，只有 /workspace 下新建或修改的文件会同步为当前用户文件；写到 /tmp 或绝对路径不会同步。只有命令以 0 退出（且未超时、未超出输出上限）时才会同步：命令失败或超时时工作区改动全部丢弃，既有会话文件保持原样，因此需要保留产物时保证脚本正常退出。',
     parameters: bashParameters,
     execute: async (toolCallId, params: BashParams): Promise<AgentToolResult<unknown>> => {
       if (!context.sql || !context.fileRuntime) throw new Error('Bash 沙箱不可用');
