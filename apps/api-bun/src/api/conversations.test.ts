@@ -1,8 +1,11 @@
 // 会话路由冒烟：用内存仓库校验 JSON 契约（不连数据库、不跑 LLM）
 import { describe, expect, test } from 'bun:test';
+import type { SSEStreamingApi } from 'hono/streaming';
 import { Hono } from 'hono';
+import type { PiAgentKernel } from '../agent/pi/kernel.ts';
 import { loadConfig } from '../config.ts';
 import { AppError, toAppError } from '../errors.ts';
+import type { AgentRequest } from '../models/agent.ts';
 import type { AppEnv } from '../http/types.ts';
 import { nowRfc3339 } from '../infra/time.ts';
 import { newUuid } from '../infra/uuid.ts';
@@ -12,6 +15,9 @@ import type { ConversationMessage } from '../models/message.ts';
 import { InMemoryConversationRepository } from '../repositories/memory.ts';
 import type { AppState } from '../state.ts';
 import { conversationsRouter } from './conversations.ts';
+import { runAgentPipeline } from './conversations_pipeline.ts';
+import { SseSink } from './conversations_sse.ts';
+import { RuntimeEventFactory } from './runtime_events.ts';
 
 const KB_ID = '00000000-0000-0000-0000-0000000000aa';
 const OTHER_KB_ID = '00000000-0000-0000-0000-0000000000bb';
@@ -280,4 +286,43 @@ describe('conversationsRouter', () => {
     expect(mismatched.status).toBe(404);
     expect((await mismatched.json() as Record<string, any>).code).toBe('MESSAGE_NOT_FOUND');
   });
+});
+
+test('skill_save requires both the admin role and kb.manage in the agent request', async () => {
+  const observed: boolean[] = [];
+  const kernel = {
+    prepare: async (request: AgentRequest) => {
+      observed.push(request.can_manage_skills ?? false);
+      return null;
+    },
+    runPrepared: async () => { throw new Error('stop before model execution'); },
+  } as unknown as PiAgentKernel;
+  const config = loadConfig({});
+
+  for (const actor of [
+    testActor({ roles: ['tenant_admin'], permissions: ['chat.ask'] }),
+    testActor({ roles: ['tenant_admin'], permissions: ['chat.ask', 'kb.manage'] }),
+    testActor({ roles: ['end_user'], permissions: ['chat.ask', 'kb.manage'] }),
+  ]) {
+    const repo = new InMemoryConversationRepository();
+    const { conversationId } = await seededConversation(repo);
+    const userMessageId = newUuid();
+    const assistantMessageId = newUuid();
+    await repo.createMessage(message(assistantMessageId, conversationId, 'assistant', {
+      parent_message_id: userMessageId, status: 'answering',
+    }));
+    const stream = { writeSSE: async () => {} } as unknown as SSEStreamingApi;
+    await runAgentPipeline({
+      repo, kernel, config, sql: null, actor, conversationId, userMessageId, assistantMessageId,
+      originalQuery: '保存技能', effectiveKbIds: [KB_ID], fileIds: [], fileContext: '',
+      ctx: {
+        sink: new SseSink(stream), protocol: 'legacy',
+        factory: new RuntimeEventFactory(TENANT_ID, USER_ID, conversationId, assistantMessageId),
+        abandoned: false,
+      },
+      titleUpdate: null,
+    });
+  }
+
+  expect(observed).toEqual([false, true, false]);
 });

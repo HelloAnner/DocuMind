@@ -290,6 +290,27 @@ async function authCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
     if (json) printJson(identity); else printIdentity(identity);
     return 0;
   }
+  if (subcommand === "portal-login" || subcommand === "portal-link") {
+    if (args.positionals.length > 2) {
+      throw new CliError("Portal ticket 不得作为命令行参数；请使用 DOCUMIND_PORTAL_TICKET 或交互输入", 2);
+    }
+    if (subcommand === "portal-link" && booleanOption(args, "create")) {
+      throw new CliError("portal-link 与 --create 不能同时使用", 2);
+    }
+    let ticket = process.env.DOCUMIND_PORTAL_TICKET?.trim();
+    if (!ticket) {
+      if (!process.stdin.isTTY) throw new CliError("缺少 DOCUMIND_PORTAL_TICKET 且没有交互终端", 2);
+      const readline = createInterface({ input: process.stdin, output: process.stderr });
+      try { ticket = (await readline.question("一次性 Portal ticket: ")).trim(); }
+      finally { readline.close(); }
+    }
+    if (!ticket) throw new CliError("Portal ticket 不能为空", 2);
+    const identity = subcommand === "portal-link"
+      ? await api.linkPortalTicket(ticket)
+      : await api.loginPortalTicket(ticket, booleanOption(args, "create"));
+    if (json) printJson(identity); else printIdentity(identity);
+    return 0;
+  }
   if (subcommand === "whoami") {
     const identity = await api.me();
     if (json) printJson(identity); else printIdentity(identity);

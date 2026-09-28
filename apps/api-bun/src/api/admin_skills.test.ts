@@ -1,6 +1,10 @@
+import { Hono } from 'hono';
+import { AppError } from '../errors.ts';
+import type { AppEnv } from '../http/types.ts';
+import type { CurrentActor } from '../models/identity.ts';
 import { expect, test } from 'bun:test';
 import type { Sql } from 'postgres';
-import { saveSkill, type SkillInput } from './admin_skills.ts';
+import { adminSkillsRouter, saveSkill, type SkillInput } from './admin_skills.ts';
 
 const input: SkillInput = {
   name: 'file-boundary', display_name: '文件边界', description: '验证技能文本资产', content: '# Instructions',
@@ -25,4 +29,20 @@ test('rejects duplicate paths, traversal and non-text content at the persistence
     await expect(saveSkill(sql, 'tenant', 'user', { ...input, files }))
       .rejects.toMatchObject({ httpStatus: 400, code: 'SKILL_INVALID' });
   }
+});
+
+test('portal-clamped admin cannot read or mutate tenant skills without KB permissions', async () => {
+  const app = new Hono<AppEnv>();
+  const actor = { tenant_id: 'tenant', user_id: 'user', roles: ['tenant_admin'],
+    permissions: [], is_super_admin: false } as unknown as CurrentActor;
+  app.use('*', async (c, next) => {
+    c.set('actor', actor);
+    c.set('appState', { sql: null } as never);
+    await next();
+  });
+  app.route('/', adminSkillsRouter());
+  app.onError((error, c) => c.json({ error: error.message },
+    error instanceof AppError ? error.httpStatus as 403 : 500));
+  expect((await app.request('http://localhost/api/admin/skills')).status).toBe(403);
+  expect((await app.request('http://localhost/api/admin/skills', { method: 'POST' })).status).toBe(403);
 });

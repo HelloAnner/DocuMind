@@ -59,6 +59,8 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  init                         创建 ~/.config/documind/config.toml\n` +
   `  config show|path             查看脱敏配置或配置路径\n` +
   `  auth register|login [--platform]|whoami|logout  注册、登录、身份检查、退出\n` +
+  `  auth portal-login [--create]  一次性票据登录；新账号须明确 --create\n` +
+  `  auth portal-link             用本地已验证会话关联历史账号（新票据）\n` +
   `  auth profile                查看展示名称与头像\n` +
   `  auth profile-update [--name N] [--avatar-url URL|--clear-avatar]\n` +
   `  auth tenants|switch <id>     列出并切换当前账号的企业空间\n` +
@@ -124,6 +126,7 @@ const ADMIN_HELP = `用法: documind admin <subcommand> [options]\n\n` +
   `成员: member-update <id> [--role ROLE --status STATUS] | member-remove <id> --force\n` +
   `权限: permission-grant --kb ID --subject-type role|user --subject ID --permission read|write|manage\n` +
   `      permission-revoke <id> --force\n` +
+  `门户: portal-map --portal-tenant-id UUID --portal-tenant-code CODE（本地管理员密码来自 DOCUMIND_PASSWORD）\n` +
   `日志: logs [--range today|week|month|all --q TEXT --limit N]\n` +
   `质量: quality-summary | quality-cases [--status S --root-cause C --kb ID --q TEXT]\n` +
   `      quality-case <id> | quality-diagnose <id>\n` +

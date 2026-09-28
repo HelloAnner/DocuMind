@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { findPublishedCorrection, normalizeQuestion, QUALITY_CASE_STATUSES, QUALITY_ROOT_CAUSES } from '../answer_quality.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
-import { requireTenantAdmin } from '../auth/permissions.ts';
+import { requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { newUuid, isUuid } from '../infra/uuid.ts';
@@ -567,6 +567,7 @@ function correctionSummary(row: Record<string, unknown>): Record<string, unknown
 function adminContext(c: Context<AppEnv>): { sql: Sql; tenantId: string; actor: CurrentActor } {
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'kb.manage');
   const sql = c.get('appState').sql;
   if (!sql) throw AppError.internal('数据库未配置');
   return { sql, tenantId: actor.tenant_id, actor };

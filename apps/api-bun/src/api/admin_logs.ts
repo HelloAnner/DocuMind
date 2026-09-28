@@ -3,7 +3,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import type { AppEnv } from '../http/types.ts';
 import type { QaLogSummary } from '../models/identity.ts';
-import { requireTenantAdmin } from '../auth/permissions.ts';
+import { requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
 import { toRfc3339 } from '../infra/time.ts';
 
 export function adminLogsRouter(): Hono<AppEnv> {
@@ -16,6 +16,7 @@ async function listLogs(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'audit.read');
   const sql = state.sql;
   if (!sql) return c.json([]);
 

@@ -1,5 +1,6 @@
 import type { ApiClient } from "./api.ts";
 import { booleanOption, listOption, numberOption, type ParsedArgs, stringOption } from "./args.ts";
+import { configuredPassword } from "./config.ts";
 import { CliError } from "./errors.ts";
 import { printJson } from "./render.ts";
 
@@ -170,6 +171,16 @@ export async function adminCommand(args: ParsedArgs, api: ApiClient): Promise<nu
     case "permission-revoke":
       requireForce(args, "知识库授权将被撤销");
       result = await api.requestJson(`/api/admin/permissions/${id(args, command)}`, { method: "DELETE" });
+      break;
+    case "portal-map":
+      result = await api.requestJson("/api/auth/portal/tenant-mapping", {
+        method: "POST",
+        body: JSON.stringify({
+          portal_tenant_id: required(args, "portal-tenant-id", "admin portal-map 需要 --portal-tenant-id"),
+          portal_tenant_code: required(args, "portal-tenant-code", "admin portal-map 需要 --portal-tenant-code"),
+          password: configuredPassword(api.config),
+        }),
+      });
       break;
     case "runtime-config": result = await api.requestJson("/api/admin/runtime-config"); break;
     case "chunking":

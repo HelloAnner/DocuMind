@@ -64,6 +64,7 @@ function derivePermissionsCached(roles: string[]): string[] { return derivePermi
 
 export async function resolveActorFromDb(
   sql: Sql, tenantId: string, userId: string, requestedRole: string, requestedScope: string,
+  authSource?: Claims['auth_source'], portalPermissions?: string[],
 ): Promise<CurrentActor> {
   const users = await sql`
     SELECT id, login_id, email, name, status FROM app_user WHERE id = ${userId}
@@ -88,12 +89,18 @@ export async function resolveActorFromDb(
   const membership = memberships[0];
   if (!membership) throw AppError.unauthorized();
   const membershipRoles = (membership.roles as string[]) ?? [];
-  const roles = normalizedActorRoles(membershipRoles, isSuperAdmin);
   const attributes = membership.attributes ?? {};
+  const roles = requestedRole === 'end_user'
+    && (authSource === 'portal'
+      || (authSource === undefined && (attributes as Record<string, unknown>).auth_provider === 'portal'))
+    ? ['end_user'] : normalizedActorRoles(membershipRoles, isSuperAdmin);
   if (roles.length === 0) throw AppError.unauthorized();
 
   const kbIds = await allowedKbIds(sql, tenantId, userId, roles);
-  const permissions = effectivePermissionsForMembership(roles, attributes);
+  const permissions = authSource === 'portal'
+    ? derivePermissions(roles).filter((permission) => portalPermissions?.includes(permission))
+    : authSource === 'local' ? derivePermissions(roles)
+      : effectivePermissionsForMembership(roles, attributes);
   const loginId = String(user.login_id);
   return {
     user_id: userId, tenant_id: tenantId, login_id: loginId,
@@ -174,7 +181,6 @@ export async function authenticateFromDb(
   const includeSuperAdmin = !explicitTenant;
   const isSuperAdmin = isPlatformAdmin && includeSuperAdmin;
   const roles = normalizedActorRoles(membershipRoles, isSuperAdmin);
-  const attributes = membership.attributes ?? {};
   if (roles.length === 0) {
     if (isPlatformAdmin && explicitTenant) {
       throw AppError.forbiddenWith(
@@ -183,7 +189,7 @@ export async function authenticateFromDb(
     throw AppError.unauthorized();
   }
   const kbIds = await allowedKbIds(sql, tenantId, userId, roles);
-  const permissions = effectivePermissionsForMembership(roles, attributes);
+  const permissions = derivePermissions(roles);
   const loginId = String(user.login_id);
   const email = (user.email as string | null) ?? '';
   const name = (user.name as string | null) ?? loginId;
@@ -239,7 +245,8 @@ export async function actorFromClaims(
     throw AppError.conflictWith('TENANT_SELECTION_REQUIRED', '请先选择或创建租户');
   }
   if (deps.sql) {
-    return resolveActorFromDb(deps.sql, claims.tenant_id, claims.sub, claims.role, claims.scope);
+    return resolveActorFromDb(deps.sql, claims.tenant_id, claims.sub, claims.role, claims.scope,
+      claims.auth_source, claims.portal_permissions);
   }
   return buildActorFromFallback(
     claims.tenant_id, claims.sub, claims.email, claims.email, claims.role,

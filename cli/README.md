@@ -40,7 +40,9 @@ documind auth login
 documind doctor
 ```
 
-登录后可列出账号加入的企业空间，并切换 CLI 的活动空间；切换会替换缓存 JWT，并清除上一个空间的会话选择：
+门户托管模式运行 `documind auth portal-login`，从交互提示或 `DOCUMIND_PORTAL_TICKET` 环境变量读取一次性票据，不接受命令行票据参数。已审批租户的新用户须明确运行 `auth portal-login --create` 才会创建独立账号；如需保留历史账号，先以本地密码执行 `auth login`，再以**新票据**运行 `auth portal-link`，CLI 用本地会话和服务器返回的一次性 challenge 完成关联，绝不重试已消耗的票据。CLI 将权限受限的会话保存为 `0600` 文件；该会话到期后不自动续期或回退密码登录，需重新从门户获取票据。
+
+本地密码会话可列出账号加入的企业空间并切换活动空间；门户会话固定在票据指定的租户，不支持切换：
 
 ```bash
 documind auth tenants

@@ -1,7 +1,7 @@
 // 移植自 apps/api-rs/src/api/document_jobs.rs —— 文档处理任务列表/详情
 import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
-import { requireTenantAdmin } from '../auth/permissions.ts';
+import { requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import type { AppEnv } from '../http/types.ts';
 import { requiredSql } from './documents_access.ts';
@@ -192,6 +192,7 @@ export async function listJobs(c: Context<AppEnv>): Promise<Response> {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'document.reprocess');
   const sql = requiredSql(state, '文档处理任务需要启用 PostgreSQL 数据库连接');
   const query = jobListQuery(c);
 
@@ -234,6 +235,7 @@ export async function getJob(c: Context<AppEnv>): Promise<Response> {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'document.reprocess');
   const sql = requiredSql(state, '文档处理任务需要启用 PostgreSQL 数据库连接');
   const jobId = pathParam(c, 'job_id');
 

@@ -1,10 +1,10 @@
 // 移植自 apps/api-rs/src/auth.rs 的 record_audit_event
-import type { Sql } from 'postgres';
+import type { Sql, TransactionSql } from 'postgres';
 import { AppError } from '../errors.ts';
 import type { CurrentActor } from '../models/identity.ts';
 
 export async function recordAuditEvent(
-  sql: Sql | null,
+  sql: Sql | TransactionSql | null,
   actor: CurrentActor | null,
   action: string,
   resourceType: string | null,

@@ -14,7 +14,7 @@ import {
   validateAndRenewAuthSession,
 } from '../auth/session.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
-import { derivePermissions, roleMatrix } from '../auth/permissions.ts';
+import { derivePermissions, requirePermission, roleMatrix } from '../auth/permissions.ts';
 import type { CurrentActor, MeResponse, TenantProfile, UserProfile } from '../models/identity.ts';
 import type { LoginResponse } from './auth_types.ts';
 import { newUuid } from '../infra/uuid.ts';
@@ -37,6 +37,10 @@ interface InvitationGrantStored { kb_id: string; permission: string; }
 export function authRouter(): Hono<AppEnv> {
   const router = new Hono<AppEnv>();
   router.get('/auth/portal/callback', portalCallbackHandler);
+  router.post('/api/auth/portal/ticket', portalTicketHandler);
+  router.post('/api/auth/portal/link', portalLinkHandler);
+  router.post('/api/auth/portal/create', portalCreateHandler);
+  router.post('/api/auth/portal/tenant-mapping', approvePortalTenantMapping);
   router.get('/api/me', getMeHandler);
   router.post('/api/auth/login', loginHandler);
   router.post('/api/auth/refresh', refreshHandler);
@@ -80,17 +84,207 @@ async function portalCallbackHandler(c: import('hono').Context<AppEnv>) {
     return portalCallbackError(appError);
   }
 }
+async function portalTicketHandler(c: import('hono').Context<AppEnv>) {
+  const body = await c.req.json().catch(() => {
+    throw AppError.badRequest('INVALID_PORTAL_TICKET', '无效的门户票据');
+  }) as { code?: unknown; create_intent?: unknown };
+  if (typeof body?.code !== 'string' || (body.create_intent !== undefined
+    && typeof body.create_intent !== 'boolean')) throw AppError.unauthorized();
+  return portalCallbackInner(c.get('appState'), { code: body.code }, true, body.create_intent === true);
+}
 
-async function portalCallbackInner(state: AppState, query: PortalCallbackQuery): Promise<Response> {
-  if (state.config.authLoginMode !== 'portal') throw AppError.unauthorized();
+
+async function portalCallbackInner(
+  state: AppState, query: PortalCallbackQuery, json = false, createIntent = false,
+): Promise<Response> {
+  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  if (!query.code || !/^[0-9a-f-]{36}:[^:\s]+$/i.test(query.code)) throw AppError.unauthorized();
   const portal = await exchangePortalTicket(state, query.code);
-  if (portal.system_code !== 'documind' || portal.expires_at < Math.floor(Date.now() / 1000)) {
+  validatePortalContext(portal);
+  const roles = mapDocumindRoles(portal);
+  const mappedTenant = await resolvePortalTenant(state.sql, portal, false);
+  const existing = mappedTenant ? await state.sql`
+    SELECT local_user_id AS id FROM portal_identity_mapping
+    WHERE portal_user_id = ${portal.user_id} AND portal_tenant_id = ${portal.tenant_id}
+      AND local_tenant_id = ${mappedTenant}
+  ` : [];
+  if (!existing.length) {
+    const conflict = mappedTenant ? await state.sql`
+      SELECT u.id, u.sso_subject FROM app_user u
+      JOIN tenant_member tm ON tm.user_id = u.id AND tm.tenant_id = ${mappedTenant}
+        AND tm.status = 'active'
+      WHERE (NULLIF(${portal.email ?? ''}, '') IS NOT NULL AND lower(u.email) = lower(${portal.email ?? ''}))
+         OR lower(u.login_id) = lower(${portal.username})
+      LIMIT 2
+    ` : [];
+    if (conflict.some((row) => row.sso_subject && row.sso_subject !== portal.user_id)) {
+      throw AppError.forbidden();
+    }
+    if (createIntent && conflict.length) throw AppError.forbidden();
+    const mapping = mappedTenant ? await state.sql`
+      SELECT origin FROM portal_tenant_mapping
+      WHERE portal_tenant_id = ${portal.tenant_id} AND tenant_id = ${mappedTenant}
+    ` : [];
+    if (conflict.length || (mapping[0]?.origin === 'approved' && !createIntent)) {
+      const challenge = crypto.randomUUID();
+      await state.redis.set(`documind:portal:link:${challenge}`, JSON.stringify({
+        portal, user_ids: conflict.map((row) => String(row.id)),
+      }), 'EX', 300);
+      if (json) return Response.json({
+        code: 'PORTAL_LINK_REQUIRED',
+        message: '请用已验证的本地会话关联；如无历史账号，明确选择创建新账号',
+        challenge,
+      }, { status: 409, headers: { 'Cache-Control': 'no-store' } });
+      return portalLinkHtml(challenge, conflict.length === 0);
+    }
+  }
+  return finishPortalLogin(state, portal, roles, json);
+}
+
+function validatePortalContext(portal: PortalContext, requireFresh = true): void {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (portal.system_code !== 'documind' || !Number.isSafeInteger(portal.expires_at)
+    || (requireFresh && (portal.expires_at <= Math.floor(Date.now() / 1000)
+      || portal.expires_at > Math.floor(Date.now() / 1000) + 60))
+    || !uuid.test(portal.user_id) || !uuid.test(portal.tenant_id)
+    || !portal.username?.trim() || !portal.display_name?.trim()
+    || !portal.tenant_code?.trim() || !Array.isArray(portal.system_roles)
+    || !Array.isArray(portal.permissions)) throw AppError.unauthorized();
+}
+
+async function approvePortalTenantMapping(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  const actor = c.get('actor');
+  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis
+    || actor.is_super_admin
+    || !actor.roles.some((role) => role === 'tenant_owner' || role === 'tenant_admin')) throw AppError.forbidden();
+  requirePermission(actor, 'tenant.write');
+  const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source !== 'local' || claims.sub !== actor.user_id
+    || claims.tenant_id !== actor.tenant_id) throw AppError.unauthorized();
+  const body = await c.req.json() as {
+    portal_tenant_id?: string; portal_tenant_code?: string; password?: string;
+  };
+  const portalId = body.portal_tenant_id ?? '';
+  const portalCode = body.portal_tenant_code ?? '';
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(portalId)
+    || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(portalCode)
+    || portalCode.length > 63 || !body.password) throw AppError.badRequest('INVALID_PORTAL_TENANT', '无效的门户租户资料');
+  const accounts = await state.sql`
+    SELECT password_hash, auth_provider FROM app_user WHERE id = ${actor.user_id} AND status = 'active'
+  `;
+  if (!accounts[0] || !['password', 'email'].includes(String(accounts[0].auth_provider))
+    || !accounts[0].password_hash || !await bcrypt.compare(body.password, String(accounts[0].password_hash))) {
     throw AppError.unauthorized();
   }
-  const roles = mapDocumindRoles(portal);
+  await state.sql.begin(async (tx) => {
+    const mapped = await tx`
+      INSERT INTO portal_tenant_mapping
+        (portal_tenant_id, portal_tenant_code, tenant_id, origin, approved_by)
+      VALUES (${portalId}, ${portalCode}, ${actor.tenant_id}, 'approved', ${actor.user_id})
+      ON CONFLICT DO NOTHING RETURNING tenant_id
+    `;
+    if (!mapped.length) throw AppError.conflictWith('PORTAL_TENANT_ALREADY_MAPPED', '门户或本地租户已有映射');
+    await recordAuditEvent(tx, actor, 'portal.tenant.mapping.approved',
+      'tenant', actor.tenant_id, { portal_tenant_id: portalId, portal_tenant_code: portalCode });
+  });
+  return c.json({ portal_tenant_id: portalId, tenant_id: actor.tenant_id });
+}
+
+export async function resolvePortalTenant(sql: Sql, portal: PortalContext, create: boolean): Promise<string | null> {
+  const code = slugify(portal.tenant_code ?? '');
+  if (!code) throw AppError.unauthorized();
+  const mappings = await sql`
+    SELECT m.tenant_id, t.status FROM portal_tenant_mapping m
+    JOIN tenant t ON t.id = m.tenant_id
+    WHERE m.portal_tenant_id = ${portal.tenant_id} AND m.portal_tenant_code = ${code}
+  `;
+  if (mappings.length) {
+    if (mappings[0]!.status !== 'active') throw AppError.forbidden();
+    return String(mappings[0]!.tenant_id);
+  }
+  const collisions = await sql`
+    SELECT id FROM tenant WHERE id = ${portal.tenant_id} OR slug = ${code} LIMIT 1
+  `;
+  if (collisions.length) throw AppError.forbidden();
+  if (!create) return null;
+  await sql.begin(async (tx) => {
+    await tx`
+      INSERT INTO tenant (id, name, slug, status)
+      VALUES (${portal.tenant_id}, ${portal.tenant_name?.trim() || code}, ${code}, 'active')
+    `;
+    await tx`
+      INSERT INTO portal_tenant_mapping (portal_tenant_id, portal_tenant_code, tenant_id, origin)
+      VALUES (${portal.tenant_id}, ${code}, ${portal.tenant_id}, 'portal_created')
+    `;
+  });
+  return portal.tenant_id;
+}
+
+async function portalLinkHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  const actor = c.get('actor');
+  const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
+  await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source !== 'local' || claims.sub !== actor.user_id
+    || claims.tenant_id !== actor.tenant_id) throw AppError.unauthorized();
+  const req = await c.req.json() as { challenge?: string; explicit_link?: boolean };
+  if (!req.challenge || !/^[0-9a-f-]{36}$/i.test(req.challenge)) throw AppError.unauthorized();
+  const key = `documind:portal:link:${req.challenge}`;
+  const raw = await state.redis.get(key);
+  if (!raw) throw AppError.unauthorized();
+  const pending = JSON.parse(raw) as { portal: PortalContext; user_ids: string[] };
+  validatePortalContext(pending.portal, false);
+  if (!Array.isArray(pending.user_ids)
+    || (!pending.user_ids.includes(actor.user_id) && req.explicit_link !== true)) throw AppError.forbidden();
+  const mappedTenant = await resolvePortalTenant(state.sql, pending.portal, false);
+  if (!mappedTenant || actor.tenant_id !== mappedTenant) throw AppError.forbidden();
+  const membership = await state.sql`
+    SELECT t.id FROM tenant_member tm JOIN tenant t ON t.id = tm.tenant_id
+    WHERE tm.user_id = ${actor.user_id} AND tm.status = 'active' AND t.status = 'active'
+      AND tm.tenant_id = ${actor.tenant_id}
+      AND t.id = ${mappedTenant}
+    LIMIT 1
+  `;
+  if (!membership.length) throw AppError.forbidden();
+  if (!await state.redis.del(key)) throw AppError.unauthorized();
+  const provisioned = await provisionPortalActor(
+    state, pending.portal, mapDocumindRoles(pending.portal), actor);
+  const sessionId = await createAuthSession(state.redis, state.config, provisioned.actor, 'portal');
+  return c.json({ auth: portalAuth(await issueToken(state.config, provisioned.actor, sessionId,
+    provisioned.effective_permissions), provisioned.actor), redirect: AUTHENTICATED_HOME_PATH });
+}
+async function portalCreateHandler(c: import('hono').Context<AppEnv>) {
+  const state = c.get('appState');
+  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  const req = await c.req.json() as { challenge?: string };
+  if (!req.challenge || !/^[0-9a-f-]{36}$/i.test(req.challenge)) throw AppError.unauthorized();
+  const key = `documind:portal:link:${req.challenge}`;
+  const raw = await state.redis.get(key);
+  if (!raw) throw AppError.unauthorized();
+  const pending = JSON.parse(raw) as { portal: PortalContext; user_ids: string[] };
+  validatePortalContext(pending.portal, false);
+  if (!Array.isArray(pending.user_ids) || pending.user_ids.length) throw AppError.forbidden();
+  const mappedTenant = await resolvePortalTenant(state.sql, pending.portal, false);
+  if (!mappedTenant) throw AppError.forbidden();
+  const mapping = await state.sql`
+    SELECT origin FROM portal_tenant_mapping
+    WHERE portal_tenant_id = ${pending.portal.tenant_id} AND tenant_id = ${mappedTenant}
+  `;
+  if (mapping[0]?.origin !== 'approved') throw AppError.forbidden();
+  if (!await state.redis.del(key)) throw AppError.unauthorized();
+  return finishPortalLogin(state, pending.portal, mapDocumindRoles(pending.portal), true);
+}
+
+
+async function finishPortalLogin(
+  state: AppState, portal: PortalContext, roles: string[], json = false,
+): Promise<Response> {
   const provisioned = await provisionPortalActor(state, portal, roles);
-  const sessionId = await createAuthSession(state.redis, state.config, provisioned.actor);
-  const token = await issueToken(state.config, provisioned.actor, sessionId);
+  const sessionId = await createAuthSession(state.redis, state.config, provisioned.actor, 'portal');
+  const token = await issueToken(state.config, provisioned.actor, sessionId, provisioned.effective_permissions);
   const identityAction = provisioned.identity_created
     ? 'portal.identity.link.created' : 'portal.identity.link.updated';
   const detail = {
@@ -109,7 +303,17 @@ async function portalCallbackInner(state: AppState, query: PortalCallbackQuery):
   }
   await recordAuditEvent(state.sql, provisioned.actor, 'portal.login.success',
     'auth_session', sessionId, detail);
-  return portalSuccessHtml(token, provisioned.actor);
+  if (!json) return portalSuccessHtml(token, provisioned.actor);
+  const me = await meResponse(state, provisioned.actor);
+  const body: LoginResponse = {
+    access_token: token, token_type: 'bearer', scope: me.scope,
+    user: me.user, tenant: me.tenant, roles: me.roles,
+    permissions: me.permissions, allowed_kb_ids: me.allowed_kb_ids,
+    tenants: [me.tenant],
+  };
+  return new Response(JSON.stringify(body), { status: 200, headers: {
+    'Content-Type': 'application/json', 'Cache-Control': 'no-store',
+  } });
 }
 
 async function exchangePortalTicket(state: AppState, code: string): Promise<PortalContext> {
@@ -131,40 +335,57 @@ interface PortalProvisionResult {
   identity_created: boolean; was_clamped: boolean; effective_permissions: string[];
 }
 
-async function provisionPortalActor(
-  state: AppState, portal: PortalContext, roles: string[],
+export async function provisionPortalActor(
+  state: AppState, portal: PortalContext, roles: string[], linkActor?: CurrentActor,
 ): Promise<PortalProvisionResult> {
   const sql = state.sql;
   if (!sql) {
     throw AppError.badRequest('PORTAL_REQUIRES_DB', 'database is required for portal managed auth');
   }
-  const tenantName = (portal.tenant_name ?? '').trim().length > 0 ? portal.tenant_name! : 'Portal Tenant';
-  const tenantSlug = (portal.tenant_code ? slugify(portal.tenant_code) : '')
-    || `tenant-${portal.tenant_id.slice(0, 8)}`;
+  const tenantId = await resolvePortalTenant(sql, portal, true);
+  if (!tenantId) throw AppError.forbidden();
 
-  await sql`
-    INSERT INTO tenant (id, name, slug, status)
-    VALUES (${portal.tenant_id}, ${tenantName}, ${tenantSlug}, 'active')
-    ON CONFLICT (id) DO UPDATE
-    SET name = EXCLUDED.name, slug = EXCLUDED.slug, status = 'active', updated_at = NOW()
+  const { email, identityCreated, userId, effectiveRoles, effectivePermissions, wasClamped } =
+    await sql.begin(async (tx) => {
+  const email = portal.email?.trim() || null;
+  const existingPortal = await tx`
+    SELECT pim.local_user_id AS id, u.status
+    FROM portal_identity_mapping pim
+    JOIN app_user u ON u.id = pim.local_user_id
+    WHERE pim.portal_user_id = ${portal.user_id} AND pim.portal_tenant_id = ${portal.tenant_id}
+      AND pim.local_tenant_id = ${tenantId}
   `;
-
-  const email = (portal.email ?? '').trim().length > 0
-    ? portal.email! : `${portal.user_id}@portal.local`;
-  const displayName = portal.display_name.trim().length === 0 ? portal.username : portal.display_name;
-  const existingPortal = await sql`
-    SELECT id FROM app_user WHERE auth_provider = 'portal' AND sso_subject = ${portal.user_id} LIMIT 1
-  `;
-  const identityCreated = existingPortal.length === 0;
-  let userId: string | null = existingPortal[0] ? String(existingPortal[0].id) : null;
-  if (!userId) {
-    const byEmail = await sql`
-      SELECT id FROM app_user WHERE lower(email) = lower(${email}) LIMIT 1
-    `;
-    userId = byEmail[0] ? String(byEmail[0].id) : null;
+  if (existingPortal[0]?.status && existingPortal[0].status !== 'active') throw AppError.forbidden();
+  if (linkActor && existingPortal.length && String(existingPortal[0]!.id) !== linkActor.user_id) {
+    throw AppError.forbidden();
   }
-  if (!userId) userId = newUuid();
-  const localPermissions = derivePermissions(roles);
+  const identityCreated = existingPortal.length === 0 && !linkActor;
+  const userId = existingPortal[0] ? String(existingPortal[0].id) : linkActor?.user_id ?? newUuid();
+  if (linkActor && !existingPortal.length) {
+    const linked = await tx`
+      INSERT INTO portal_identity_mapping
+        (portal_user_id, portal_tenant_id, local_user_id, local_tenant_id)
+      VALUES (${portal.user_id}, ${portal.tenant_id}, ${linkActor.user_id}, ${tenantId})
+      ON CONFLICT DO NOTHING RETURNING local_user_id
+    `;
+    if (!linked.length) throw AppError.forbidden();
+  }
+  const membership = await tx`
+    SELECT roles, attributes FROM tenant_member
+    WHERE tenant_id = ${tenantId} AND user_id = ${userId} AND status = 'active'
+  `;
+  const mapped = await tx`
+    SELECT origin FROM portal_tenant_mapping
+    WHERE portal_tenant_id = ${portal.tenant_id} AND tenant_id = ${tenantId}
+  `;
+  if (!mapped.length) throw AppError.forbidden();
+  if (!identityCreated && !membership.length && mapped[0]!.origin === 'approved') {
+    throw AppError.forbidden();
+  }
+  const effectiveRoles = portalMembershipRoles(roles, String(mapped[0]!.origin),
+    membership[0]?.roles as string[] | undefined,
+    (membership[0]?.attributes as { auth_provider?: string } | undefined)?.auth_provider === 'portal');
+  const localPermissions = derivePermissions(effectiveRoles);
   const mappedPortalPermissions = mapPortalPermissions(portal.permissions ?? []);
   const effectivePermissions = intersectPermissions(localPermissions, mappedPortalPermissions);
   const wasClamped = effectivePermissions.length < localPermissions.length;
@@ -175,54 +396,76 @@ async function provisionPortalActor(
     effective_permissions: effectivePermissions,
     system_roles: portal.system_roles ?? [], portal_roles: portal.portal_roles ?? [],
   };
-  await sql`
-    INSERT INTO app_user
-      (id, login_id, email, name, auth_provider, sso_subject, last_active_tenant, status)
-    VALUES (${userId}, ${email}, ${email}, ${displayName}, 'portal', ${portal.user_id}, ${portal.tenant_id}, 'active')
-    ON CONFLICT (id) DO UPDATE
-    SET email = EXCLUDED.email, name = EXCLUDED.name, auth_provider = 'portal',
-        sso_subject = EXCLUDED.sso_subject, last_active_tenant = EXCLUDED.last_active_tenant,
-        status = 'active', updated_at = NOW()
-  `;
-
-  if (roles.includes('super_admin')) {
-    await sql`
-      INSERT INTO platform_admin (user_id, role, status)
-      VALUES (${userId}, 'super_admin', 'active')
-      ON CONFLICT (user_id)
-      DO UPDATE SET role = 'super_admin', status = 'active', updated_at = NOW()
+  if (identityCreated) {
+    const occupiedEmail = email ? await tx`
+      SELECT id FROM app_user WHERE lower(email) = lower(${email}) LIMIT 1
+    ` : [];
+    await tx`
+      INSERT INTO app_user
+        (id, login_id, email, name, auth_provider, last_active_tenant, status)
+      VALUES (${userId}, ${`portal-${portal.user_id}-${portal.tenant_id}`},
+        ${occupiedEmail.length ? null : email}, ${portal.display_name},
+        'portal', ${tenantId}, 'active')
+    `;
+    const linked = await tx`
+      INSERT INTO portal_identity_mapping
+        (portal_user_id, portal_tenant_id, local_user_id, local_tenant_id)
+      VALUES (${portal.user_id}, ${portal.tenant_id}, ${userId}, ${tenantId})
+      ON CONFLICT DO NOTHING RETURNING local_user_id
+    `;
+    if (!linked.length) throw AppError.forbidden();
+  } else {
+    await tx`
+      UPDATE app_user SET name = ${portal.display_name}, last_active_tenant = ${tenantId},
+        updated_at = NOW() WHERE id = ${userId} AND status = 'active'
     `;
   }
 
-  await sql`
+
+  await tx`
     INSERT INTO tenant_member (tenant_id, user_id, roles, attributes, status, joined_at, last_seen_at)
-    VALUES (${portal.tenant_id}, ${userId}, ${roles}, ${sql.json(attributes)}, 'active', NOW(), NOW())
+    VALUES (${tenantId}, ${userId}, ${effectiveRoles}, ${tx.json(attributes)}, 'active', NOW(), NOW())
     ON CONFLICT (tenant_id, user_id) DO UPDATE
-    SET roles = EXCLUDED.roles, attributes = EXCLUDED.attributes, status = 'active',
-        last_seen_at = NOW()
+    SET roles = CASE WHEN ${String(mapped[0]!.origin)} = 'portal_created'
+      AND tenant_member.attributes->>'auth_provider' = 'portal'
+      AND NOT ('tenant_owner' = ANY(tenant_member.roles))
+      THEN EXCLUDED.roles ELSE tenant_member.roles END,
+      attributes = EXCLUDED.attributes, last_seen_at = NOW()
+    WHERE tenant_member.status = 'active'
   `;
+  if (linkActor) {
+    await recordAuditEvent(tx, linkActor, 'portal.identity.link.verified',
+      'portal_identity_mapping', userId, {
+        portal_user_id: portal.user_id, portal_tenant_id: portal.tenant_id,
+        local_user_id: userId, local_tenant_id: tenantId,
+      });
+  }
+  return { email, identityCreated, userId, effectiveRoles, effectivePermissions, wasClamped };
+  });
 
   const claims: Claims = {
-    sub: userId, email, role: roles[0] ?? 'end_user',
-    scope: roles.includes('super_admin') ? 'platform' : 'tenant',
-    tenant_id: portal.tenant_id, sid: null,
+    sub: userId, email: email ?? '', role: effectiveRoles[0]!,
+    scope: 'tenant',
+    tenant_id: tenantId, sid: null,
     exp: Math.floor(Date.now() / 1000) + 3600,
+    auth_source: 'portal', portal_permissions: effectivePermissions,
   };
   const actor = await actorFromClaims({ sql, config: state.config }, claims);
   return { actor, identity_created: identityCreated, was_clamped: wasClamped, effective_permissions: effectivePermissions };
 }
 
+export function portalMembershipRoles(
+  systemRoles: string[], mappingOrigin: string, localRoles?: string[], portalManaged = false,
+): string[] {
+  const locallyApproved = (mappingOrigin === 'portal_created' && (!localRoles || portalManaged))
+    || !!localRoles?.some((role) => role === 'tenant_owner' || role === 'tenant_admin');
+  return systemRoles.includes('tenant_admin') && locallyApproved ? ['tenant_admin'] : ['end_user'];
+}
+
 export function mapDocumindRoles(portal: PortalContext): string[] {
-  const mapped: string[] = [];
-  const candidates = [
-    ...(portal.system_roles ?? []).map(mapDocumindRole),
-    ...(portal.portal_roles ?? []).map(mapPortalRoleForDocumind),
-  ];
-  for (const role of candidates) {
-    if (role !== null && !mapped.includes(role)) mapped.push(role);
-  }
-  if (mapped.length === 0) mapped.push('end_user');
-  return sortDocumindRolesByPriority(mapped);
+  const roles = (portal.system_roles ?? []).map(mapDocumindRole);
+  if (!roles.length || roles.includes(null)) throw AppError.unauthorized();
+  return sortDocumindRolesByPriority(roles as string[]);
 }
 
 export function mapPortalPermissions(values: string[]): string[] {
@@ -261,49 +504,93 @@ export function intersectPermissions(local: string[], portal: string[]): string[
 
 function mapDocumindRole(role: string): string | null {
   switch (role) {
-    case 'super_admin': return 'super_admin';
     case 'tenant_owner': case 'tenant_admin': return 'tenant_admin';
-    case 'enterprise_admin': case 'team_admin': case 'data_admin': return 'tenant_admin';
-    case 'analyst': case 'user': case 'viewer': case 'end_user': return 'end_user';
+    case 'user': return 'end_user';
     default: return null;
   }
 }
 
-function mapPortalRoleForDocumind(role: string): string | null {
-  switch (role) {
-    case 'super-admin': case 'super_admin': return 'super_admin';
-    case 'tenant-owner': case 'tenant_owner': return 'tenant_admin';
-    case 'tenant-admin': case 'tenant_admin': return 'tenant_admin';
-    case 'module-admin': case 'module_admin': case 'subsystem-admin': case 'subsystem_admin': return 'tenant_admin';
-    case 'admin': case 'enterprise-admin': case 'enterprise_admin': return 'tenant_admin';
-    case 'normal-user': case 'normal_user': case 'normal': case 'user': case 'viewer': case 'end_user': return 'end_user';
-    default: return null;
-  }
-}
 
 function sortDocumindRolesByPriority(roles: string[]): string[] {
-  const priority = ['super_admin', 'tenant_admin', 'end_user'];
+  const priority = ['tenant_admin', 'end_user'];
   return priority.filter((role) => roles.includes(role));
 }
 
-function portalSuccessHtml(token: string, actor: import('../models/identity.ts').CurrentActor): Response {
-  const auth = {
+function portalAuth(token: string, actor: CurrentActor) {
+  return {
     token, userId: actor.user_id, tenantId: actor.tenant_id,
-    email: actor.email, roles: actor.roles,
+    loginId: actor.login_id, email: actor.email, scope: actor.scope, roles: actor.roles,
   };
+}
+
+function portalSuccessHtml(token: string, actor: CurrentActor): Response {
+  const auth = portalAuth(token, actor);
   const target = AUTHENTICATED_HOME_PATH;
   const html = `<!doctype html>
 <html><head><meta charset="utf-8"><title>DocuMind 登录中</title></head>
 <body>
 <script>
-const auth = ${JSON.stringify(auth)};
+const auth = ${JSON.stringify(auth).replace(/</g, '\\u003c')};
 const prefix = window.location.pathname.startsWith("/documind/") || window.location.pathname === "/documind" ? "/documind" : "";
 const target = ${JSON.stringify(target)};
 localStorage.setItem("documind-auth", JSON.stringify(auth));
 window.location.replace(prefix + target);
 </script>
 </body></html>`;
-  return new Response(html, { status: 200, headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  return new Response(html, { status: 200, headers: {
+    'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+  } });
+}
+
+function portalLinkHtml(challenge: string, allowCreate = false): Response {
+  const html = `<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>关联 DocuMind 账号</title></head>
+<body><main><h1>关联已有 DocuMind 账号</h1>
+<p>请在另一个标签页登录已有账号并切换到对应企业；返回本页后点击关联。链接将在五分钟内失效。</p>
+<a id="login" target="_blank" rel="noopener noreferrer">打开 DocuMind 登录页</a>
+<button type="button" id="link">验证本地登录并关联</button>
+${allowCreate ? '<button type="button" id="create">确认无历史账号，创建新账号</button>' : ''}
+<p id="status" role="status"></p></main>
+<script>
+const prefix = location.pathname.startsWith("/documind/") ? "/documind" : "";
+document.getElementById("login").href = prefix + "/login";
+document.getElementById("link").onclick = async () => {
+  const status = document.getElementById("status");
+  const stored = JSON.parse(localStorage.getItem("documind-auth") || "null");
+  if (!stored?.token) { status.textContent = "请先在另一个标签页登录 DocuMind"; return; }
+  try {
+    const response = await fetch(prefix + "/api/auth/portal/link", {
+      method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + stored.token },
+      body: JSON.stringify({ challenge: ${JSON.stringify(challenge)}, explicit_link: true })
+    });
+    if (!response.ok) throw new Error("关联失败：请确认本地账号属于当前企业，或重新从门户进入");
+    const data = await response.json();
+    localStorage.setItem("documind-auth", JSON.stringify(data.auth));
+    location.replace(prefix + data.redirect);
+  } catch (error) { status.textContent = error.message; }
+};
+if (${JSON.stringify(allowCreate)}) document.getElementById("create").onclick = async () => {
+  const status = document.getElementById("status");
+  try {
+    const response = await fetch(prefix + "/api/auth/portal/create", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ challenge: ${JSON.stringify(challenge)} })
+    });
+    if (!response.ok) throw new Error("创建失败：请重新从门户进入");
+    const data = await response.json();
+    localStorage.setItem("documind-auth", JSON.stringify({
+      token: data.access_token, userId: data.user.id, tenantId: data.tenant.id,
+      loginId: data.user.login_id, email: data.user.email, scope: data.scope, roles: data.roles
+    }));
+    location.replace(prefix + ${JSON.stringify(AUTHENTICATED_HOME_PATH)});
+  } catch (error) { status.textContent = error.message; }
+};
+</script></body></html>`;
+  return new Response(html, { status: 200, headers: {
+    'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store',
+    'Referrer-Policy': 'no-referrer',
+  } });
 }
 
 function portalCallbackError(error: AppError): Response {
@@ -458,6 +745,8 @@ async function switchTenantHandler(c: import('hono').Context<AppEnv>) {
   const claims = await claimsFromAuthorizationHeader(
     state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source === 'portal'
+    || (state.config.authLoginMode === 'portal' && !claims.auth_source)) throw AppError.forbidden();
   const req = await c.req.json() as { tenant_id?: string };
   const tenantId = (req.tenant_id ?? '').trim();
   const rows = await sql`
@@ -493,6 +782,8 @@ async function createTenantHandler(c: import('hono').Context<AppEnv>) {
   const claims = await claimsFromAuthorizationHeader(
     state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source === 'portal'
+    || (state.config.authLoginMode === 'portal' && !claims.auth_source)) throw AppError.forbidden();
   const idempotencyKey = (c.req.header('idempotency-key') ?? '').trim();
   if (!idempotencyKey) {
     throw AppError.badRequest('IDEMPOTENCY_KEY_REQUIRED', '缺少 Idempotency-Key');
@@ -661,6 +952,8 @@ async function refreshHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source === 'portal') throw AppError.unauthorized();
+  if (state.config.authLoginMode === 'portal' && !claims.auth_source) throw AppError.unauthorized();
   if (!claims.tenant_id) {
     if (!claims.sid) throw AppError.unauthorized();
     return c.json(await identityLoginResponse(state, claims.sub, claims.sid));
@@ -737,6 +1030,8 @@ async function acceptInvitationHandler(c: import('hono').Context<AppEnv>) {
   const claims = await claimsFromAuthorizationHeader(
     state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
+  if (claims.auth_source === 'portal'
+    || (state.config.authLoginMode === 'portal' && !claims.auth_source)) throw AppError.forbidden();
   const result = await sql.begin(async (tx) => {
     const accounts = await tx`
       SELECT login_id, status FROM app_user WHERE id = ${claims.sub} FOR UPDATE

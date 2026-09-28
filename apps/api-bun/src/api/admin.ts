@@ -38,6 +38,8 @@ async function overview(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'kb.read');
+  requirePermission(actor, 'member.read');
   const sql = state.sql;
   if (sql) {
     const rows = await sql`
@@ -183,6 +185,7 @@ async function listKnowledgeBases(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'kb.read');
   const sql = state.sql;
   if (sql) {
     const rows = await sql`
@@ -270,6 +273,7 @@ async function updateKnowledgeBase(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'kb.write');
   const sql = state.sql;
   if (!sql) throw AppError.badRequest('KB_REQUIRES_POSTGRES', '知识库管理需要启用 PostgreSQL');
   const req = await c.req.json() as KnowledgeBaseUpsert;
@@ -312,6 +316,7 @@ async function deleteKnowledgeBase(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'kb.manage');
   const sql = state.sql;
   if (!sql) throw AppError.badRequest('KB_REQUIRES_POSTGRES', '知识库管理需要启用 PostgreSQL');
   const kbId = c.req.param('kb_id')!;
@@ -328,6 +333,7 @@ async function listMembers(c: Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
   requireTenantAdmin(actor);
+  requirePermission(actor, 'member.read');
   const sql = state.sql;
   if (sql) {
     const rows = await sql`

@@ -222,6 +222,62 @@ export class ApiClient {
     return response;
   }
 
+  async loginPortalTicket(code: string, createIntent = false): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>(
+      "/api/auth/portal/ticket",
+      { method: "POST", body: JSON.stringify({ code, create_intent: createIntent }) },
+      false, false,
+    );
+    return this.storePortalSession(response.access_token, response);
+  }
+
+  async linkPortalTicket(code: string): Promise<Identity> {
+    const local = await this.getSession();
+    if (!local.access_token || local.auth_source === "portal") {
+      throw new CliError("先使用 auth login 验证需要关联的本地账号，再运行 auth portal-link", 2);
+    }
+    let login: LoginResponse;
+    try {
+      login = await this.requestJson<LoginResponse>(
+        "/api/auth/portal/ticket",
+        { method: "POST", body: JSON.stringify({ code }) },
+        false, false,
+      );
+    } catch (error) {
+      const body = error instanceof ApiError && error.status === 409
+        && error.body && typeof error.body === "object"
+        ? error.body as Record<string, unknown> : null;
+      if (body?.code !== "PORTAL_LINK_REQUIRED"
+        || typeof body.challenge !== "string") throw error;
+      const linked = await this.requestJson<{ auth: { token: string } }>(
+        "/api/auth/portal/link",
+        { method: "POST", body: JSON.stringify({ challenge: body.challenge, explicit_link: true }),
+          headers: { Authorization: `Bearer ${local.access_token}` } },
+        false, false,
+      );
+      const identity = await this.requestJson<Identity>(
+        "/api/me", { headers: { Authorization: `Bearer ${linked.auth.token}` } },
+        false, false,
+      );
+      return this.storePortalSession(linked.auth.token, identity);
+    }
+    if (!local.user?.id || login.user.id !== local.user.id) {
+      throw new CliError("门户身份已关联其他本地账号，拒绝覆盖已验证的账号");
+    }
+    return this.storePortalSession(login.access_token, login);
+  }
+
+  private async storePortalSession(token: string, identity: Identity): Promise<Identity> {
+    const { user, tenant, roles, permissions, allowed_kb_ids } = identity;
+    this.session = {
+      access_token: token, auth_source: "portal",
+      user, tenant, roles, permissions, allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return { user, tenant, roles, permissions, allowed_kb_ids };
+  }
+
   async listTenants(): Promise<{ items: TenantProfile[]; active_tenant_id: string | null }> {
     return this.requestJson("/api/v1/auth/tenants");
   }
@@ -656,6 +712,9 @@ export class ApiClient {
       signal: AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
     });
     if (response.status === 401 && retryAuthentication && !this.externalMode) {
+      if ((await this.getSession()).auth_source === "portal") {
+        throw new CliError("Portal 会话已过期，请重新运行 auth portal-login");
+      }
       await this.login(true);
       return this.sse(path, body, false);
     }
@@ -708,7 +767,8 @@ export class ApiClient {
       headers,
       signal: init.signal ?? AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
     });
-    if (authenticated && retryAuthentication && response.status === 401 && !this.externalMode) {
+    if (authenticated && retryAuthentication && response.status === 401 && !this.externalMode
+      && (await this.getSession()).auth_source !== "portal") {
       await this.login(true);
       return this.request(path, init, authenticated, false);
     }

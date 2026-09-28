@@ -69,6 +69,7 @@ export interface LoginResponse extends Identity {
 
 export interface SessionState extends Partial<Identity> {
   access_token?: string;
+  auth_source?: "portal";
   last_conversation_id?: string;
   saved_at?: string;
 }

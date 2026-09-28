@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ApiClient } from "../src/api.ts";
-import { DEFAULT_CONFIG } from "../src/config.ts";
+import { parseArgs } from "../src/args.ts";
+import { dispatch } from "../src/commands.ts";
+import { DEFAULT_CONFIG, readSession, serializeConfig } from "../src/config.ts";
 import type { AdminDocument, CliConfig, KnowledgeBase } from "../src/types.ts";
 
 interface CapturedRequest {
@@ -164,6 +166,143 @@ describe("ApiClient admin management", () => {
         body: { username: "moss", password: "complex-secret" },
       }]);
     } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+  test("Portal ticket login persists session and never falls back to password after expiry", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-portal-"));
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+      auth: { ...DEFAULT_CONFIG.auth, password: "" },
+    };
+    const path = join(temporary, "config.toml");
+    let expired = false;
+    const calls: string[] = [];
+    const fetcher = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+      calls.push(url.pathname);
+      if (url.pathname === "/api/auth/portal/ticket") {
+        expect(JSON.parse(String(init?.body))).toEqual({ code: "once-only", create_intent: false });
+        expect(new Headers(init?.headers).has("Authorization")).toBe(false);
+        return jsonResponse({ ...identity() as object, access_token: "portal-token" });
+      }
+      if (url.pathname === "/api/me") {
+        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer portal-token");
+        if (expired) return jsonResponse({ message: "expired" }, 401);
+        const { access_token: _token, token_type: _type, ...me } = identity() as Record<string, unknown>;
+        return jsonResponse(me);
+      }
+      throw new Error(`unexpected call ${url.pathname}`);
+    }) as typeof fetch;
+    try {
+      const api = new ApiClient(config, path, fetcher);
+      await api.loginPortalTicket("once-only");
+      expect((await readSession(path)).auth_source).toBe("portal");
+      expect((await api.me()).user.id).toBe("user");
+      expired = true;
+      await expect(api.me()).rejects.toMatchObject({ status: 401 });
+      await expect(api.linkPortalTicket("must-not-use")).rejects.toThrow("先使用 auth login");
+      expect(calls).toEqual(["/api/auth/portal/ticket", "/api/me", "/api/me"]);
+    } finally {
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+  test("auth portal-login CLI reads ticket from environment and reuses persisted identity", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-ticket-command-"));
+    const path = join(temporary, "config.toml");
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+    };
+    const previousFetch = globalThis.fetch;
+    const previousTicket = process.env.DOCUMIND_PORTAL_TICKET;
+    const previousWrite = process.stdout.write;
+    const calls: string[] = [];
+    let output = "";
+    try {
+      await writeFile(path, serializeConfig(config));
+      process.env.DOCUMIND_PORTAL_TICKET = "once-only";
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+        calls.push(url.pathname);
+        if (url.pathname === "/api/auth/portal/ticket") {
+          expect(JSON.parse(String(init?.body))).toEqual({ code: "once-only", create_intent: true });
+          return jsonResponse({ ...identity() as object, access_token: "portal-token" });
+        }
+        if (url.pathname === "/api/me") {
+          const { access_token: _token, token_type: _type, ...me } = identity() as Record<string, unknown>;
+          return jsonResponse(me);
+        }
+        throw new Error(`unexpected CLI call ${url.pathname}`);
+      }) as typeof fetch;
+      process.stdout.write = ((chunk: string) => { output += String(chunk); return true; }) as typeof process.stdout.write;
+      expect(await dispatch(parseArgs(["auth", "portal-login", "--create", "--config", path, "--json"]))).toBe(0);
+      expect(await dispatch(parseArgs(["auth", "whoami", "--config", path, "--json"]))).toBe(0);
+      expect((await readSession(path)).auth_source).toBe("portal");
+      expect(calls).toEqual(["/api/auth/portal/ticket", "/api/me"]);
+      expect(output).not.toContain("once-only");
+      expect(output).not.toContain("portal-token");
+    } finally {
+      globalThis.fetch = previousFetch;
+      process.stdout.write = previousWrite;
+      if (previousTicket === undefined) delete process.env.DOCUMIND_PORTAL_TICKET;
+      else process.env.DOCUMIND_PORTAL_TICKET = previousTicket;
+      await rm(temporary, { recursive: true, force: true });
+    }
+  });
+  test("portal-link consumes ticket once and binds the verified local account", async () => {
+    const temporary = await mkdtemp(join(tmpdir(), "documind-cli-portal-link-"));
+    const path = join(temporary, "config.toml");
+    const config: CliConfig = {
+      ...DEFAULT_CONFIG,
+      server: { ...DEFAULT_CONFIG.server, url: "https://documind.test", base_path: "" },
+      auth: { ...DEFAULT_CONFIG.auth, password: "local-password" },
+    };
+    const previousFetch = globalThis.fetch;
+    const previousTicket = process.env.DOCUMIND_PORTAL_TICKET;
+    const previousWrite = process.stdout.write;
+    const calls: string[] = [];
+    try {
+      await writeFile(path, serializeConfig(config));
+      process.env.DOCUMIND_PORTAL_TICKET = "one-time-link-ticket";
+      globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = new URL(typeof input === "string" || input instanceof URL ? input : input.url);
+        calls.push(url.pathname);
+        if (url.pathname === "/api/auth/login") {
+          return jsonResponse({ ...identity() as object, access_token: "local-token" });
+        }
+        if (url.pathname === "/api/auth/portal/ticket") {
+          expect(JSON.parse(String(init?.body))).toEqual({ code: "one-time-link-ticket" });
+          return jsonResponse({ code: "PORTAL_LINK_REQUIRED", challenge: "challenge-id" }, 409);
+        }
+        if (url.pathname === "/api/auth/portal/link") {
+          expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer local-token");
+          expect(JSON.parse(String(init?.body))).toEqual({
+            challenge: "challenge-id", explicit_link: true,
+          });
+          return jsonResponse({ auth: { token: "linked-portal-token" } });
+        }
+        if (url.pathname === "/api/me") {
+          expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer linked-portal-token");
+          const { access_token: _token, token_type: _type, ...me } = identity() as Record<string, unknown>;
+          return jsonResponse(me);
+        }
+        throw new Error(`unexpected CLI call ${url.pathname}`);
+      }) as typeof fetch;
+      process.stdout.write = (() => true) as typeof process.stdout.write;
+      expect(await dispatch(parseArgs(["auth", "login", "--config", path, "--json"]))).toBe(0);
+      expect(await dispatch(parseArgs(["auth", "portal-link", "--config", path, "--json"]))).toBe(0);
+      expect((await readSession(path)).access_token).toBe("linked-portal-token");
+      expect((await readSession(path)).auth_source).toBe("portal");
+      expect(calls).toEqual([
+        "/api/auth/login", "/api/auth/portal/ticket", "/api/auth/portal/link", "/api/me",
+      ]);
+    } finally {
+      globalThis.fetch = previousFetch;
+      process.stdout.write = previousWrite;
+      if (previousTicket === undefined) delete process.env.DOCUMIND_PORTAL_TICKET;
+      else process.env.DOCUMIND_PORTAL_TICKET = previousTicket;
       await rm(temporary, { recursive: true, force: true });
     }
   });

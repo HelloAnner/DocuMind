@@ -8,6 +8,7 @@ import { isIP } from 'node:net';
 import JSZip from 'jszip';
 import { Hono, type Context } from 'hono';
 import type { Sql } from 'postgres';
+import { requirePermission } from '../auth/permissions.ts';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { newUuid } from '../infra/uuid.ts';
@@ -171,17 +172,20 @@ export function formatSkillsForSystemPrompt(skills: SkillSummary[]): string {
 }
 
 function requireSkillManager(actor: CurrentActor): void {
-  if (actor.is_super_admin) return;
-  if (!actor.roles.some((role) => ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role))) {
+  if (!actor.is_super_admin && !actor.roles.some((role) => ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role))) {
     throw AppError.forbidden();
   }
+  requirePermission(actor, 'kb.manage');
 }
 
 async function requestContext(c: Context<AppEnv>, writable = true): Promise<{ sql: Sql; actor: CurrentActor }> {
   const actor = c.get('actor');
   if (writable) requireSkillManager(actor);
-  else if (!actor.is_super_admin && !actor.roles.some((role) => ['tenant_owner', 'tenant_admin', 'enterprise_admin', 'team_admin', 'data_admin'].includes(role))) {
-    throw AppError.forbidden();
+  else {
+    if (!actor.is_super_admin && !actor.roles.some((role) => ['tenant_owner', 'tenant_admin', 'enterprise_admin', 'team_admin', 'data_admin'].includes(role))) {
+      throw AppError.forbidden();
+    }
+    requirePermission(actor, 'kb.read');
   }
   const sql = c.get('appState').sql;
   if (!sql) throw AppError.badRequest('DATABASE_REQUIRED', '技能管理需要 PostgreSQL');

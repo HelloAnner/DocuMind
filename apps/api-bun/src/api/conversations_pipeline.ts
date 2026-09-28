@@ -107,8 +107,9 @@ async function runAgentPipelineInner(options: AgentPipelineOptions): Promise<voi
     effective_kb_ids: options.effectiveKbIds,
     file_ids: options.fileIds,
     file_context: options.fileContext,
-    can_manage_skills: actor.is_super_admin || actor.roles.some((role) =>
-      ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role)),
+    can_manage_skills: actor.permissions.includes('kb.manage') &&
+      (actor.is_super_admin || actor.roles.some((role) =>
+        ['tenant_owner', 'tenant_admin', 'enterprise_admin'].includes(role))),
     history: history,
     options: agentOptionsFromConfig(config),
   };

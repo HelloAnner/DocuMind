@@ -11,6 +11,7 @@ const BOOLEAN_OPTIONS = new Set([
   "accessible",
   "continue",
   "clear-avatar",
+  "create",
   "events",
   "force",
   "full",

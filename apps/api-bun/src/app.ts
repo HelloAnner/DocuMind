@@ -23,6 +23,7 @@ import { createDocumindMcpEndpoint } from './mcp.ts';
 const PUBLIC_API_PATHS = new Set([
   '/api/health', '/api/metrics', '/api/config',
   '/api/auth/login', '/api/auth/refresh', '/api/auth/logout',
+  '/api/auth/portal/ticket', '/api/auth/portal/create',
   '/api/auth/tenant-context',
   '/api/v1/auth/login', '/api/v1/auth/register', '/api/v1/auth/refresh',
   '/api/v1/auth/logout', '/api/v1/auth/me', '/api/v1/me', '/api/me',

@@ -8,7 +8,7 @@ import type { Claims } from './jwt.ts';
 
 interface AuthSession {
   user_id: string; tenant_id: string | null; role: string; scope: string;
-  created_at: number; last_seen_at: number;
+  created_at: number; last_seen_at: number; auth_source?: 'portal';
 }
 
 function authSessionKey(sessionId: string): string {
@@ -16,7 +16,7 @@ function authSessionKey(sessionId: string): string {
 }
 
 export async function createAuthSession(
-  redis: Redis | null, config: AppConfig, actor: CurrentActor,
+  redis: Redis | null, config: AppConfig, actor: CurrentActor, authSource?: 'portal',
 ): Promise<string> {
   const sessionId = crypto.randomUUID();
   if (!redis) return sessionId;
@@ -24,7 +24,7 @@ export async function createAuthSession(
   const session: AuthSession = {
     user_id: actor.user_id, tenant_id: actor.tenant_id,
     role: actor.roles[0] ?? 'user', scope: actor.scope,
-    created_at: now, last_seen_at: now,
+    created_at: now, last_seen_at: now, ...(authSource ? { auth_source: authSource } : {}),
   };
   await redis.set(
     authSessionKey(sessionId), JSON.stringify(session), 'EX',
@@ -85,6 +85,13 @@ export async function validateAndRenewAuthSession(
   if (session.user_id !== claims.sub || session.tenant_id !== claims.tenant_id
     || session.role !== claims.role || session.scope !== claims.scope) {
     throw AppError.unauthorized();
+  }
+  if (session.auth_source === 'portal' || claims.auth_source === 'portal') {
+    if (session.auth_source !== claims.auth_source
+      || nowSeconds() >= session.created_at + Math.max(1, config.authTokenExpireHours) * 3600) {
+      throw AppError.unauthorized();
+    }
+    return;
   }
   session.last_seen_at = nowSeconds();
   await redis.set(
