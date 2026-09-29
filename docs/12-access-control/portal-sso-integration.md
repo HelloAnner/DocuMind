@@ -2,14 +2,14 @@
 
 ## 定位
 
-DocuMind 是门户下的企业文档 RAG 子系统。接入门户统一登录后，用户在门户完成登录，从门户首页点击 DocuMind 入口即可进入文档问答或管理后台；DocuMind 不再在门户托管部署链路中要求用户再次输入账号密码。
+DocuMind 是独立的企业文档问答系统，原账号、密码和历史数据保持不变；Portal 首页点击 DocuMind 时，可额外用一次性票据直接进入，无须重复输入密码。
 
 本方案与门户侧总协议保持一致：
 
 - 浏览器只携带一次性 code 跳转到 DocuMind。
 - DocuMind 后端使用 code 调用门户 `POST /api/auth/exchange-ticket` 换取身份上下文。
 - DocuMind 根据门户上下文建立本地 JWT 和 Redis session。
-- DocuMind 本地账号体系保留，用于独立部署模式。
+- DocuMind 本地账号密码登录始终是独立入口；Portal 换票是可选入口。
 
 ## 当前认证现状
 
@@ -275,48 +275,33 @@ DocuMind 的业务权限最终还要落到知识库 ACL。
 
 ## 配置项
 
-当前服务器默认使用 DocuMind 独立本地认证。门户接入是可选模式，只有显式配置 `AUTH_LOGIN_MODE=portal` 时才按门户托管处理；否则 `/login` 与 `/api/v1/auth/login` 是正式入口，不应被当作门户系统的附属登录。
+当前生产部署同时保留本地登录与可选 Portal 换票：
 
 ```env
-SYSTEM_CODE=documind
-AUTH_LOGIN_MODE=portal
-PORTAL_MANAGED=true
+AUTH_LOGIN_MODE=local
+PORTAL_MANAGED=false
 PORTAL_AUTH_ENABLED=true
-PORTAL_BASE_URL=http://localhost:8080
+PORTAL_BASE_URL=http://127.0.0.1:6688
 PORTAL_EXCHANGE_ENDPOINT=/api/auth/exchange-ticket
-PORTAL_AUTH_CALLBACK=/auth/portal/callback
-PORTAL_CLIENT_ID=documind
-PORTAL_CLIENT_SECRET=change-me
 ```
 
 语义：
 
-- `AUTH_LOGIN_MODE=local`：正常独立登录模式。DocuMind 使用自己的邮箱/密码、会话和权限体系，门户 callback 不生效。
-- `AUTH_LOGIN_MODE=portal`：接口门户模式。DocuMind 只信任门户下发的一次性 ticket；callback 换票成功后，按门户身份自动创建或同步本地租户、用户和租户成员关系，然后直接签发 DocuMind 登录态。
-- `PORTAL_MANAGED=true`：当前部署由门户统一入口管理。
-- `PORTAL_AUTH_ENABLED=true`：兼容旧配置，用于标识门户认证；实际是否进入门户模式以 `AUTH_LOGIN_MODE=portal` 为准。
+- `AUTH_LOGIN_MODE=local`：原 `/login`、`/api/v1/auth/login`、原密码和会话继续有效。
+- `PORTAL_AUTH_ENABLED=true`：另外开放 Portal callback；仅 Portal JWT 受 Portal 角色和权限上限约束，不改变本地密码会话。
+- `PORTAL_MANAGED=false`：DocuMind 保持独立部署和独立登录入口。
+- `AUTH_LOGIN_MODE=portal`：旧的 Portal 独占入口选项；当前生产环境不启用。
 - `PORTAL_BASE_URL`：门户后端地址。
 - `PORTAL_EXCHANGE_ENDPOINT`：门户换票接口。
-- `PORTAL_AUTH_CALLBACK`：DocuMind 接收门户 code 的回调路径。
-- `PORTAL_CLIENT_SECRET`：DocuMind 调用门户换票接口的服务凭证。门户当前还需要补齐服务凭证校验。
+- Portal callback 为 `/auth/portal/callback`；换票接口当前不使用 `PORTAL_CLIENT_SECRET`。
 
 ## 本地登录入口处理
 
-独立部署模式：
-
-- `AUTH_LOGIN_MODE=local`。
-- 保留 `/login`、`/api/v1/auth/login` 和本地账号密码登录。
-
-门户托管模式：
-
-- `AUTH_LOGIN_MODE=portal`。
-- `/login` 不再作为生产登录入口。
-- 未登录访问受保护页面时，跳转到门户登录页或门户首页。
-- `/api/v1/auth/login` 可保留给开发和紧急维护；若门户是唯一生产入口，应通过配置关闭、限制来源或只允许专用维护账号。
+独立本地登录和 Portal 入口并存：用户直接访问 `/login` 时输入原账号密码；从 Portal 点击 DocuMind 时由 callback 换票。二者都使用 DocuMind 自己的 JWT、Redis 会话和数据库，只有 Portal 会话受 ticket 权限上限约束。下次 `make deploy-remote` 保留上述环境配置，不应将 `AUTH_LOGIN_MODE` 改回 `portal`。
 
 ## 门户模式自动建号规则
 
-`AUTH_LOGIN_MODE=portal` 时，本地是否已存在用户不影响登录。DocuMind 必须优先信任门户 ticket：
+启用 `PORTAL_AUTH_ENABLED=true` 后，本地是否已存在用户不影响已验证 Portal 身份的登录：
 
 - 门户超级管理员始终映射为 DocuMind `super_admin`，优先级最高；即使 DocuMind 本地没有该账号，也会自动创建并登录。
 - 门户租户所有者映射为 `tenant_owner`。
@@ -359,7 +344,7 @@ DocuMind 建议新增审计事件：
 5. 将 `systemRoles` 转换为 DocuMind roles。
 6. 用本地 `derive_permissions` 和门户 `permissions` 计算最终权限。
 7. 复用现有 session 与 JWT 签发逻辑建立本地登录态。
-8. 在 `AUTH_LOGIN_MODE=portal` 时旁路本地登录页。
+8. 保留本地登录页，Portal callback 作为附加入口。
 9. 增加端到端测试：门户登录后进入 DocuMind、重复 code 失败、权限不同导致默认入口不同。
 
 ## 验收标准
