@@ -97,7 +97,7 @@ async function portalTicketHandler(c: import('hono').Context<AppEnv>) {
 async function portalCallbackInner(
   state: AppState, query: PortalCallbackQuery, json = false, createIntent = false,
 ): Promise<Response> {
-  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  if ((!state.config.portalAuthEnabled && state.config.authLoginMode !== 'portal') || !state.sql || !state.redis) throw AppError.unauthorized();
   if (!query.code || !/^[0-9a-f-]{36}:[^:\s]+$/i.test(query.code)) throw AppError.unauthorized();
   const portal = await exchangePortalTicket(state, query.code);
   validatePortalContext(portal);
@@ -155,7 +155,7 @@ function validatePortalContext(portal: PortalContext, requireFresh = true): void
 async function approvePortalTenantMapping(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   const actor = c.get('actor');
-  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis
+  if ((!state.config.portalAuthEnabled && state.config.authLoginMode !== 'portal') || !state.sql || !state.redis
     || actor.is_super_admin
     || !actor.roles.some((role) => role === 'tenant_owner' || role === 'tenant_admin')) throw AppError.forbidden();
   requirePermission(actor, 'tenant.write');
@@ -224,7 +224,7 @@ export async function resolvePortalTenant(sql: Sql, portal: PortalContext, creat
 
 async function portalLinkHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
-  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  if ((!state.config.portalAuthEnabled && state.config.authLoginMode !== 'portal') || !state.sql || !state.redis) throw AppError.unauthorized();
   const actor = c.get('actor');
   const claims = await claimsFromAuthorizationHeader(state.config, c.req.header('authorization') ?? null);
   await validateAndRenewAuthSession(state.redis, state.config, claims);
@@ -258,7 +258,7 @@ async function portalLinkHandler(c: import('hono').Context<AppEnv>) {
 }
 async function portalCreateHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
-  if (state.config.authLoginMode !== 'portal' || !state.sql || !state.redis) throw AppError.unauthorized();
+  if ((!state.config.portalAuthEnabled && state.config.authLoginMode !== 'portal') || !state.sql || !state.redis) throw AppError.unauthorized();
   const req = await c.req.json() as { challenge?: string };
   if (!req.challenge || !/^[0-9a-f-]{36}$/i.test(req.challenge)) throw AppError.unauthorized();
   const key = `documind:portal:link:${req.challenge}`;

@@ -395,7 +395,7 @@ function settingsPayload(state: AppState, updatedAt: string | null) {
       portal_base_url: cfg.portalBaseUrl,
       portal_exchange_endpoint: cfg.portalExchangeEndpoint,
       local_login_enabled: cfg.authLoginMode === 'local',
-      portal_login_enabled: cfg.authLoginMode === 'portal',
+      portal_login_enabled: cfg.portalAuthEnabled,
     },
     storage: {
       database_configured: configured(cfg.databaseUrl),

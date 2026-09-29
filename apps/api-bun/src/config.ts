@@ -32,7 +32,7 @@ export interface AppConfig {
   objectStorageAccessKey: string | null; objectStorageSecretKey: string | null;
   objectStorageForcePathStyle: boolean; objectStorageTlsVerify: boolean; objectStoragePresignExpireSeconds: number;
   blobStorageDir: string; sandboxImage: string; sandboxMaxTimeoutSeconds: number;
-  jwtSecret: string; authTokenExpireHours: number; authLoginMode: string;
+  jwtSecret: string; authTokenExpireHours: number; authLoginMode: string; portalAuthEnabled: boolean;
   portalBaseUrl: string; portalExchangeEndpoint: string;
   defaultTenantId: string; defaultUserId: string; defaultRole: string; defaultKbIds: string[];
   defaultTenantName: string; defaultTenantSlug: string;
@@ -229,6 +229,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     jwtSecret: envStr('JWT_SECRET') ?? 'documind-dev-secret-change-me',
     authTokenExpireHours: envNum(['AUTH_TOKEN_EXPIRE_HOURS', 'JWT_EXPIRE_HOURS'], 24),
     authLoginMode,
+    portalAuthEnabled: envBool('PORTAL_AUTH_ENABLED', false) || authLoginMode === 'portal',
     portalBaseUrl: envStr('PORTAL_BASE_URL') ?? 'http://localhost:8080',
     portalExchangeEndpoint: envStr('PORTAL_EXCHANGE_ENDPOINT') ?? '/api/auth/exchange-ticket',
     defaultTenantId: envUuid('DEFAULT_TENANT_ID', DEFAULT_TENANT_ID),

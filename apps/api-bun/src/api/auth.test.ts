@@ -128,7 +128,7 @@ describe('api/auth', () => {
       begin: async (run: (tx: Sql) => Promise<unknown>) => run(sql),
     }) as unknown as Sql;
     const state = { sql, redis: { set: async () => 'OK' }, config: {
-      authLoginMode: 'portal', jwtSecret: 'two-tenant-test-secret', authTokenExpireHours: 1,
+      authLoginMode: 'local', portalAuthEnabled: true, jwtSecret: 'two-tenant-test-secret', authTokenExpireHours: 1,
       portalBaseUrl: 'http://portal.test', portalExchangeEndpoint: '/exchange',
     } as AppState['config'] } as unknown as AppState;
     const portal = {
