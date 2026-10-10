@@ -37,17 +37,16 @@ export async function resolveA2AConversation(
     return fresh;
   }
 
+  // a2a_thread.conversation_id 有外键，必须先落本地会话再写映射。
   const session = newSession(actor);
+  await state.repository.createSession(session);
   const inserted = await sql`
     INSERT INTO a2a_thread (portal_context_id, tenant_id, user_id, conversation_id)
     VALUES (${contextId}, ${actor.tenant_id}, ${actor.user_id}, ${session.id})
     ON CONFLICT (portal_context_id) DO NOTHING
     RETURNING conversation_id
   `;
-  if (inserted.length > 0) {
-    await state.repository.createSession(session);
-    return session;
-  }
+  if (inserted.length > 0) return session;
   // 并发下另一请求先写入：复用已存在的映射
   const rows = await sql`
     SELECT conversation_id, user_id, tenant_id FROM a2a_thread
