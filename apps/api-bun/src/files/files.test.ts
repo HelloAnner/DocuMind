@@ -151,4 +151,31 @@ describe('private user files', () => {
     );
     expect(xlsx).toEqual({ text: '## sheet1.xml\n项目\t42', truncated: false });
   });
+
+  test('extracts text from PDF user files (A2A 附件)', async () => {
+    const buildPdf = (objects: string[]): Uint8Array => {
+      let out = '%PDF-1.4\n';
+      const offsets: number[] = [];
+      for (let i = 0; i < objects.length; i += 1) {
+        offsets.push(out.length);
+        out += `${i + 1} 0 obj\n${objects[i]}\nendobj\n`;
+      }
+      const xrefOffset = out.length;
+      out += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+      for (const offset of offsets) out += `${String(offset).padStart(10, '0')} 00000 n \n`;
+      out += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+      return new Uint8Array(Buffer.from(out, 'latin1'));
+    };
+    const stream = 'BT\n/F1 12 Tf\n72 720 Td\n(Hello DocuMind) Tj\nET';
+    const pdf = buildPdf([
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+      `<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
+    ]);
+    const extracted = await extractUserFileText('合同.pdf', 'application/pdf', pdf);
+    expect(extracted.text).toContain('Hello DocuMind');
+    expect(extracted.truncated).toBeFalse();
+  });
 });

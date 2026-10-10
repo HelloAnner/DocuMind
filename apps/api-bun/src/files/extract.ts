@@ -20,6 +20,15 @@ const USER_UPLOAD_TYPES: Record<string, string> = {
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
+/** `extractUserFileText` 能解析出正文的扩展名（A2A 附件据此判断能否纳入对话上下文）。 */
+const EXTRACTABLE_USER_FILE_TYPES = new Set([
+  'txt', 'md', 'markdown', 'csv', 'json', 'docx', 'xlsx', 'pptx', 'pdf',
+]);
+
+export function isExtractableUserFileName(name: string): boolean {
+  return EXTRACTABLE_USER_FILE_TYPES.has(fileExtension(name));
+}
+
 export interface ExtractedFileText {
   text: string;
   truncated: boolean;
@@ -68,7 +77,7 @@ export async function extractUserFileText(
     text = decodeText(bytes);
   } else if (extension === 'xlsx') {
     text = await extractXlsx(bytes);
-  } else if (['txt', 'md', 'markdown', 'docx', 'pptx'].includes(extension)) {
+  } else if (['txt', 'md', 'markdown', 'docx', 'pptx', 'pdf'].includes(extension)) {
     const bundle = await parseDocument(newUuid(), newUuid(), name, mimeType, bytes);
     text = bundle.parsed.blocks.map((block) => block.text).filter(Boolean).join('\n\n');
   } else {

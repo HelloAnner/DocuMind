@@ -99,6 +99,12 @@ export class A2AFrameMapper {
     }
   }
 
+  /** handler 直接下发一帧 working 提示（附件降级等），不改变终端状态。 */
+  statusUpdates(message: string): A2AFrame[] {
+    if (this.terminal) return [];
+    return [this.statusFrame(message)];
+  }
+
   private finish(): A2AFrame[] {
     if (this.terminal) return [];
     this.terminal = true;
@@ -185,16 +191,26 @@ export class A2ASink implements EventSink {
     const parsed = parseEvent(event);
     if (parsed === null) return;
     for (const frame of this.mapper.map(parsed.eventType, parsed.payload)) {
-      this.chain = this.chain
-        .then(() => this.stream.writeSSE({ event: frame.event, data: frame.data }))
-        .catch((error: unknown) => {
-          this.broken = true;
-          console.warn('[documind][a2a] SSE write failed: ' + (error as Error).message);
-        });
+      this.enqueue(frame);
     }
   }
 
+  /** 下发一帧 working 状态提示（附件下载失败/类型不支持等降级说明）。 */
+  sendStatus(message: string): void {
+    if (this.broken || this.mapper.done) return;
+    for (const frame of this.mapper.statusUpdates(message)) this.enqueue(frame);
+  }
+
   flush(): Promise<void> { return this.chain; }
+
+  private enqueue(frame: A2AFrame): void {
+    this.chain = this.chain
+      .then(() => this.stream.writeSSE({ event: frame.event, data: frame.data }))
+      .catch((error: unknown) => {
+        this.broken = true;
+        console.warn('[documind][a2a] SSE write failed: ' + (error as Error).message);
+      });
+  }
 }
 
 export function parseEvent(event: OutboundSseEvent): { eventType: string; payload: unknown } | null {

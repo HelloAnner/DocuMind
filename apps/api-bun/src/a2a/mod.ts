@@ -20,9 +20,17 @@ import { sendExecutionStarted, type PipelineContext } from '../api/conversations
 import { runAgentPipeline } from '../api/conversations_pipeline.ts';
 import { A2ASink } from './sink.ts';
 import { A2A_MAX_CONTEXT_ID, resolveA2AConversation } from './thread.ts';
+import {
+  receiveA2AAttachments,
+  type A2AAttachmentResult,
+} from './attachments.ts';
 
 export { A2AFrameMapper, A2ASink } from './sink.ts';
 export { resolveA2AConversation } from './thread.ts';
+export {
+  A2A_ATTACHMENT_MAX_BYTES, A2A_MAX_ATTACHMENTS,
+  extractFileParts, receiveA2AAttachments, type A2AAttachmentResult,
+} from './attachments.ts';
 
 export const A2A_SYSTEM_CODE = 'documind';
 
@@ -166,11 +174,27 @@ export async function a2aStreamHandler(c: Context<AppEnv>): Promise<Response> {
   } catch (error) {
     return rpcErrorFromAppError(id, error);
   }
+  // 4) Portal 附件：下载 -> 落库 user_file -> 抽取 fileContext。
+  //    任何单附件失败都只降级为 status-update 提示，不阻断文本问答。
+  let attachments: A2AAttachmentResult;
+  try {
+    attachments = await receiveA2AAttachments(messageRecord.parts, {
+      sql: state.sql,
+      storage: state.storage,
+      actor,
+      conversationId,
+    });
+  } catch (error) {
+    console.error('[documind][a2a] attachment receive failed: '
+      + (error instanceof Error ? error.message : String(error)));
+    attachments = { fileIds: [], fileContext: '', notices: ['附件接收失败，已忽略'] };
+  }
+
   const userMessage = messageRecord2User(conversationId, actor, content);
   const assistantMessageId = newUuid();
   const assistantMessage = assistantPlaceholder(conversationId, actor, userMessage.id, assistantMessageId);
   try {
-    await state.repository.createMessagePair(userMessage, assistantMessage, []);
+    await state.repository.createMessagePair(userMessage, assistantMessage, attachments.fileIds);
   } catch (error) {
     return rpcErrorFromAppError(id, error);
   }
@@ -185,6 +209,7 @@ export async function a2aStreamHandler(c: Context<AppEnv>): Promise<Response> {
       abandoned: false,
     };
     sendExecutionStarted(ctx, userMessage.id, assistantMessageId, content);
+    for (const notice of attachments.notices) sink.sendStatus(notice);
     try {
       await runAgentPipeline({
         repo: state.repository,
@@ -197,8 +222,8 @@ export async function a2aStreamHandler(c: Context<AppEnv>): Promise<Response> {
         assistantMessageId,
         originalQuery: content,
         effectiveKbIds,
-        fileIds: [],
-        fileContext: '',
+        fileIds: attachments.fileIds,
+        fileContext: attachments.fileContext,
         ctx,
         titleUpdate: null,
       });
