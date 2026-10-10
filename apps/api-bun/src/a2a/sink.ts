@@ -74,10 +74,12 @@ export class A2AFrameMapper {
         return [this.artifactFrame('answer', delta)];
       }
       case 'response.replace': {
+        // 内核用 replace 表示"用新正文覆盖已流式内容"（草稿 -> 最终答案）。
+        // A2A 用 append:false 表达同一语义，Portal 会重置该消息正文再展示。
         const content = stringField(payload, 'content') ?? '';
-        const suffix = appendableSuffix(this.text, content);
+        if (content === this.text) return [];
         this.text = content;
-        return suffix === '' ? [] : [this.artifactFrame('answer', suffix)];
+        return [this.artifactReplaceFrame('answer', content)];
       }
       case 'sources.reported':
         collectSources(payload, this.sources, this.sourceKeys);
@@ -113,6 +115,18 @@ export class A2AFrameMapper {
       final: true, status: { state: 'completed' },
     }));
     return frames;
+  }
+
+  private artifactReplaceFrame(artifactId: string, text: string): A2AFrame {
+    return this.result('artifact-update', {
+      kind: 'artifact-update', taskId: this.meta.taskId, contextId: this.meta.contextId,
+      append: false,
+      artifact: {
+        artifactId,
+        parts: [{ kind: 'text', text }],
+        metadata: { sources: this.sources },
+      },
+    });
   }
 
   private statusFrame(message: string): A2AFrame {
