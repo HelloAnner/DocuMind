@@ -38,8 +38,14 @@ export class SseSink {
   flush(): Promise<void> { return this.chain; }
 }
 
+/** 事件输出端口：SSE（SseSink）与 A2A（A2ASink）共用，管线只依赖该接口。 */
+export interface EventSink {
+  send(event: OutboundSseEvent): void;
+  flush(): Promise<void>;
+}
+
 export interface PipelineContext {
-  sink: SseSink;
+  sink: EventSink;
   protocol: SseProtocol;
   factory: RuntimeEventFactory;
   /** 管线被超时放弃后置 true，丢弃其残留事件（等价于 Rust drop 掉 future）。 */

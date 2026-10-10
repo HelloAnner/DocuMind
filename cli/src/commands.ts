@@ -8,6 +8,7 @@ import {
   type ParsedArgs,
   stringOption,
 } from "./args.ts";
+import { A2AClient, printA2AReport, printAgentCard } from "./a2a.ts";
 import { ChatService } from "./chat.ts";
 import { documentCommand, knowledgeBaseCommand } from "./admin_commands.ts";
 import {
@@ -70,6 +71,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "kb": return knowledgeBaseCommand(args, api, json);
     case "models": return modelsCommand(api, json);
     case "chat": return chatCommand(args, api, json);
+    case "a2a": return a2aCommand(args, api, json);
     case "files": return fileCommand(args, api, json);
     case "run": return runCommand(args, api, json);
     case "conversations": return conversationCommand(args, api, json);
@@ -627,6 +629,41 @@ async function fileCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
   throw new CliError(`未知 files 子命令: ${subcommand}`, 2);
 }
 
+
+async function a2aCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const subcommand = args.positionals[1] ?? "card";
+  const base = (stringOption(args, "url") ?? api.baseUrl).replace(/\/+$/, "");
+  const client = new A2AClient(base);
+  if (subcommand === "card" || subcommand === "ping") {
+    const card = await client.card();
+    if (json) printJson(card);
+    else printAgentCard(card);
+    return 0;
+  }
+  if (subcommand === "ask") {
+    const text = stringOption(args, "text") ?? args.positionals.slice(2).join(" ").trim();
+    if (!text) throw new CliError('a2a ask 需要 --text "..." 或位置参数问题', 2);
+    const ticket = stringOption(args, "ticket") ?? process.env.DOCUMIND_PORTAL_TICKET?.trim();
+    if (!ticket) {
+      throw new CliError("a2a ask 需要 --ticket 或 DOCUMIND_PORTAL_TICKET（Portal 一次性票据）", 2);
+    }
+    const contextId = stringOption(args, "context-id") ?? crypto.randomUUID();
+    const report = await client.ask({
+      ticket,
+      contextId,
+      text,
+      onStatus: (message) => { if (!json) process.stderr.write(`[状态] ${message}\n`); },
+      onDelta: (chunk) => { if (!json) process.stdout.write(chunk); },
+    });
+    if (json) printJson(report);
+    else {
+      if (report.text !== "") process.stdout.write("\n");
+      printA2AReport(report);
+    }
+    return 0;
+  }
+  throw new CliError(`未知 a2a 子命令: ${subcommand}（可用 card / ask）`, 2);
+}
 
 async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   if (booleanOption(args, "interactive")) {

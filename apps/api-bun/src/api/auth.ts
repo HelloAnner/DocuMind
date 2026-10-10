@@ -222,6 +222,69 @@ export async function resolvePortalTenant(sql: Sql, portal: PortalContext, creat
   return portal.tenant_id;
 }
 
+/** A2A：门户账号未与本地用户建立映射时抛出，handler 转成 409 JSON-RPC error。 */
+export class PortalAccountNotLinkedError extends Error {
+  readonly linkUrl: string;
+  constructor(linkUrl: string) {
+    super('门户账号尚未关联');
+    this.name = 'PortalAccountNotLinkedError';
+    this.linkUrl = linkUrl;
+  }
+}
+
+/** 未关联账号的引导链接：门户系统落地页。 */
+export function portalSystemEnterUrl(portalBaseUrl: string): string {
+  const base = portalBaseUrl.replace(/\/+$/, '');
+  return `${base}/api/portal/systems/documind/enter`;
+}
+
+/**
+ * A2A 专用身份解析：用 Portal 一次性票据换取 portal user/tenant，
+ * 只读地查 portal_identity_mapping 得到本地用户，不创建/更新任何身份。
+ * 未关联时抛 PortalAccountNotLinkedError（调用方返回 account_not_linked）。
+ */
+export async function resolveA2APortalActor(state: AppState, ticket: string): Promise<CurrentActor> {
+  const sql = state.sql;
+  if (!sql) throw AppError.unauthorized();
+  if (!/^[0-9a-f-]{36}:[^:\s]+$/i.test(ticket)) throw AppError.unauthorized();
+  const portal = await exchangePortalTicket(state, ticket);
+  validatePortalContext(portal);
+  const mappedTenant = await resolvePortalTenant(sql, portal, false);
+  const rows = mappedTenant === null ? [] : await sql`
+    SELECT pim.local_user_id AS id, u.status AS user_status,
+           tm.roles AS roles, tm.attributes AS attributes
+    FROM portal_identity_mapping pim
+    JOIN app_user u ON u.id = pim.local_user_id
+    JOIN tenant_member tm ON tm.tenant_id = pim.local_tenant_id
+      AND tm.user_id = pim.local_user_id AND tm.status = 'active'
+    WHERE pim.portal_user_id = ${portal.user_id}
+      AND pim.portal_tenant_id = ${portal.tenant_id}
+      AND pim.local_tenant_id = ${mappedTenant}
+    LIMIT 1
+  `;
+  if (!rows.length || String(rows[0]!.user_status) !== 'active') {
+    throw new PortalAccountNotLinkedError(portalSystemEnterUrl(state.config.portalBaseUrl));
+  }
+  const originRows = await sql`
+    SELECT origin FROM portal_tenant_mapping
+    WHERE portal_tenant_id = ${portal.tenant_id} AND tenant_id = ${mappedTenant}
+  `;
+  const attributes = (rows[0]!.attributes ?? {}) as { auth_provider?: string };
+  const effectiveRoles = portalMembershipRoles(
+    mapDocumindRoles(portal), String(originRows[0]?.origin ?? 'portal_created'),
+    rows[0]!.roles as string[] | undefined,
+    attributes.auth_provider === 'portal');
+  const effectivePermissions = intersectPermissions(
+    derivePermissions(effectiveRoles), mapPortalPermissions(portal.permissions ?? []));
+  const claims: Claims = {
+    sub: String(rows[0]!.id), email: portal.email ?? '', role: effectiveRoles[0]!,
+    scope: 'tenant', tenant_id: mappedTenant, sid: null,
+    exp: Math.floor(Date.now() / 1000) + 3600,
+    auth_source: 'portal', portal_permissions: effectivePermissions,
+  };
+  return actorFromClaims({ sql, config: state.config }, claims);
+}
+
 async function portalLinkHandler(c: import('hono').Context<AppEnv>) {
   const state = c.get('appState');
   if ((!state.config.portalAuthEnabled && state.config.authLoginMode !== 'portal') || !state.sql || !state.redis) throw AppError.unauthorized();

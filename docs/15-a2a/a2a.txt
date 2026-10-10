@@ -1,0 +1,95 @@
+DocuMind A2A 服务端
+===================
+状态: 已实现   端点: GET /.well-known/agent-card.json  POST /a2a
+
+一、用途
+  Portal 门户 /chat 页面 @Documind 时, Portal 后端以 A2A 协议调用本系统,
+  复用现有 pi core 对话内核, 流式返回答案与引用来源。
+
+二、整体链路 (ascii)
+  Portal /chat
+    |  POST /api/chat/stream  (@Documind)
+    v
+  Portal 后端 --签发一次性票据--> POST {DOCUMIND}/a2a   Authorization: Bearer <id:secret>
+                                     |
+                          (1) 校验票据: POST {PORTAL}/api/auth/exchange-ticket
+                                     |     {system_code:"documind", code:"<id:secret>"}
+                                     v
+                          (2) portal_user_id+portal_tenant_id 查 portal_identity_mapping
+                                     |  命中   -> 本地 user/tenant (权限=本地角色 ∩ 门户 grants)
+                                     |  未命中 -> 409 account_not_linked (+link_url)
+                                     v
+                          (3) contextId -> a2a_thread -> conversation_sessions
+                                     |
+                          (4) 复用 conversations_pipeline / pi core 执行
+                                     |
+                          (5) A2ASink: 内核事件 -> A2A SSE 帧
+                                     v
+  Portal <-- text/event-stream: task / status-update / artifact-update / completed
+
+三、端点
+  GET /.well-known/agent-card.json
+      200 JSON: name/description/url/version/capabilities/defaultInputModes/
+                defaultOutputModes/skills/securitySchemes/security
+      url 取请求 origin+前缀, 可用环境变量 DOCUMIND_PUBLIC_BASE_URL 覆盖
+
+  POST /a2a
+      Header: Authorization: Bearer <ticket>   Content-Type: application/json
+      Body:   {"jsonrpc":"2.0","id":"<id>","method":"message/stream",
+               "params":{"message":{"role":"user","messageId":"<uuid>",
+               "contextId":"<Portal 会话 id>","parts":[{"kind":"text","text":"问题"}]}}}
+      成功: 200 text/event-stream, 每帧 event: <name>\ndata: <json>\n\n
+
+四、SSE 事件 (data 是 JSON-RPC 响应, 客户端只读 result.*)
+  task            result.kind=task            id=TASK contextId=CTX status.state=submitted
+  status-update   result.kind=status-update   taskId contextId final=false
+                  status={state:"working", message:"正在检索文档"}
+  artifact-update result.kind=artifact-update taskId contextId append=true
+                  artifact={artifactId:"answer", parts:[{kind:"text",text:"正文增量"}]}
+                  artifact.metadata.sources=[{title,section,doc_id,quote,page_range,score}]
+                  (来源帧 artifactId="sources", parts=[], metadata.sources=[...])
+  completed       result.kind=status-update   taskId contextId final=true
+                  status={state:"completed"}
+
+五、内核事件 -> A2A 帧映射
+  execution.started        -> task + status-update(working, 正在检索文档)
+  response.stage           -> status-update(working, 阶段文案)
+  agent.query_understood   -> status-update(working, 正在理解问题)
+  response.delta           -> artifact-update(answer, 增量文本)
+  response.replace         -> artifact-update(answer, 未发送后缀)
+  sources.reported         -> 累计 sources (完成前一次性下发)
+  response.completed       -> artifact-update(sources) + completed
+  execution.completed      -> completed (兜底)
+  execution.failed         -> event: error (JSON-RPC error)
+  其余(thinking.delta/tool.call.*/usage.reported/conversation.title.updated) 忽略
+
+六、错误
+  账号未关联: HTTP 409
+    {"jsonrpc":"2.0","id":ID,"error":{"code":-32001,"message":"门户账号尚未关联",
+     "data":{"reason":"account_not_linked",
+             "link_url":"<portalBaseUrl>/api/portal/systems/documind/enter"}}}
+  其他: HTTP 4xx/5xx, 同形状 error, data.reason 为短标识
+    (unauthorized / forbidden / invalid_params / pipeline_error ...)
+  流中失败: 追加一帧 event: error 后关闭
+
+七、身份与权限
+  票据: Portal 一次性 <uuid>:<secret>, 60s 且单次消费。
+  映射: 只读查 portal_identity_mapping, 不创建/更新本地身份。
+  权限: 本地角色权限 ∩ 门户 grants, 至少需要 chat.ask。
+
+八、会话连续性
+  a2a_thread(portal_context_id PK, tenant_id, user_id, conversation_id)
+  同一 contextId 幂等复用同一条本地会话; 本地会话被删则重建并覆盖映射。
+
+九、CLI 验收
+  documind a2a card [--url http://123.57.255.204:8089/documind]
+  DOCUMIND_PORTAL_TICKET=<id:secret> documind a2a ask --text "@Documind 差旅报销标准" \
+      [--context-id <Portal 会话 id>] [--json]
+
+十、相关代码
+  apps/api-bun/src/a2a/mod.ts     路由 + AgentCard + JSON-RPC handler
+  apps/api-bun/src/a2a/sink.ts    内核事件 -> A2A 帧 (A2AFrameMapper/A2ASink)
+  apps/api-bun/src/a2a/thread.ts  contextId -> 本地会话
+  apps/api-bun/src/api/auth.ts    resolveA2APortalActor (票据->本地身份)
+  apps/api-bun/migrations/0037_a2a_thread.up.sql
+  cli/src/a2a.ts, cli/tests/a2a.test.ts

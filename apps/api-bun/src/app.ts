@@ -18,6 +18,7 @@ import {
   vectorDiagnosticsRouter,
 } from './api/mod.ts';
 import { createDocumindMcpEndpoint } from './mcp.ts';
+import { a2aRouter } from './a2a/mod.ts';
 
 /** 与 Rust 保持一致：这些端点不使用 ActorExtractor（自行鉴权或完全公开）。 */
 const PUBLIC_API_PATHS = new Set([
@@ -80,6 +81,8 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', externalApiRouter());
   api.route('/', conversationsRouter());
   api.route('/', sharesRouter());
+  // A2A：GET /.well-known/agent-card.json + POST /a2a（handler 内自行鉴权，不走 actor 中间件）
+  api.route('/', a2aRouter());
 
   const app = new Hono<AppEnv>();
   app.use('*', logger());

@@ -34,6 +34,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(CHAT_HELP);
     return;
   }
+  if (topic === "a2a") {
+    process.stdout.write(A2A_HELP);
+    return;
+  }
   if (topic === "vector") {
     process.stdout.write(VECTOR_HELP);
     return;
@@ -79,6 +83,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  invitation <subcommand>      邀请创建、校验、接受、重发与撤销\n` +
   `对话与评测\n` +
   `  chat|ask <问题>              真实 SSE 对话并合并落库 trace\n` +
+  `  a2a card|ask                 A2A：读取 AgentCard / 用 Portal 票据流式问答\n` +
   `  models                       列出可选模型与深度思考能力\n` +
   `  files list|upload|show|download|delete  管理当前用户隔离文件\n` +
   `  chat --interactive           多轮交互 REPL\n` +
@@ -96,7 +101,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  --json, -j                   机器可读 JSON 输出\n` +
   `  --help, -h                   查看帮助\n` +
   `  --version, -V                查看版本\n\n` +
-  `运行 documind help system|admin|chat|run|files|kb|documents|skills|vector 查看详细帮助。\n`;
+  `运行 documind help system|admin|chat|a2a|run|files|kb|documents|skills|vector 查看详细帮助。\n`;
 
 const SKILLS_HELP = `用法: documind skills <subcommand> [options]\n\n` +
   `  list [--search TEXT] | show <技能ID或名称>\n` +
@@ -163,6 +168,14 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --input-json <json|@file|->  用 JSON 提供 content/conversation_id/kb_ids\n` +
   `  --interactive, -i            多轮 REPL\n` +
   `  --quiet, -q                  只输出回答正文\n`;
+
+const A2A_HELP = `用法: documind a2a <subcommand> [options]\n\n` +
+  `  card [--url URL]             GET /.well-known/agent-card.json（默认用配置服务器地址）\n` +
+  `  ask --text "问题" [--ticket CODE] [--context-id ID] [--url URL]\n` +
+  `                              POST /a2a message/stream，流式打印正文与来源\n\n` +
+  `票据: --ticket 或环境变量 DOCUMIND_PORTAL_TICKET（Portal 一次性 <id>:<secret>）。\n` +
+  `同一 --context-id 复用远端同一条 DocuMind 本地会话。\n` +
+  `未关联账号时服务端返回 409 account_not_linked，CLI 会打印引导链接。\n`;
 
 const FILES_HELP = `用法: documind files <subcommand> [options]\n\n` +
   `  list [--conversation ID]     列出当前用户全部文件或指定会话文件\n` +
