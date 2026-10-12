@@ -50,13 +50,23 @@ if grep -qE '^SUPER_ADMIN_PASSWORD=1$|documind123' "$deploy"; then
 else
   ok "deploy.sh 无 1 / documind123 弱口令字面量"
 fi
-for key in SUPER_ADMIN_PASSWORD ENTERPRISE_ADMIN_PASSWORD STANDARD_USER_PASSWORD; do
+for key in ENTERPRISE_ADMIN_PASSWORD STANDARD_USER_PASSWORD; do
   if grep -q "resolve_strong_secret \"\$(remote_env_value $key)\"" "$deploy"; then
     ok "deploy.sh 对 $key 调用 resolve_strong_secret"
   else
     no "deploy.sh 未对 $key 调用 resolve_strong_secret"
   fi
 done
+if grep -q 'resolve_strong_secret "$(remote_env_value SUPER_ADMIN_PASSWORD)"' "$deploy"; then
+  ok "deploy.sh 默认对 SUPER_ADMIN_PASSWORD 调用 resolve_strong_secret"
+else
+  no "deploy.sh 默认未对 SUPER_ADMIN_PASSWORD 调用 resolve_strong_secret"
+fi
+if grep -q 'SUPER_ADMIN_ALLOW_WEAK' "$deploy" && grep -q 'seed_allow_weak' "$deploy"; then
+  ok "deploy.sh 支持显式 SUPER_ADMIN_ALLOW_WEAK 开关"
+else
+  no "deploy.sh 缺少显式弱口令开关"
+fi
 if grep -q 'SUPER_ADMIN_PASSWORD 仍为弱值，拒绝部署' "$deploy"; then
   ok "deploy.sh 在弱口令残留时拒绝部署"
 else
