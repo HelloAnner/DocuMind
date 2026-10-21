@@ -1,5 +1,6 @@
 // 移植自 apps/api-rs/src/lib.rs 的 run() 与路由装配
 import { Hono } from 'hono';
+import { portalFilesRouter } from './api/portal_files.ts';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { toAppError } from './errors.ts';
@@ -76,6 +77,7 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   api.route('/', adminSkillsRouter());
   api.route('/', documentsRouter());
   api.route('/', filesRouter());
+  api.route('/', portalFilesRouter());
   api.route('/', knowledgeRouter());
   api.route('/', historyRouter());
   api.route('/', externalApiRouter());
@@ -106,11 +108,11 @@ export async function createApp(config: AppConfig): Promise<{ app: Hono<AppEnv>;
   }));
   // Rust 里仅显式使用 ActorExtractor 的 handler 需要身份；下列端点自行鉴权或不鉴权
   app.use('/api/*', async (c, next) => {
-    if (isPublicApiPath(c.req.path)) return next();
+    if (isPublicApiPath(c.req.path) || /^\/(?:documind\/)?api\/portal\/files(?:\/[^/]+\/(?:content|preview))?$/.test(c.req.path)) return next();
     return actorMiddleware(c, next);
   });
   app.use('/documind/api/*', async (c, next) => {
-    if (isPublicApiPath(c.req.path)) return next();
+    if (isPublicApiPath(c.req.path) || /^\/(?:documind\/)?api\/portal\/files(?:\/[^/]+\/(?:content|preview))?$/.test(c.req.path)) return next();
     return actorMiddleware(c, next);
   });
 

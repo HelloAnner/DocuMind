@@ -1,0 +1,12 @@
+Portal 文件只读接口
+==================
+GET /api/portal/files?portal_user_id=UUID&portal_tenant_id=UUID&scope=personal|space
+分页 limit 1..100，cursor 数字偏移；返回 files、next_cursor。
+GET /api/portal/files/:id/content 或 preview，携带相同 Portal 身份参数。
+
+所有接口先验证 X-Portal-Internal-Token 与服务器 PORTAL_INTERNAL_TOKEN。
+不配置密钥时拒绝访问；不接受本地 tenant/user 参数；仅使用已验证的双映射。
+每次读取检查本地用户、企业和成员均 active，内容返回前再次检查。
+缺失映射返回409 portal_identity_unlinked；权限已撤销返回404。
+仅只读，不新增自动账号或邮箱关联。下载 no-store、nosniff、CSP sandbox。
+网络访问应通过服务器防火墙限制到 Portal 出口，应用不信任 X-Forwarded-For。
