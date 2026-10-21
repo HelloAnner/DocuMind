@@ -74,7 +74,9 @@ export function buildDockerArgs(
     '--pids-limit', '64',
     '--ulimit', 'nofile=128:128',
     '--ulimit', `fsize=${MAX_USER_FILE_BYTES}:${MAX_USER_FILE_BYTES}`,
-    '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m',
+    // mode=1777 不能省：容器以 65532:65532 运行，Docker 的 tmpfs 默认归 root，
+    // 不给 mode 的话沙箱内任何写 /tmp 的命令都会 Permission denied（podman 下不会）。
+    '--tmpfs', '/tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777',
     '--mount', `type=bind,src=${workspace},dst=/workspace`,
     '--workdir', '/workspace',
     '--entrypoint', '/bin/bash',
