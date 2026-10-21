@@ -579,100 +579,59 @@ ensure_ocr_dependencies() {
 ensure_office_preview_dependencies
 ensure_ocr_dependencies
 
-container_exists() {
-  docker container inspect "\$1" >/dev/null 2>&1
-}
-
-container_running() {
-  docker ps --format '{{.Names}}' | grep -qx "\$1"
-}
-
-if ! container_exists "\$pg_container"; then
-  docker run -d --name "\$pg_container" \
-    -e POSTGRES_USER=documind \
-    -e POSTGRES_PASSWORD=documind \
-    -e POSTGRES_DB="\$pg_database" \
-    -p 127.0.0.1:8100:5432 \
-    -v "\$remote_shared/postgres:/var/lib/postgresql/data" \
-    "\$postgres_image" >/dev/null
-elif ! container_running "\$pg_container"; then
-  docker start "\$pg_container" >/dev/null
+# 中间件统一由 deploy/compose.yaml 声明，不再逐条 docker run。
+# compose.env 是本脚本生成的中间件凭据唯一来源，与 \$remote_env 保持一致。
+script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
+source_compose="\$script_dir/../deploy/compose.yaml"
+if [[ ! -f "\$source_compose" ]]; then
+  echo "Missing deploy/compose.yaml in the release source tree" >&2
+  exit 1
 fi
-
-if ! container_exists "\$redis_container"; then
-  docker run -d --name "\$redis_container" \
-    -p 127.0.0.1:8101:6379 \
-    -v "\$remote_shared/redis:/data" \
-    "\$redis_image" redis-server --appendonly yes >/dev/null
-elif ! container_running "\$redis_container"; then
-  docker start "\$redis_container" >/dev/null
+if ! docker compose version >/dev/null 2>&1; then
+  echo "docker compose 不可用；DocuMind 中间件由 compose 管理，请先在服务器安装 Docker CE" >&2
+  exit 1
 fi
+install -m 644 "\$source_compose" "\$remote_shared/compose.yaml"
+compose_file="\$remote_shared/compose.yaml"
+compose_env="\$remote_shared/compose.env"
 
-if ! container_exists "\$rabbitmq_container"; then
-  docker run -d --name "\$rabbitmq_container" \
-    -p 127.0.0.1:8102:5672 \
-    -p 127.0.0.1:8103:15672 \
-    -v "\$remote_shared/rabbitmq:/var/lib/rabbitmq" \
-    "\$rabbitmq_image" >/dev/null
-elif ! container_running "\$rabbitmq_container"; then
-  docker start "\$rabbitmq_container" >/dev/null
-fi
+install -m 600 /dev/null "\$compose_env"
+cat > "\$compose_env" <<COMPOSEENV
+POSTGRES_USER=\$pg_user
+POSTGRES_PASSWORD=documind
+POSTGRES_DB=\$pg_database
+MINIO_ROOT_USER=\$minio_access_key
+MINIO_ROOT_PASSWORD=\$minio_secret_key
+OBJECT_STORAGE_BUCKET=\$minio_bucket
+ES_JAVA_OPTS=-Xms512m -Xmx512m
+POSTGRES_IMAGE=\$postgres_image
+REDIS_IMAGE=\$redis_image
+RABBITMQ_IMAGE=\$rabbitmq_image
+ELASTICSEARCH_IMAGE=\$es_image
+MINIO_IMAGE=\$minio_image
+COMPOSEENV
 
-if ! container_exists "\$es_container"; then
-  docker run -d --name "\$es_container" \
-    -e discovery.type=single-node \
-    -e xpack.security.enabled=false \
-    -e ES_JAVA_OPTS='-Xms512m -Xmx512m' \
-    -p 127.0.0.1:8104:9200 \
-    -v "\$remote_shared/elasticsearch:/usr/share/elasticsearch/data" \
-    "\$es_image" >/dev/null
-elif ! container_running "\$es_container"; then
-  docker start "\$es_container" >/dev/null
-fi
+docker compose --env-file "\$compose_env" -f "\$compose_file" up -d
 
-if container_exists "\$minio_container"; then
-  configured_user="\$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "\$minio_container" \
-    | grep '^MINIO_ROOT_USER=' | tail -1 | cut -d= -f2-)"
-  configured_password="\$(docker inspect --format '{{range .Config.Env}}{{println .}}{{end}}' "\$minio_container" \
-    | grep '^MINIO_ROOT_PASSWORD=' | tail -1 | cut -d= -f2-)"
-  if [[ "\$configured_user" != "\$minio_access_key" || "\$configured_password" != "\$minio_secret_key" ]]; then
-    docker rm -f "\$minio_container" >/dev/null
+for _ in \$(seq 1 120); do
+  if docker exec "\$pg_container" pg_isready -U "\$pg_user" -d "\$pg_database" >/dev/null 2>&1 &&
+     docker exec "\$redis_container" redis-cli -n 0 ping >/dev/null 2>&1 &&
+     docker exec "\$rabbitmq_container" rabbitmq-diagnostics -q ping >/dev/null 2>&1 &&
+     curl -fsS http://127.0.0.1:8104 >/dev/null 2>&1 &&
+     curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null 2>&1; then
+    break
   fi
-fi
-if ! container_exists "\$minio_container"; then
-  docker run -d --name "\$minio_container" \
-    -e MINIO_ROOT_USER="\$minio_access_key" \
-    -e MINIO_ROOT_PASSWORD="\$minio_secret_key" \
-    -p 127.0.0.1:9010:9000 \
-    -p 127.0.0.1:9011:9001 \
-    -v "\$remote_shared/minio:/data" \
-    "\$minio_image" server /data --console-address ':9001' >/dev/null
-elif ! container_running "\$minio_container"; then
-  docker start "\$minio_container" >/dev/null
-fi
+  sleep 1
+done
 
 docker exec "\$pg_container" pg_isready -U "\$pg_user" -d "\$pg_database" >/dev/null
 docker exec "\$redis_container" redis-cli -n 0 ping >/dev/null
 docker exec "\$rabbitmq_container" rabbitmq-diagnostics -q ping >/dev/null
-for _ in \$(seq 1 60); do
-  if curl -fsS http://127.0.0.1:8104 >/dev/null 2>&1; then break; fi
-  sleep 1
-done
 curl -fsS http://127.0.0.1:8104 >/dev/null
-for _ in \$(seq 1 60); do
-  if curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null 2>&1; then break; fi
-  sleep 1
-done
 curl -fsS http://127.0.0.1:9010/minio/health/live >/dev/null
-docker exec \
-  -e MINIO_USER="\$minio_access_key" \
-  -e MINIO_PASSWORD="\$minio_secret_key" \
-  -e MINIO_BUCKET="\$minio_bucket" \
-  "\$minio_container" sh -c '
-    mc alias set local http://127.0.0.1:9000 "\$MINIO_USER" "\$MINIO_PASSWORD" >/dev/null &&
-    mc mb --ignore-existing "local/\$MINIO_BUCKET" >/dev/null &&
-    mc stat "local/\$MINIO_BUCKET" >/dev/null
-  '
+
+# bucket 幂等创建（minio-init 用独立的 mc 镜像，不依赖 minio 镜像里是否带 mc）
+docker compose --env-file "\$compose_env" -f "\$compose_file" --profile init up minio-init
 
 printf '%s\n' \
   "CREATE SCHEMA IF NOT EXISTS documind AUTHORIZATION \$pg_user;" \

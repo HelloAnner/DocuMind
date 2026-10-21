@@ -225,9 +225,9 @@ ssh documind 'bash -lc "tail -n 200 /opt/documind/shared/logs/documind-8089.log"
 服务器查询命令：
 
 ```bash
-ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select parse_status, count(*) docs, sum(chunk_count) chunks, sum(table_count) tables from documind.documents group by parse_status order by parse_status;\""'
+ssh documind 'bash -lc "docker exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select parse_status, count(*) docs, sum(chunk_count) chunks, sum(table_count) tables from documind.documents group by parse_status order by parse_status;\""'
 
-ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select status, embedding_model, count(*) from documind.chunk_embeddings group by status, embedding_model order by count desc;\""'
+ssh documind 'bash -lc "docker exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select status, embedding_model, count(*) from documind.chunk_embeddings group by status, embedding_model order by count desc;\""'
 
 ssh documind 'bash -lc "curl -fsS http://127.0.0.1:8104/_cat/indices?v"'
 ```
@@ -300,7 +300,7 @@ cargo test --workspace --no-fail-fast
 服务器数据验证：
 
 ```bash
-ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select title, file_type, parse_status, chunk_count, table_count, uploaded_at from documind.documents order by uploaded_at desc limit 20;\""'
+ssh documind 'bash -lc "docker exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select title, file_type, parse_status, chunk_count, table_count, uploaded_at from documind.documents order by uploaded_at desc limit 20;\""'
 ```
 
 验收标准：
@@ -626,7 +626,7 @@ rg -n "const mock|mock[A-Z]" apps/web/components/views -S
 ```bash
 make status
 make health
-ssh documind 'bash -lc "podman ps --format \"table {{.Names}}\t{{.Status}}\t{{.Ports}}\" | grep documind"'
+ssh documind 'bash -lc "docker ps --format \"table {{.Names}}\t{{.Status}}\t{{.Ports}}\" | grep documind"'
 ssh documind 'bash -lc "df -h /opt/documind /opt/documind/shared || true"'
 ssh documind 'bash -lc "du -sh /opt/documind/shared/* 2>/dev/null | sort -h"'
 ssh documind 'bash -lc "tail -n 300 /opt/documind/shared/logs/documind-8089.log"'
@@ -815,7 +815,7 @@ ssh documind 'bash -lc "tail -f /opt/documind/shared/logs/documind-8089.log"'
 验收后查询数据：
 
 ```bash
-ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select count(*) conversations from documind.conversation_sessions; select count(*) messages from documind.conversation_messages; select count(*) feedback from documind.conversation_feedback;\""'
+ssh documind 'bash -lc "docker exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select count(*) conversations from documind.conversation_sessions; select count(*) messages from documind.conversation_messages; select count(*) feedback from documind.conversation_feedback;\""'
 ```
 
 Office Preview 与 OCR 的可重复服务器 smoke：
@@ -891,7 +891,7 @@ BASE_URL=http://123.57.255.204:8089 make release-gate
 make status
 make health
 ssh documind 'bash -lc "tail -n 500 /opt/documind/shared/logs/documind-8089.log"'
-ssh documind 'bash -lc "podman exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select parse_status, count(*) from documind.documents group by parse_status order by parse_status;\""'
+ssh documind 'bash -lc "docker exec documind-postgres psql -U documind -d documind_dev -P pager=off -c \"select parse_status, count(*) from documind.documents group by parse_status order by parse_status;\""'
 ssh documind 'bash -lc "curl -fsS http://127.0.0.1:8104/_cat/indices?v"'
 ```
 
