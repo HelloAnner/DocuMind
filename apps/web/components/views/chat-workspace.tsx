@@ -454,6 +454,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   useEffect(() => {
     if (!mentionOpen) return;
     let cancelled = false;
+    setMentionFiles({personal:[],space:[]});
     setMentionStatus("loading");
     Promise.allSettled([listFiles(undefined, "personal"), listFiles(undefined, "space")])
       .then(([personal, space]) => {
@@ -562,7 +563,8 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     mentionFlat.length === 0 ? 0 : Math.min(mentionIndex, mentionFlat.length - 1);
 
   const chooseMention = (file: ChatFile) => {
-    addReference(file);
+    if(mentionStatus!=="ready")return;
+    if(!addReference(file)){window.alert("附件数量已达上限，请先移除一个附件");return;}
     setInput((current) => removeFileMention(current));
     setMention(null);
     setMentionIndex(0);

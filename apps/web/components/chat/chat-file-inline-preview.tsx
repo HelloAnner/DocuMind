@@ -52,6 +52,9 @@ export function ChatFileInlinePreview({ file }: { file: ChatFile }) {
       return;
     }
 
+    if(currentKind === "text" && !isTextPreviewWithinLimit(byteLengthOf(file))){
+      setState({status:"text-too-large",byteLength:byteLengthOf(file)});return;
+    }
     setState({ status: "loading" });
     fetchFileDownloadBlob(file.id)
       .then(async (blob) => {

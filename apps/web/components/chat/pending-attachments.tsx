@@ -222,8 +222,10 @@ export function useAttachmentQueue(
   };
 
   const addReference = (uploaded: ChatFile) => {
+    if(attachments.some(item=>item.uploaded?.id===uploaded.id))return true;
+    if(attachments.filter(item=>item.status!=="error").length>=MAX_MESSAGE_FILES)return false;
     setAttachments((current) => {
-      if (current.some((item) => item.uploaded?.id === uploaded.id) || current.length >= MAX_MESSAGE_FILES) return current;
+      if (current.some((item) => item.uploaded?.id === uploaded.id) || current.filter(item=>item.status!=="error").length >= MAX_MESSAGE_FILES) return current;
       return [
         ...current,
         {
@@ -237,6 +239,7 @@ export function useAttachmentQueue(
         },
       ];
     });
+    return true;
   };
 
   return {
