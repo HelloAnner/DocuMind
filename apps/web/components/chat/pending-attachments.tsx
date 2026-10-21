@@ -81,7 +81,8 @@ export function PendingAttachmentList({
 
 export function useAttachmentQueue(
   conversationId?: string | null,
-  onUploaded?: (attachment: PendingAttachment) => void
+  onUploaded?: (attachment: PendingAttachment) => void,
+  scope: "personal" | "space" = "personal"
 ) {
   const conversationIdRef = useRef(conversationId);
   conversationIdRef.current = conversationId;
@@ -132,7 +133,8 @@ export function useAttachmentQueue(
       file,
       (progress: FileUploadProgress) => update(key, { progress: progress.percent }),
       controller.signal,
-      conversationIdRef.current ?? undefined
+      scope === "space" ? undefined : conversationIdRef.current ?? undefined,
+      scope
     )
       .then((uploaded) => {
         abortRef.current.delete(key);
@@ -210,9 +212,18 @@ export function useAttachmentQueue(
     ]);
   };
 
+  const addReference = (uploaded: ChatFile) => {
+    setAttachments((current) => {
+      if (current.some((item) => item.uploaded?.id === uploaded.id) || current.length >= MAX_MESSAGE_FILES) return current;
+      return [...current, { key: `ref-${uploaded.id}`, file: new File([], uploaded.name, { type: uploaded.mime_type }),
+        status: "ready", progress: 100, uploaded }];
+    });
+  };
+
   return {
     attachments,
     addFiles,
+    addReference,
     removeAttachment,
     retryAttachment,
     consumeReady,

@@ -148,7 +148,7 @@ export function ConversationFilesPanel({
 }: ConversationFilesPanelProps) {
   const [state, setState] = useState<FileListState>({ status: "idle", files: [] });
   const [myState, setMyState] = useState<ChatFileListState>({ status: "idle", files: [] });
-  const [tab, setTab] = useState<"conversation" | "mine">("conversation");
+  const [tab, setTab] = useState<"conversation" | "mine" | "space">("mine");
   const [retryToken, setRetryToken] = useState(0);
   const [myRetryToken, setMyRetryToken] = useState(0);
   const [maximized, setMaximized] = useState(false);
@@ -165,7 +165,7 @@ export function ConversationFilesPanel({
   } = useAttachmentQueue(conversationId, (attachment) => {
     removeUpload(attachment.key);
     setMyRetryToken((value) => value + 1);
-  });
+  }, tab === "space" ? "space" : "personal");
 
   useEffect(() => {
     setState({ status: "idle", files: [] });
@@ -174,7 +174,7 @@ export function ConversationFilesPanel({
   useEffect(() => {
     if (!open) {
       setMaximized(false);
-      setTab("conversation");
+      setTab("mine");
       return;
     }
     const panel = panelRef.current;
@@ -234,10 +234,10 @@ export function ConversationFilesPanel({
   }, [conversationId, open, refreshKey, retryToken]);
 
   useEffect(() => {
-    if (!open || tab !== "mine") return;
+    if (!open || tab === "conversation") return;
     let cancelled = false;
-    setMyState((current) => ({ status: "loading", files: current.files }));
-    listFiles()
+    setMyState({ status: "loading", files: [] });
+    listFiles(undefined, tab === "space" ? "space" : "personal")
       .then((response) => {
         if (!cancelled) setMyState({ status: "ready", files: response.files });
       })
@@ -345,7 +345,7 @@ export function ConversationFilesPanel({
                 aria-label="刷新文件列表"
                 className="dm-right-rail-maximize"
                 onClick={() => {
-                  if (tab === "mine") setMyRetryToken((value) => value + 1);
+                  if (tab !== "conversation") setMyRetryToken((value) => value + 1);
                   else setRetryToken((value) => value + 1);
                 }}
                 title="刷新"
@@ -387,6 +387,7 @@ export function ConversationFilesPanel({
                 options={[
                   { value: "conversation", label: "会话引用" },
                   { value: "mine", label: "我的文件" },
+                  { value: "space", label: "空间文件" },
                 ]}
                 value={tab}
               />

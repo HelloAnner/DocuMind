@@ -146,8 +146,10 @@ export async function getMessages(conversationId: string): Promise<MessageListRe
 }
 
 
-export async function listFiles(conversationId?: string): Promise<ChatFileListResponse> {
-  const qs = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+export async function listFiles(conversationId?: string, scope: "personal" | "space" = "personal"): Promise<ChatFileListResponse> {
+  const params = new URLSearchParams({ scope });
+  if (conversationId) params.set("conversation_id", conversationId);
+  const qs = `?${params}`;
   const response = await fetchJson<{ items: ChatFile[] }>(`/api/files${qs}`);
   return { files: response.items };
 }
@@ -254,7 +256,8 @@ export function uploadChatFile(
   file: File,
   onProgress: (progress: FileUploadProgress) => void,
   signal?: AbortSignal,
-  conversationId?: string
+  conversationId?: string,
+  scope: "personal" | "space" = "personal"
 ): Promise<ChatFile> {
   const preflight = uploadPreflightError(file);
   if (preflight) return Promise.reject(new Error(preflight));
@@ -262,7 +265,7 @@ export function uploadChatFile(
   form.set("file", file);
   if (conversationId) form.set("conversation_id", conversationId);
   return uploadWithProgress<ChatFile>({
-    url: `${BASE}/api/files`,
+    url: `${BASE}/api/files?scope=${scope}`,
     form,
     byteLength: file.size,
     onProgress,
