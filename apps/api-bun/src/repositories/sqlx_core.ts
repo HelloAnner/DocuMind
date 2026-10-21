@@ -316,17 +316,21 @@ export class SqlxConversationCore {
     await this.pool.begin(async (tx) => {
       await insertMessage(tx, userMessage);
       if (fileIds.length > 0) {
-        // 文件归属最新的会话：同一份用户文件可以在别的会话里继续使用（重新绑定），
-        // 否则第二次 chat --file-id 会误报“文件不存在或无权限”。
-        const bound = await tx.unsafe(
-          `UPDATE user_file SET conversation_id = $1, updated_at = NOW()
-           WHERE tenant_id = $2 AND user_id = $3 AND id = ANY($4::uuid[])
-           RETURNING id`,
-          [userMessage.conversation_id, userMessage.tenant_id, userMessage.user_id, fileIds],
+        const visible = await tx.unsafe(
+          `SELECT id FROM user_file
+           WHERE tenant_id = $1 AND (scope = 'space' OR user_id = $2)
+             AND id = ANY($3::uuid[]) FOR UPDATE`,
+          [userMessage.tenant_id, userMessage.user_id, fileIds],
         );
-        if (bound.length !== fileIds.length) {
+        if (visible.length !== fileIds.length) {
           throw AppError.notFound('FILE_NOT_FOUND', '文件不存在或无权限');
         }
+        // 只重绑自己的个人文件；空间文件不能被某个成员占用到其会话。
+        await tx.unsafe(
+          `UPDATE user_file SET conversation_id = $1, updated_at = NOW()
+           WHERE tenant_id = $2 AND user_id = $3 AND scope = 'personal' AND id = ANY($4::uuid[])`,
+          [userMessage.conversation_id, userMessage.tenant_id, userMessage.user_id, fileIds],
+        );
         await tx.unsafe(
           `INSERT INTO conversation_message_file (message_id, file_id, tenant_id, user_id)
            SELECT $1, id, $2, $3 FROM unnest($4::uuid[]) AS id`,

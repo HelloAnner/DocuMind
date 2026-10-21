@@ -13,9 +13,10 @@ const FILE = '00000000-0000-4000-8000-000000000016';
 describe('SqlxConversationCore.createMessagePair', () => {
   for (const [failAt, label] of [
     [1, 'user message'],
-    [2, 'file binding'],
-    [3, 'attachment link'],
-    [4, 'assistant placeholder'],
+    [2, 'file visibility'],
+    [3, 'file binding'],
+    [4, 'attachment link'],
+    [5, 'assistant placeholder'],
   ] as const) {
     test(`rolls back every write when ${label} fails`, async () => {
       const { sql, state } = transactionalSql(failAt);
@@ -64,7 +65,13 @@ function transactionalSql(failAt: number | null): { sql: Sql; state: Transaction
             staged.messages.push(String(values[0]));
             return [];
           }
+          if (query.startsWith('SELECT id FROM user_file')) {
+            expect(query).toContain("(scope = 'space' OR user_id = $2)");
+            expect(query).toContain('FOR UPDATE');
+            return [{ id: FILE }];
+          }
           if (query.startsWith('UPDATE user_file SET conversation_id')) {
+            expect(query).toContain("scope = 'personal'");
             staged.conversationId = String(values[0]);
             return [{ id: FILE }];
           }
