@@ -33,6 +33,12 @@ function input(messageId?: string) {
 }
 
 describe('user file object consistency', () => {
+  test('shared input cannot be overwritten by sandbox persistence', async () => {
+    const file = { ...storedFile(OLD_KEY), scope: 'space' as const };
+    await expect(updateStoredUserFile(
+      {} as Sql, storageStub({}), file, new TextEncoder().encode('changed'), MESSAGE,
+    )).rejects.toThrow('空间文件作为只读输入');
+  });
   test('stalled object upload never holds a SQL transaction', async () => {
     let transactionStarts = 0;
     let rejectPut!: (error: Error) => void;

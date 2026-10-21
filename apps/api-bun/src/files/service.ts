@@ -274,11 +274,12 @@ export async function queryMessageFiles(
 ): Promise<UserFile[]> {
   const rows = await sql.unsafe(
     `SELECT f.id, f.tenant_id, f.user_id, f.conversation_id, f.name, f.path,
-       f.mime_type, f.size_bytes, f.source, f.storage_key, f.extracted_text,
+       f.mime_type, f.size_bytes, f.source, f.scope, f.storage_key, f.extracted_text,
        f.extraction_truncated, f.created_at, f.updated_at
      FROM conversation_message_file mf
-     JOIN user_file f ON f.id = mf.file_id AND f.tenant_id = mf.tenant_id AND f.user_id = mf.user_id
+     JOIN user_file f ON f.id = mf.file_id AND f.tenant_id = mf.tenant_id
      WHERE mf.message_id = $1 AND mf.tenant_id = $2 AND mf.user_id = $3
+       AND (f.scope = 'space' OR f.user_id = $3)
      ORDER BY mf.created_at, f.path`,
     [messageId, tenantId, userId],
   );
@@ -293,6 +294,9 @@ export async function updateStoredUserFile(
   bytes: Uint8Array,
   messageId: string,
 ): Promise<StoredUserFile> {
+  if (file.scope !== 'personal') {
+    throw AppError.badRequest('SHARED_FILE_READ_ONLY', '空间文件作为只读输入，修改结果必须保存为个人文件');
+  }
   if (bytes.byteLength > MAX_USER_FILE_BYTES) {
     throw AppError.badRequest('FILE_TOO_LARGE', '单个用户文件不得超过 25 MB');
   }
@@ -310,7 +314,7 @@ export async function updateStoredUserFile(
          updated_at = NOW()
        WHERE id = $4 AND tenant_id = $5 AND user_id = $6
        RETURNING id, tenant_id, user_id, conversation_id, name, path, mime_type,
-         size_bytes, source, storage_key, extracted_text, extraction_truncated,
+         size_bytes, source, scope, storage_key, extracted_text, extraction_truncated,
          created_at, updated_at`,
       [bytes.byteLength, mimeTypeForPath(file.path), storageKey,
         file.id, file.tenant_id, file.user_id],

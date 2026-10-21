@@ -1,7 +1,7 @@
 import { posix } from 'node:path';
 import { Hono, type Context } from 'hono';
 import type { Sql } from 'postgres';
-import { isDocumindAdmin, requirePermission } from '../auth/permissions.ts';
+import { requirePermission } from '../auth/permissions.ts';
 import { AppError } from '../errors.ts';
 import { requireScope } from './external_api.ts';
 import type { AppEnv } from '../http/types.ts';
@@ -114,7 +114,8 @@ async function deleteFile(c: Context<AppEnv>): Promise<Response> {
     actor.tenant_id,
     actor.user_id,
     id,
-    actor.is_super_admin || isDocumindAdmin(actor.roles),
+    actor.is_super_admin || actor.roles.some((role) =>
+      ['enterprise_admin', 'tenant_owner', 'tenant_admin'].includes(role)),
   );
   return c.json({ id, status: 'deleted' });
 }

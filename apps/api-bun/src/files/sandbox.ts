@@ -98,7 +98,9 @@ export async function runBashSandbox(request: BashSandboxRequest): Promise<BashS
     await chmod(workspace, 0o777);
     for (const fileId of request.fileIds) {
       const file = await getOwnedUserFile(request.sql, request.tenantId, request.userId, fileId);
-      if (file.conversation_id !== request.conversationId) throw new Error('file is not associated with this conversation');
+      if (file.scope === 'personal' && file.conversation_id && file.conversation_id !== request.conversationId) {
+        throw new Error('file is not associated with this conversation');
+      }
       const bytes = await withObjectStorageTimeout(
         'get', (signal) => request.storage.get(file.storage_key, signal),
       );
@@ -174,10 +176,12 @@ async function synchronizeWorkspace(
   for (const { path, bytes } of outputs) {
     const original = originals.get(path);
     if (original?.digest === digest(bytes)) continue;
-    const storedPath = original ? path : sandboxOutputPath(request, path);
-    const stored = original
+    const writableOriginal = original?.file.scope === 'personal' && original.file.user_id === request.userId
+      ? original : undefined;
+    const storedPath = writableOriginal ? path : sandboxOutputPath(request, path);
+    const stored = writableOriginal
       ? await updateStoredUserFile(
-        request.sql, request.storage, original.file, bytes, request.assistantMessageId,
+        request.sql, request.storage, writableOriginal.file, bytes, request.assistantMessageId,
       )
       : await createStoredUserFile(request.sql, request.storage, {
         tenantId: request.tenantId,
