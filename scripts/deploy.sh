@@ -29,6 +29,9 @@ REMOTE_RABBITMQ_IMAGE="${REMOTE_RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/
 REMOTE_ES_IMAGE="${REMOTE_ES_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}"
 REMOTE_MINIO_IMAGE="${REMOTE_MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}"
 REMOTE_BASH_RUNNER_IMAGE="${REMOTE_BASH_RUNNER_IMAGE:-documind-bash-runner:latest}"
+# 中间件 compose 声明。远端块由 `bash -s` 通过管道执行，那里没有 BASH_SOURCE，
+# 所以路径必须在外层算好后传进去。
+SOURCE_COMPOSE="${SOURCE_COMPOSE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/deploy/compose.yaml}"
 
 if [[ "$DEPLOY_LOCAL_SERVER" != "1" && "$DEPLOY_HOST" != "documind" && "${ALLOW_CUSTOM_DEPLOY_HOST:-0}" != "1" ]]; then
   echo "Refusing non-default deploy host: $DEPLOY_HOST"
@@ -581,10 +584,9 @@ ensure_ocr_dependencies
 
 # 中间件统一由 deploy/compose.yaml 声明，不再逐条 docker run。
 # compose.env 是本脚本生成的中间件凭据唯一来源，与 \$remote_env 保持一致。
-script_dir="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)"
-source_compose="\$script_dir/../deploy/compose.yaml"
+source_compose='$SOURCE_COMPOSE'
 if [[ ! -f "\$source_compose" ]]; then
-  echo "Missing deploy/compose.yaml in the release source tree" >&2
+  echo "Missing deploy/compose.yaml: \$source_compose" >&2
   exit 1
 fi
 if ! docker compose version >/dev/null 2>&1; then
