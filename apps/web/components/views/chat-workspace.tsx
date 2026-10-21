@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -28,12 +28,29 @@ import {
 } from "@/components/chat/document-preview";
 import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
 import { PendingAttachmentList, useAttachmentQueue } from "@/components/chat/pending-attachments";
+import {
+  FileMentionPicker,
+  type MentionFileGroup,
+} from "@/components/chat/file-mention-picker";
+import {
+  findFileMention,
+  matchesFileQuery,
+  nextMentionIndex,
+  removeFileMention,
+  type FileMentionTrigger,
+} from "@/components/chat/file-preview-utils";
 import { useConversation } from "@/components/providers/conversation-provider";
-import type { Citation, Message } from "@/lib/types";
+import type { ChatFile, Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { AgentOrb } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
-import { createConversationShare, getChatModels, type ChatModelOption, type KnowledgeBase } from "@/lib/api";
+import {
+  createConversationShare,
+  getChatModels,
+  listFiles,
+  type ChatModelOption,
+  type KnowledgeBase,
+} from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
 
 const suggestions = [
@@ -371,6 +388,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const {
     attachments,
     addFiles,
+    addReference,
     removeAttachment,
     retryAttachment,
     consumeReady,
@@ -378,8 +396,19 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     uploadingCount,
   } = useAttachmentQueue(currentId);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const composerRef = useRef<HTMLDivElement | null>(null);
   const dragDepthRef = useRef(0);
   const [dragActive, setDragActive] = useState(false);
+  const [mention, setMention] = useState<FileMentionTrigger | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [mentionFiles, setMentionFiles] = useState<{
+    personal: ChatFile[];
+    space: ChatFile[];
+  }>({ personal: [], space: [] });
+  const [mentionStatus, setMentionStatus] = useState<"idle" | "loading" | "ready" | "failed">(
+    "idle"
+  );
+  const mentionOpen = mention !== null;
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
   const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
@@ -418,7 +447,44 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
 
   useEffect(() => {
     setPreviewTarget(null);
+    setMention(null);
   }, [currentId]);
+
+  // @ 选择器每次打开时刷新个人/空间文件，避免显示本次会话里已上传或删除的旧列表。
+  useEffect(() => {
+    if (!mentionOpen) return;
+    let cancelled = false;
+    setMentionStatus("loading");
+    Promise.allSettled([listFiles(undefined, "personal"), listFiles(undefined, "space")])
+      .then(([personal, space]) => {
+        if (cancelled) return;
+        if (personal.status === "rejected" && space.status === "rejected") {
+          setMentionStatus("failed");
+          return;
+        }
+        setMentionFiles({
+          personal: personal.status === "fulfilled" ? personal.value.files : [],
+          space: space.status === "fulfilled" ? space.value.files : [],
+        });
+        setMentionStatus("ready");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mentionOpen]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mention?.query]);
+
+  useEffect(() => {
+    if (!mentionOpen) return;
+    const closeOutside = (event: PointerEvent) => {
+      if (!composerRef.current?.contains(event.target as Node)) setMention(null);
+    };
+    document.addEventListener("pointerdown", closeOutside);
+    return () => document.removeEventListener("pointerdown", closeOutside);
+  }, [mentionOpen]);
 
   useEffect(() => {
     if (loading || messages.length === 0) return;
@@ -472,9 +538,40 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     setShowScrollToBottom(distance > 100);
   };
 
+  const mentionGroups = useMemo<MentionFileGroup[]>(() => {
+    const query = mention?.query ?? "";
+    return [
+      {
+        key: "personal",
+        title: "个人文件",
+        files: mentionFiles.personal.filter((file) => matchesFileQuery(file.name, query)),
+      },
+      {
+        key: "space",
+        title: "空间文件",
+        files: mentionFiles.space.filter((file) => matchesFileQuery(file.name, query)),
+      },
+    ];
+  }, [mention, mentionFiles]);
+
+  const mentionFlat = useMemo(
+    () => mentionGroups.flatMap((group) => group.files),
+    [mentionGroups]
+  );
+  const activeMentionIndex =
+    mentionFlat.length === 0 ? 0 : Math.min(mentionIndex, mentionFlat.length - 1);
+
+  const chooseMention = (file: ChatFile) => {
+    addReference(file);
+    setInput((current) => removeFileMention(current));
+    setMention(null);
+    setMentionIndex(0);
+  };
+
   const handleSend = async () => {
     const text = input.trim();
     if (!text || uploadingCount > 0) return;
+    setMention(null);
     const ready = consumeReady();
     setInput("");
     const accepted = await sendMessage(
@@ -497,6 +594,31 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // @ 选择器打开时，Enter 永远不能落到发送逻辑上：即使列表为空或仍在加载。
+    if (mentionOpen && !isComposing) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const file = mentionFlat[activeMentionIndex];
+        if (file) chooseMention(file);
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setMentionIndex(
+          nextMentionIndex(
+            activeMentionIndex,
+            mentionFlat.length,
+            e.key === "ArrowDown" ? 1 : -1
+          )
+        );
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setMention(null);
+        return;
+      }
+    }
     if (isComposing) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -652,6 +774,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
           <div className="dm-composer">
             <div
               className={`dm-composer-box ${dragActive ? "dm-drag-active" : ""}`}
+              ref={composerRef}
               onDragEnter={(event) => {
                 event.preventDefault();
                 if (!event.dataTransfer?.types.includes("Files")) return;
@@ -687,7 +810,13 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                   aria-label="消息输入框"
                   placeholder="描述你的需求，或 @ 引用文件"
                   value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setInput(value);
+                    const cursor = e.target.selectionStart ?? value.length;
+                    // 只在光标位于末尾且末尾是 @ 触发词时打开选择器。
+                    setMention(cursor === value.length ? findFileMention(value) : null);
+                  }}
                   onKeyDown={handleKeyDown}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
@@ -701,6 +830,16 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                   rows={1}
                 />
               </div>
+              {mentionOpen ? (
+                <FileMentionPicker
+                  groups={mentionGroups}
+                  onHover={setMentionIndex}
+                  onSelect={chooseMention}
+                  query={mention?.query ?? ""}
+                  selectedIndex={activeMentionIndex}
+                  status={mentionStatus}
+                />
+              ) : null}
               <div className="dm-composer-toolbar">
                 <div className="dm-composer-tools">
                   <input

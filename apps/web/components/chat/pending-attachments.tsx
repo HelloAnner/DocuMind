@@ -20,6 +20,8 @@ export interface PendingAttachment {
   uploaded?: ChatFile;
   error?: string;
   retryable?: boolean;
+  /** 从文件列表/@ 选择器引用的已有文件：没有本地字节，大小只取服务端元数据。 */
+  reference?: boolean;
 }
 
 interface PendingAttachmentListProps {
@@ -58,6 +60,13 @@ export function PendingAttachmentList({
               <span className="dm-composer-attachment-error">
                 <AlertCircle size={11} aria-hidden="true" />
                 {attachment.error ?? "上传失败"}
+              </span>
+            ) : attachment.reference ? (
+              <span className="dm-composer-attachment-meta">
+                引用
+                {attachment.uploaded && attachment.uploaded.size_bytes > 0
+                  ? ` · ${formatFileSize(attachment.uploaded.size_bytes)}`
+                  : ""}
               </span>
             ) : (
               <span className="dm-composer-attachment-meta">{formatFileSize(attachment.file.size)}</span>
@@ -215,8 +224,18 @@ export function useAttachmentQueue(
   const addReference = (uploaded: ChatFile) => {
     setAttachments((current) => {
       if (current.some((item) => item.uploaded?.id === uploaded.id) || current.length >= MAX_MESSAGE_FILES) return current;
-      return [...current, { key: `ref-${uploaded.id}`, file: new File([], uploaded.name, { type: uploaded.mime_type }),
-        status: "ready", progress: 100, uploaded }];
+      return [
+        ...current,
+        {
+          key: `ref-${uploaded.id}`,
+          // 仅用于复用附件队列的展示结构；不写入任何伪造内容或大小。
+          file: new File([], uploaded.name, { type: uploaded.mime_type }),
+          status: "ready",
+          progress: 100,
+          uploaded,
+          reference: true,
+        },
+      ];
     });
   };
 
