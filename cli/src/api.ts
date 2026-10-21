@@ -446,8 +446,11 @@ export class ApiClient {
     );
   }
 
-  async listUserFiles(conversationId?: string): Promise<{ items: UserFile[] }> {
-    const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : "";
+  async listUserFiles(conversationId?: string, scope?: string): Promise<{ items: UserFile[] }> {
+    const params = new URLSearchParams();
+    if (scope) params.set("scope", scope);
+    if (conversationId) params.set("conversation_id", conversationId);
+    const query = params.toString() ? `?${params.toString()}` : "";
     return this.requestJson(`/api/files${query}`);
   }
 
@@ -460,12 +463,15 @@ export class ApiClient {
     fileName: string,
     path?: string,
     conversationId?: string,
+    scope?: string,
   ): Promise<UserFile> {
     const form = new FormData();
     form.set("file", file, fileName);
     if (path) form.set("path", path);
     if (conversationId) form.set("conversation_id", conversationId);
-    return this.requestJson("/api/files", { method: "POST", body: form });
+    // scope 走 query 参数，与后端 fileScope(c) 的读取方式一致
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.requestJson(`/api/files${query}`, { method: "POST", body: form });
   }
 
   async downloadUserFile(id: string): Promise<Uint8Array> {

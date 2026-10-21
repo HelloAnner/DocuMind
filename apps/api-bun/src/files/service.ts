@@ -3,7 +3,7 @@ import type { Sql } from 'postgres';
 import { AppError } from '../errors.ts';
 import { nowRfc3339, toRfc3339 } from '../infra/time.ts';
 import { isUuid, newUuid } from '../infra/uuid.ts';
-import type { StoredUserFile, UserFile, UserFileSource } from '../models/user_file.ts';
+import type { FileScope, StoredUserFile, UserFile, UserFileSource } from '../models/user_file.ts';
 import type { ObjectStorage } from '../storage/types.ts';
 import {
   extractUserFileText,
@@ -30,6 +30,7 @@ interface StoredFileInput {
   source: UserFileSource;
   bytes: Uint8Array;
   messageId?: string;
+  scope?: FileScope;
 }
 
 export interface PreparedMessageFiles {
@@ -69,9 +70,15 @@ export function userFileStorageKey(
   fileId: string,
   versionId: string,
   name: string,
+  scope: FileScope = 'personal',
 ): string {
   const objectName = safeFileName(name).replace(/[^A-Za-z0-9._-]/gu, '_') || 'file';
-  return `tenants/${tenantId}/users/${userId}/files/${fileId}/${versionId}/${objectName}`;
+  // 空间文件是全租户共享的，key 里不能带 user_id，否则同一个空间文件会因上传者不同
+  // 落到不同前缀，汇总和去重都会错。
+  const root = scope === 'space'
+    ? `tenants/${tenantId}/space/files/${fileId}`
+    : `tenants/${tenantId}/users/${userId}/files/${fileId}`;
+  return `${root}/${versionId}/${objectName}`;
 }
 
 export function mimeTypeForPath(path: string): string {
@@ -101,7 +108,8 @@ export async function createStoredUserFile(
   const path = normalizeUserFilePath(input.path, input.path);
   const name = safeFileName(posix.basename(path));
   const id = newUuid();
-  const storageKey = userFileStorageKey(input.tenantId, input.userId, id, newUuid(), name);
+  const scope: FileScope = input.scope ?? 'personal';
+  const storageKey = userFileStorageKey(input.tenantId, input.userId, id, newUuid(), name, scope);
   const reservationToken = newUuid();
   await reserveObjectCleanup(sql, storageKey, reservationToken);
   await withObjectStorageTimeout(
@@ -113,13 +121,14 @@ export async function createStoredUserFile(
       const rows = await tx.unsafe(
         `INSERT INTO user_file
           (id, tenant_id, user_id, conversation_id, name, path, mime_type, size_bytes,
-           source, storage_key)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+           source, storage_key, scope)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id, tenant_id, user_id, conversation_id, name, path, mime_type,
-           size_bytes, source, storage_key, extracted_text, extraction_truncated,
+           size_bytes, source, storage_key, scope, extracted_text, extraction_truncated,
            created_at, updated_at`,
         [id, input.tenantId, input.userId, input.conversationId, name, path,
-          input.mimeType || mimeTypeForPath(path), input.bytes.byteLength, input.source, storageKey],
+          input.mimeType || mimeTypeForPath(path), input.bytes.byteLength, input.source,
+          storageKey, scope],
       );
       await tx.unsafe(
         'DELETE FROM user_file_object_cleanup WHERE storage_key = $1',
@@ -147,17 +156,30 @@ export async function listOwnedUserFiles(
   tenantId: string,
   userId: string,
   conversationId: string | null = null,
+  scope: FileScope = 'personal',
 ): Promise<UserFile[]> {
-  const rows = await sql.unsafe(
-    `SELECT id, tenant_id, user_id, conversation_id, name, path, mime_type,
-       size_bytes, source, storage_key, extracted_text, extraction_truncated,
-       created_at, updated_at
-     FROM user_file
-     WHERE tenant_id = $1 AND user_id = $2
-       AND ($3::uuid IS NULL OR conversation_id = $3)
-     ORDER BY updated_at DESC, path ASC`,
-    [tenantId, userId, conversationId],
-  );
+  // 个人文件按「租户 + 上传者」过滤；空间文件只按「租户」过滤，全租户成员可见。
+  // 空间文件不挂会话，所以 conversation_id 过滤只对个人文件生效。
+  const rows = scope === 'space'
+    ? await sql.unsafe(
+      `SELECT id, tenant_id, user_id, conversation_id, name, path, mime_type,
+         size_bytes, source, storage_key, scope, extracted_text, extraction_truncated,
+         created_at, updated_at
+       FROM user_file
+       WHERE tenant_id = $1 AND scope = 'space'
+       ORDER BY updated_at DESC, path ASC`,
+      [tenantId],
+    )
+    : await sql.unsafe(
+      `SELECT id, tenant_id, user_id, conversation_id, name, path, mime_type,
+         size_bytes, source, storage_key, scope, extracted_text, extraction_truncated,
+         created_at, updated_at
+       FROM user_file
+       WHERE tenant_id = $1 AND user_id = $2 AND scope = 'personal'
+         AND ($3::uuid IS NULL OR conversation_id = $3)
+       ORDER BY updated_at DESC, path ASC`,
+      [tenantId, userId, conversationId],
+    );
   return rows.map((row) => publicUserFile(storedUserFile(row)));
 }
 
@@ -168,27 +190,36 @@ export async function getOwnedUserFile(
   fileId: string,
 ): Promise<StoredUserFile> {
   if (!isUuid(fileId)) throw fileNotFound();
+  // 文件 id 全局唯一，先按 (id, tenant_id) 取行，再按行自身的 scope 判可见性：
+  // 空间文件对本租户任意成员可见，个人文件只有上传者本人可见。跨租户统一 404。
   const rows = await sql.unsafe(
     `SELECT id, tenant_id, user_id, conversation_id, name, path, mime_type,
-       size_bytes, source, storage_key, extracted_text, extraction_truncated,
+       size_bytes, source, storage_key, scope, extracted_text, extraction_truncated,
        created_at, updated_at
-     FROM user_file WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+     FROM user_file
+     WHERE id = $1 AND tenant_id = $2 AND (scope = 'space' OR user_id = $3)`,
     [fileId, tenantId, userId],
   );
   if (!rows[0]) throw fileNotFound();
   return storedUserFile(rows[0]);
 }
 
+// 空间文件全租户共享，所以删除权限放宽到「上传者本人或租户管理员」；
+// 个人文件仍然只有本人能删。判定写在 DELETE 的 WHERE 里，避免先查后删的竞态。
 export async function deleteOwnedUserFile(
   sql: Sql,
   storage: ObjectStorage,
   tenantId: string,
   userId: string,
   fileId: string,
+  canManageSpace = false,
 ): Promise<void> {
   const result = await sql.unsafe(
-    'DELETE FROM user_file WHERE id = $1 AND tenant_id = $2 AND user_id = $3',
-    [fileId, tenantId, userId],
+    `DELETE FROM user_file
+      WHERE id = $1 AND tenant_id = $2
+        AND ( (scope = 'personal' AND user_id = $3)
+           OR (scope = 'space' AND (user_id = $3 OR $4::boolean)) )`,
+    [fileId, tenantId, userId, canManageSpace],
   );
   if (result.count !== 1) throw fileNotFound();
   await drainObjectCleanup(sql, storage).catch(logCleanupFailure);
@@ -485,6 +516,7 @@ function logCleanupFailure(error: unknown): void {
 export function publicUserFile(file: StoredUserFile): UserFile {
   return {
     id: file.id,
+    scope: file.scope,
     name: file.name,
     path: file.path,
     mime_type: file.mime_type,
@@ -515,12 +547,14 @@ async function loadOwnedFiles(
   userId: string,
   fileIds: string[],
 ): Promise<StoredUserFile[]> {
+  // 对话可以引用个人文件（仅本人）或空间文件（本租户任何成员）。
   const rows = await sql.unsafe(
     `SELECT id, tenant_id, user_id, conversation_id, name, path, mime_type,
-       size_bytes, source, storage_key, extracted_text, extraction_truncated,
+       size_bytes, source, storage_key, scope, extracted_text, extraction_truncated,
        created_at, updated_at
      FROM user_file
-     WHERE tenant_id = $1 AND user_id = $2 AND id = ANY($3::uuid[])
+     WHERE tenant_id = $1 AND id = ANY($3::uuid[])
+       AND (scope = 'space' OR user_id = $2)
      ORDER BY array_position($3::uuid[], id)`,
     [tenantId, userId, fileIds],
   );
@@ -548,10 +582,12 @@ async function extractedText(
       `无法提取文件 ${file.path}: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+  // extracted_text 是从对象存储派生的缓存，不是授权边界；调用方已经验过可见性，
+  // 所以这里按 (id, tenant_id) 更新，空间文件由非上传者提取时也能写回缓存。
   await sql.unsafe(
     `UPDATE user_file SET extracted_text = $1, extraction_truncated = $2, updated_at = NOW()
-     WHERE id = $3 AND tenant_id = $4 AND user_id = $5`,
-    [extracted.text, extracted.truncated, file.id, file.tenant_id, file.user_id],
+     WHERE id = $3 AND tenant_id = $4`,
+    [extracted.text, extracted.truncated, file.id, file.tenant_id],
   );
   return extracted;
 }
@@ -563,6 +599,7 @@ function storedUserFile(row: FileRow): StoredUserFile {
   const conversation = row.conversation_id;
   return {
     id: String(row.id),
+    scope: row.scope === 'space' ? 'space' : 'personal',
     tenant_id: String(row.tenant_id),
     user_id: String(row.user_id),
     name: String(row.name),

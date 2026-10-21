@@ -178,6 +178,7 @@ export interface Citation {
 
 export interface UserFile {
   id: string;
+  scope?: "personal" | "space";
   name: string;
   path: string;
   mime_type: string;

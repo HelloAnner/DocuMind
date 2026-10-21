@@ -178,8 +178,9 @@ const A2A_HELP = `用法: documind a2a <subcommand> [options]\n\n` +
   `未关联账号时服务端返回 409 account_not_linked，CLI 会打印引导链接。\n`;
 
 const FILES_HELP = `用法: documind files <subcommand> [options]\n\n` +
-  `  list [--conversation ID]     列出当前用户全部文件或指定会话文件\n` +
-  `  upload <本地文件> [--path 相对路径] [--conversation ID]\n` +
+  `  list [--conversation ID] [--scope personal|space]\n` +
+  `                               列出文件。scope=personal 仅自己；space 为企业空间内全员共享\n` +
+  `  upload <本地文件> [--path 相对路径] [--conversation ID] [--scope personal|space]\n` +
   `  show <文件ID>                查看文件元数据和下载地址\n` +
   `  download <文件ID> [--output 本地路径] [--force]\n` +
   `  delete <文件ID> --force      删除当前用户文件\n\n` +

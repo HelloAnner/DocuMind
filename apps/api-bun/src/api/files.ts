@@ -1,10 +1,11 @@
 import { posix } from 'node:path';
 import { Hono, type Context } from 'hono';
 import type { Sql } from 'postgres';
-import { requirePermission } from '../auth/permissions.ts';
+import { isDocumindAdmin, requirePermission } from '../auth/permissions.ts';
 import { AppError } from '../errors.ts';
 import { requireScope } from './external_api.ts';
 import type { AppEnv } from '../http/types.ts';
+import type { FileScope } from '../models/user_file.ts';
 import { isUuid } from '../infra/uuid.ts';
 import { validateUserUpload } from '../files/extract.ts';
 import {
@@ -34,10 +35,12 @@ async function listFiles(c: Context<AppEnv>): Promise<Response> {
   const actor = c.get('actor');
   requireFileAccess(actor, false);
   const sql = requiredSql(state.sql);
-  const conversationId = optionalConversationId(c);
+  const scope = fileScope(c);
+  // 空间文件不挂会话，conversation_id 只对个人文件有意义
+  const conversationId = scope === 'space' ? null : optionalConversationId(c);
   if (conversationId) await ownedSession(state, actor, conversationId);
   return c.json({
-    items: await listOwnedUserFiles(sql, actor.tenant_id, actor.user_id, conversationId),
+    items: await listOwnedUserFiles(sql, actor.tenant_id, actor.user_id, conversationId, scope),
   });
 }
 
@@ -55,8 +58,10 @@ async function uploadFile(c: Context<AppEnv>): Promise<Response> {
     throw AppError.badRequest('FILE_TOO_LARGE', '单个用户文件不得超过 25 MB');
   }
   const rawConversationId = form.get('conversation_id');
-  const conversationId = typeof rawConversationId === 'string' && rawConversationId.trim()
+  const scope = fileScope(c);
+  const rawConversation = typeof rawConversationId === 'string' && rawConversationId.trim()
     ? rawConversationId.trim() : null;
+  const conversationId = scope === 'space' ? null : rawConversation;
   if (conversationId) {
     if (!isUuid(conversationId)) throw invalidConversationId();
     await ownedSession(state, actor, conversationId);
@@ -84,6 +89,7 @@ async function uploadFile(c: Context<AppEnv>): Promise<Response> {
     mimeType,
     source: 'upload',
     bytes,
+    scope,
   });
   return c.json(publicUserFile(file), 201);
 }
@@ -102,7 +108,14 @@ async function deleteFile(c: Context<AppEnv>): Promise<Response> {
   const actor = c.get('actor');
   requireFileAccess(actor, true);
   const id = fileId(c);
-  await deleteOwnedUserFile(requiredSql(state.sql), state.storage, actor.tenant_id, actor.user_id, id);
+  await deleteOwnedUserFile(
+    requiredSql(state.sql),
+    state.storage,
+    actor.tenant_id,
+    actor.user_id,
+    id,
+    actor.is_super_admin || isDocumindAdmin(actor.roles),
+  );
   return c.json({ id, status: 'deleted' });
 }
 
@@ -130,6 +143,15 @@ function optionalConversationId(c: Context<AppEnv>): string | null {
   if (!value) return null;
   if (!isUuid(value)) throw invalidConversationId();
   return value;
+}
+
+// scope 是普通业务参数，只决定「看哪一类文件」；真正的授权范围仍然来自 actor 的
+// tenant_id，客户端无法通过 scope 越权。
+function fileScope(c: Context<AppEnv>): FileScope {
+  const value = c.req.query('scope')?.trim();
+  if (!value) return 'personal';
+  if (value === 'personal' || value === 'space') return value;
+  throw AppError.badRequest('INVALID_FILE_SCOPE', 'scope 只能是 personal 或 space');
 }
 
 function fileId(c: Context<AppEnv>): string {

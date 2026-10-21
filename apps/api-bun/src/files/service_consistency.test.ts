@@ -392,6 +392,7 @@ function storedRow(values: unknown[]): TestRows {
 function storedFile(storageKey: string): StoredUserFile {
   return {
     id: FILE,
+    scope: 'personal',
     tenant_id: TENANT,
     user_id: USER,
     conversation_id: CONVERSATION,

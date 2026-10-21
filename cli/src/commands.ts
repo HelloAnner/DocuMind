@@ -575,13 +575,17 @@ async function modelsCommand(api: ApiClient, json: boolean): Promise<number> {
 
 async function fileCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "list";
+  const scope = stringOption(args, "scope");
+  if (scope !== undefined && scope !== "personal" && scope !== "space") {
+    throw new CliError("--scope 只能是 personal 或 space", 2);
+  }
   if (subcommand === "list") {
-    const result = await api.listUserFiles(stringOption(args, "conversation"));
+    const result = await api.listUserFiles(stringOption(args, "conversation"), scope);
     if (json) printJson(result);
     else printTable(
-      ["ID", "路径", "类型", "字节", "来源", "会话"],
+      ["ID", "范围", "路径", "类型", "字节", "来源", "会话"],
       result.items.map((file) => [
-        file.id, file.path, file.mime_type, String(file.size_bytes),
+        file.id, file.scope ?? "personal", file.path, file.mime_type, String(file.size_bytes),
         file.source, file.conversation_id ?? "",
       ]),
     );
@@ -597,6 +601,7 @@ async function fileCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
       value.split("/").pop() ?? "file",
       stringOption(args, "path"),
       stringOption(args, "conversation"),
+      scope,
     );
     if (json) printJson(uploaded);
     else process.stdout.write(`已上传 ${uploaded.path} · ${uploaded.id}\n`);

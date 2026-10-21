@@ -1,7 +1,12 @@
 export type UserFileSource = 'upload' | 'sandbox';
 
+// personal：仅上传者本人可见。
+// space   ：当前企业空间（tenant）内全体成员可见。
+export type FileScope = 'personal' | 'space';
+
 export interface UserFile {
   id: string;
+  scope: FileScope;
   name: string;
   path: string;
   mime_type: string;
