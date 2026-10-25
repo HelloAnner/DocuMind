@@ -79,6 +79,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  skills list|show|create|update|delete|upload|import|files  管理租户技能\n` +
   `  mcp verify                   验证工具发现与租户会话隔离\n\n` +
   `  system <subcommand>          平台后台全量查看与管理\n` +
+  `  portal-sync status|tenants|members|selftest  Portal 租户/账号同步内部接口\n` +
   `  admin <subcommand>           租户后台全量查看与管理\n` +
   `  invitation <subcommand>      邀请创建、校验、接受、重发与撤销\n` +
   `对话与评测\n` +

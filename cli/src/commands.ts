@@ -64,6 +64,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "external": return externalCommand(args, api, json);
     case "mcp": return mcpCommand(args, api, json);
     case "system": return systemCommand(args, api);
+    case "portal-sync": return portalSyncCommand(args, api, json);
     case "admin": return adminCommand(args, api);
     case "invitation": return invitationCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
@@ -84,6 +85,44 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
       throw new CliError(`未知命令: ${command}。运行 documind help 查看帮助`, 2);
   }
 }
+async function portalSyncCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  const action = args.positionals[1] ?? "status";
+  if (action === "status") {
+    printJson({
+      health: await api.portalSync("/api/portal/sync/v1/health"),
+      capabilities: await api.portalSync("/api/portal/sync/v1/capabilities"),
+    });
+    return 0;
+  }
+  if (action === "tenants") {
+    printJson(await api.portalSync("/api/portal/sync/v1/tenants"));
+    return 0;
+  }
+  if (action === "members") {
+    const tenantId = stringOption(args, "tenant-id");
+    if (!tenantId) throw new CliError("portal-sync members 需要 --tenant-id", 2);
+    printJson(await api.portalSync(`/api/portal/sync/v1/tenants/${encodeURIComponent(tenantId)}/members`));
+    return 0;
+  }
+  if (action === "selftest") {
+    const health = await api.portalSync<Record<string, unknown>>("/api/portal/sync/v1/health");
+    const capabilities = await api.portalSync<Record<string, unknown>>("/api/portal/sync/v1/capabilities");
+    const tenants = await api.portalSync<{ items?: Array<{ local_tenant_id?: string }> }>("/api/portal/sync/v1/tenants");
+    const first = tenants.items?.[0]?.local_tenant_id;
+    const members = first
+      ? await api.portalSync<{ items?: unknown[] }>(`/api/portal/sync/v1/tenants/${encodeURIComponent(first)}/members`)
+      : { items: [] };
+    printJson({
+      ok: health.ok === true && capabilities.version === 1,
+      system_code: capabilities.system_code,
+      tenants: tenants.items?.length ?? 0,
+      members_checked: members.items?.length ?? 0,
+    });
+    return 0;
+  }
+  throw new CliError("portal-sync 支持 status|tenants|members|selftest", 2);
+}
+
 async function shareCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
   const subcommand = args.positionals[1] ?? "show";
   const value = args.positionals[2];

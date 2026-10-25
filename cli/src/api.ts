@@ -64,6 +64,17 @@ export class ApiClient {
     return this.requestJson("/api/v1/external/me", undefined, true, false);
   }
 
+  async portalSync<T = unknown>(path: string, method = "GET", body?: unknown): Promise<T> {
+    const token = process.env.PORTAL_INTERNAL_TOKEN ?? "";
+    if (!token) throw new CliError("PORTAL_INTERNAL_TOKEN is required", 2);
+    const init: RequestInit = {
+      method,
+      headers: { "X-Portal-Internal-Token": token, "X-Portal-Sync-Version": "1" },
+    };
+    if (body !== undefined) init.body = JSON.stringify(body);
+    return this.requestJson<T>(path, init, false, false);
+  }
+
   async listApiClients(): Promise<ApiClientSummary[]> {
     return this.requestJson("/api/admin/api-clients");
   }
