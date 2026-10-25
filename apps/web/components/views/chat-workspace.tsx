@@ -28,6 +28,7 @@ import {
 } from "@/components/chat/document-preview";
 import { ConversationFilesPanel } from "@/components/chat/conversation-files-panel";
 import { PendingAttachmentList, useAttachmentQueue } from "@/components/chat/pending-attachments";
+import { clipboardFiles, renamePastedFile } from "@/lib/paste";
 import {
   FileMentionPicker,
   type MentionFileGroup,
@@ -595,6 +596,14 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
     if (dropped && dropped.length > 0) addFiles(dropped);
   };
 
+  // 输入区粘贴截图：剪贴板里有文件就当成附件；纯文本粘贴保持浏览器默认行为。
+  const handlePaste = (event: React.ClipboardEvent<HTMLDivElement>) => {
+    const pasted = clipboardFiles(event.clipboardData);
+    if (pasted.length === 0) return;
+    event.preventDefault();
+    addFiles(pasted.map(renamePastedFile));
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // @ 选择器打开时，Enter 永远不能落到发送逻辑上：即使列表为空或仍在加载。
     if (mentionOpen && !isComposing) {
@@ -777,6 +786,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
             <div
               className={`dm-composer-box ${dragActive ? "dm-drag-active" : ""}`}
               ref={composerRef}
+              onPaste={handlePaste}
               onDragEnter={(event) => {
                 event.preventDefault();
                 if (!event.dataTransfer?.types.includes("Files")) return;
@@ -822,13 +832,6 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                   onKeyDown={handleKeyDown}
                   onCompositionStart={() => setIsComposing(true)}
                   onCompositionEnd={() => setIsComposing(false)}
-                  onPaste={(event) => {
-                    const pasted = Array.from(event.clipboardData?.files ?? []);
-                    if (pasted.length > 0) {
-                      event.preventDefault();
-                      addFiles(pasted);
-                    }
-                  }}
                   rows={1}
                 />
               </div>
