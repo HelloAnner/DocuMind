@@ -11,17 +11,13 @@ import type { AppState } from '../state.ts';
 
 const PREFIX = '/api/portal/sync/v1';
 
-function enabled(): boolean {
-  return process.env.PORTAL_SYNC_ENABLED === 'true';
-}
-
 function requireToken(c: Context<AppEnv>): AppState {
   const state = c.get('appState');
   const expected = process.env.PORTAL_INTERNAL_TOKEN ?? '';
   const provided = c.req.header('X-Portal-Internal-Token') ?? '';
   const a = Buffer.from(expected);
   const b = Buffer.from(provided);
-  if (!enabled() || !expected || a.length !== b.length || !timingSafeEqual(a, b)) {
+  if (!expected || a.length !== b.length || !timingSafeEqual(a, b)) {
     throw AppError.notFound('NOT_FOUND', 'Not found');
   }
   return state;
