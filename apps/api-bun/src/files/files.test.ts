@@ -131,6 +131,15 @@ describe('private user files', () => {
     )).rejects.toThrow('filename_path_extension_mismatch:xlsx:csv');
   });
 
+  test('accepts image uploads by magic bytes and rejects mislabeled bytes', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    expect(await validateUserUpload('截图.png', '截图.png', png)).toBe('image/png');
+    expect(await validateUserUpload('动画.gif', '动画.gif', new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61]))).toBe('image/gif');
+    expect(await validateUserUpload('照片.jpg', '照片.jpg', new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe('image/jpeg');
+    await expect(validateUserUpload('fake.png', 'fake.png', new Uint8Array([1, 2, 3, 4])))
+      .rejects.toThrow('invalid_png_signature');
+  });
+
   test('extracts bounded text and XLSX table cells', async () => {
     const long = await extractUserFileText(
       'notes.txt', 'text/plain', new TextEncoder().encode('甲'.repeat(MAX_FILE_CONTEXT_CHARS + 100)),

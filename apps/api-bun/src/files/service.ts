@@ -7,6 +7,7 @@ import type { FileScope, StoredUserFile, UserFile, UserFileSource } from '../mod
 import type { ObjectStorage } from '../storage/types.ts';
 import {
   extractUserFileText,
+  isExtractableUserFileName,
   type ExtractedFileText,
   MAX_FILE_CONTEXT_CHARS,
   MAX_TOTAL_FILE_CONTEXT_CHARS,
@@ -240,7 +241,10 @@ export async function prepareMessageFiles(
   let remaining = MAX_TOTAL_FILE_CONTEXT_CHARS;
   let totalTruncated = false;
   const sections: string[] = [];
+  const storedOnly: string[] = [];
   for (const file of files) {
+    // 图片等不可解析类型：仍然挂在本条消息上，但不参与文本上下文。
+    if (!isExtractableUserFileName(file.name)) { storedOnly.push(file.path); continue; }
     const extracted = await extractedText(sql, storage, file);
     if (remaining <= 0) {
       totalTruncated = true;
@@ -253,6 +257,9 @@ export async function prepareMessageFiles(
   }
   if (totalTruncated) {
     sections.push(`[已截断：本次文件总上下文最多 ${MAX_TOTAL_FILE_CONTEXT_CHARS} 字符，单文件最多 ${MAX_FILE_CONTEXT_CHARS} 字符]`);
+  }
+  if (storedOnly.length > 0) {
+    sections.push(`[已保存未解读：${storedOnly.join('、')}（当前只解析文本与 Office/PDF）]`);
   }
   return {
     file_ids: fileIds,

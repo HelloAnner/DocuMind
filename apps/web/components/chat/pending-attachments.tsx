@@ -69,7 +69,10 @@ export function PendingAttachmentList({
                   : ""}
               </span>
             ) : (
-              <span className="dm-composer-attachment-meta">{formatFileSize(attachment.file.size)}</span>
+              <span className="dm-composer-attachment-meta">
+                {formatFileSize(attachment.file.size)}
+                {attachment.file.type.startsWith("image/") ? " · 图片仅存文件，不参与解读" : ""}
+              </span>
             )}
           </span>
           <span className="dm-composer-attachment-actions">

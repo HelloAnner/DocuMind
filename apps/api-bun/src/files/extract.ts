@@ -18,6 +18,22 @@ const USER_UPLOAD_TYPES: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  // 图片只保存不解析（粘贴截图 / 拖拽），与 A2A 附件白名单保持一致。
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+};
+
+/** 图片魔数校验：避免把任意字节标成 image/* 存进文件库。 */
+const IMAGE_SIGNATURES: Record<string, (bytes: Uint8Array) => boolean> = {
+  png: (b) => b.length >= 8 && b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47,
+  jpg: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  jpeg: (b) => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
+  gif: (b) => b.length >= 6 && b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46,
+  webp: (b) => b.length >= 12 && b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46
+    && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50,
 };
 
 /** `extractUserFileText` 能解析出正文的扩展名（A2A 附件据此判断能否纳入对话上下文）。 */
@@ -46,6 +62,11 @@ export async function validateUserUpload(
   }
   const mimeType = USER_UPLOAD_TYPES[extension];
   if (!mimeType) throw new Error(`unsupported_user_file_type:${extension || 'none'}`);
+  const imageSignature = IMAGE_SIGNATURES[extension];
+  if (imageSignature) {
+    if (!imageSignature(bytes)) throw new Error(`invalid_${extension}_signature`);
+    return mimeType;
+  }
   if (['txt', 'md', 'markdown', 'csv', 'json'].includes(extension)) {
     const text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     if (extension === 'json') JSON.parse(text);
