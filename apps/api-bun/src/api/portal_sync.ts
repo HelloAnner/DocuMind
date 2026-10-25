@@ -270,6 +270,8 @@ export function portalSyncRouter(): Hono<AppEnv> {
       const displayName = optionalText(body.display_name, 'display_name', 128) ?? username;
       const email = optionalText(body.email, 'email', 128);
       const role = canonicalRole(canonicalRoles(body.roles)[0]);
+      // DocuMind 的 CHECK 约束使用 end_user 表示普通成员，不能写 user。
+      const localRole = role === 'user' ? 'end_user' : role;
       const status = memberStatus(body.status);
 
       const tenant = await sql`SELECT id,name FROM tenant WHERE id=${localTenantId} LIMIT 1`;
@@ -335,7 +337,7 @@ export function portalSyncRouter(): Hono<AppEnv> {
 
       await sql`
         INSERT INTO tenant_member (id,tenant_id,user_id,roles,status,joined_at,updated_at)
-        VALUES (gen_random_uuid(),${localTenantId},${localUserId},ARRAY[${role}]::text[],${status},NOW(),NOW())
+        VALUES (gen_random_uuid(),${localTenantId},${localUserId},ARRAY[${localRole}]::text[],${status},NOW(),NOW())
         ON CONFLICT (tenant_id,user_id) DO UPDATE SET
           roles=excluded.roles, status=excluded.status, updated_at=NOW()
       `;
