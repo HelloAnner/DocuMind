@@ -1,7 +1,6 @@
 import Link from "next/link";
 import {
   ArrowRight,
-  BookOpenText,
   FileSearch,
   Files,
   LockKeyhole,
@@ -9,6 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import styles from "./landing.module.css";
+import { BrandIcon } from "@/components/ui/brand-mark";
 
 const questions = [
   "Q3 采购合同的付款节点是什么？",
@@ -39,7 +39,7 @@ export default function LandingPage() {
     <main className={styles.page}>
       <header className={styles.header}>
         <Link className={styles.brand} href="/" aria-label="DocuMind 首页">
-          <span className={styles.mark}><BookOpenText size={18} strokeWidth={2.2} /></span>
+          <BrandIcon decorative />
           <span>DocuMind</span>
         </Link>
         <nav className={styles.nav} aria-label="主导航">
@@ -63,7 +63,7 @@ export default function LandingPage() {
 
         <div className={styles.product} aria-label="DocuMind 产品界面预览">
           <div className={styles.productBar}>
-            <div className={styles.productBrand}><span className={styles.miniMark}><BookOpenText size={13} /></span> DocuMind</div>
+            <div className={styles.productBrand}><BrandIcon size={25} decorative /> DocuMind</div>
             <span className={styles.workspace}>企业知识空间</span>
           </div>
           <div className={styles.productBody}>
@@ -115,7 +115,7 @@ export default function LandingPage() {
       </section>
 
       <footer className={styles.footer}>
-        <span className={styles.brand}><span className={styles.mark}><BookOpenText size={18} /></span>DocuMind</span>
+        <span className={styles.brand}><BrandIcon decorative />DocuMind</span>
         <p>让知识成为每个人的工作语言。</p>
         <span>© 2026 DocuMind</span>
       </footer>

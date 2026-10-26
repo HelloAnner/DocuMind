@@ -69,6 +69,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  auth profile-update [--name N] [--avatar-url URL|--clear-avatar]\n` +
   `  auth tenants|switch <id>     列出并切换当前账号的企业空间\n` +
   `  health                       检查真实服务器健康状态\n` +
+  `  brand check                  检查 SVG 图标、favicon 与部署前缀\n` +
   `  doctor                       检查 API、认证、租户与 Elasticsearch\n` +
   `  external doctor|whoami       使用 DOCUMIND_API_TOKEN 检查外部 API\n` +
   `  external chat <问题>         使用外部 API Token 真实问答\n` +

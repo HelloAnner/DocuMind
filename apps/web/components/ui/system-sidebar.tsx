@@ -16,6 +16,7 @@ import {
   Users,
 } from "lucide-react";
 import { NavItem } from "./nav-item";
+import { BrandMark } from "./brand-mark";
 
 const systemNav = [
   { label: "概览", href: "/system", icon: LayoutDashboard },
@@ -45,7 +46,7 @@ export function SystemSidebar() {
     <aside className="dm-system-sidebar">
       <div className="dm-sidebar-top">
         <Link className="dm-admin-logo" href="/system">
-          DocuMind / System
+          <BrandMark /> / System
         </Link>
       </div>
 

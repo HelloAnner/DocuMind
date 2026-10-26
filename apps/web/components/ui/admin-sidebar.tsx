@@ -15,6 +15,7 @@ import {
   Users,
 } from "lucide-react";
 import { NavItem } from "./nav-item";
+import { BrandMark } from "./brand-mark";
 
 const manageNav = [
   { label: "概览", href: "/admin", icon: LayoutDashboard },
@@ -45,7 +46,7 @@ export function AdminSidebar() {
     <aside className="dm-admin-sidebar">
       <div className="dm-sidebar-top">
         <Link className="dm-admin-logo" href="/admin">
-          DocuMind
+          <BrandMark />
         </Link>
       </div>
 

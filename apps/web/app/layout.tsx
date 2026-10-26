@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { BRAND_ICON_URL } from "@/components/ui/brand-mark";
 import "streamdown/styles.css";
 import "./globals.css";
 import "./product-theme.css";
@@ -9,7 +10,8 @@ export const metadata: Metadata = {
   title: "DocuMind",
   description: "企业级文档智能问答系统",
   icons: {
-    icon: "/favicon.svg",
+    icon: { url: BRAND_ICON_URL, type: "image/svg+xml" },
+    shortcut: BRAND_ICON_URL,
   },
 };
 

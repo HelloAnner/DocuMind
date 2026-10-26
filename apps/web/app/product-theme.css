@@ -274,43 +274,6 @@ select:focus-visible {
   min-width: 0;
 }
 
-.dm-brand-glyph {
-  border: 1.7px solid currentColor;
-  border-right-color: transparent;
-  border-radius: 50%;
-  display: inline-block;
-  height: 23px;
-  position: relative;
-  transform: rotate(-8deg);
-  width: 23px;
-}
-
-.dm-brand-glyph::before,
-.dm-brand-glyph::after,
-.dm-brand-glyph > span {
-  background: currentColor;
-  border-radius: 50%;
-  content: "";
-  height: 3px;
-  position: absolute;
-  width: 3px;
-}
-
-.dm-brand-glyph::before {
-  right: 2px;
-  top: 3px;
-}
-
-.dm-brand-glyph::after {
-  right: 0;
-  top: 9px;
-}
-
-.dm-brand-glyph > span {
-  right: 2px;
-  top: 15px;
-}
-
 .dm-brand-wordmark {
   font-size: 16px;
   font-weight: 650;
@@ -319,19 +282,8 @@ select:focus-visible {
   white-space: nowrap;
 }
 
-.dm-brand-mark.compact .dm-brand-glyph {
-  height: 22px;
-  width: 22px;
-}
-
 .dm-agent-orb {
-  background: conic-gradient(from -40deg at 42% 48%, #b65ac7 0deg, #ec3d91 85deg, #a955d4 180deg, #635cf6 245deg, #348cf7 310deg, #8c62d0 360deg);
-  border-radius: 44% 45% 46% 42% / 48% 38% 45% 42%;
-  box-shadow: 0 4px 14px rgba(109, 40, 217, 0.16);
-  animation: dm-agent-orb-breathe 4s ease-in-out infinite;
-  display: inline-block;
-  transform-origin: center;
-  will-change: border-radius, filter, transform;
+  object-fit: contain;
 }
 
 .dm-agent-orb-small {
@@ -347,26 +299,6 @@ select:focus-visible {
 .dm-agent-orb-large {
   height: 190px;
   width: 190px;
-}
-
-@keyframes dm-agent-orb-breathe {
-  0%,
-  100% {
-    border-radius: 44% 45% 46% 42% / 48% 38% 45% 42%;
-    filter: saturate(1);
-    transform: rotate(-2deg) scale(1);
-  }
-  50% {
-    border-radius: 48% 42% 43% 47% / 42% 47% 40% 48%;
-    filter: saturate(1.12);
-    transform: rotate(2deg) scale(1.06);
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dm-agent-orb {
-    animation: none;
-  }
 }
 
 
@@ -5988,51 +5920,7 @@ body > .hiddenCanvasElement {
   }
 }
 
-/* NorthLine visual parity */
-.dm-brand-glyph {
-  align-items: center;
-  background: linear-gradient(135deg, #8b5cf6, #ec4899 55%, #f59e0b);
-  border: 0;
-  border-radius: 11px;
-  box-shadow: 0 8px 18px rgba(139, 92, 246, 0.2);
-  color: #fff;
-  display: inline-flex;
-  height: 32px;
-  justify-content: center;
-  transform: none;
-  width: 32px;
-}
-
-.dm-brand-glyph::before,
-.dm-brand-glyph::after,
-.dm-brand-glyph > span {
-  display: none;
-}
-
-.dm-brand-glyph::before {
-  content: "D";
-}
-
-.dm-brand-mark.compact .dm-brand-glyph {
-  border-radius: 9px;
-  height: 25px;
-  width: 25px;
-}
-
-.dm-agent-orb {
-  filter: drop-shadow(0 18px 42px rgba(139, 92, 246, 0.18));
-}
-
-.dm-agent-orb-core {
-  background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 52%, #f59e0b 100%);
-  box-shadow: none;
-}
-
-.dm-agent-orb-core::after,
-.dm-agent-orb-glint {
-  display: none;
-}
-
+/* Workspace layout */
 .dm-shell,
 .dm-chat-shell {
   background: var(--bg-primary);

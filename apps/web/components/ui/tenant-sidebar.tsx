@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ArrowLeft, BookOpen, Shield, Users } from "lucide-react";
 import { NavItem } from "./nav-item";
+import { BrandMark } from "./brand-mark";
 
 const nav = [
   { label: "知识库", href: "/tenant/knowledge", icon: BookOpen },
@@ -23,7 +24,7 @@ export function TenantSidebar() {
     <aside className="dm-admin-sidebar">
       <div className="dm-sidebar-top">
         <Link className="dm-admin-logo" href="/tenant">
-          DocuMind
+          <BrandMark />
         </Link>
       </div>
 
