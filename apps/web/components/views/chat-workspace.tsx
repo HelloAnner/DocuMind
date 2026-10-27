@@ -412,7 +412,6 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const mentionOpen = mention !== null;
 
   const currentConversation = conversations.find((c) => c.conversation_id === currentId);
-  const selectedKnowledgeBases = availableKbs.filter((kb) => selectedKbIds.includes(kb.id));
   const currentFavorite = currentId ? isFavorite(currentId) : false;
   const userName = me?.user.name?.trim() || me?.user.email?.split("@")[0] || "你";
   const filesRefreshKey = messages
@@ -900,20 +899,6 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
                         onChange={setThinkingMode}
                       />
                     </>
-                  ) : null}
-                  {selectedKnowledgeBases.length > 0 ? (
-                    <div className="dm-kb-selection-badges" aria-label="当前对话知识库">
-                      {selectedKnowledgeBases.map((kb, index) => (
-                        <span
-                          className={`dm-kb-badge tone-${index % 6}`}
-                          title={kb.name}
-                          key={kb.id}
-                        >
-                          <span aria-hidden="true" />
-                          {kb.name}
-                        </span>
-                      ))}
-                    </div>
                   ) : null}
                 </div>
                 <button

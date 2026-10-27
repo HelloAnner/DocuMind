@@ -2059,80 +2059,32 @@ select:focus-visible {
   margin: 8px 5px 1px;
 }
 
-.dm-kb-selection-badges {
-  align-items: center;
-  display: flex;
-  gap: 5px;
-  margin-left: 5px;
-  max-width: 300px;
-  min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.dm-kb-selection-badges::-webkit-scrollbar {
-  display: none;
-}
-
-.dm-kb-badge {
-  align-items: center;
-  background: var(--kb-surface);
-  border: 1px solid color-mix(in srgb, var(--kb-accent) 24%, transparent);
-  border-radius: 999px;
-  color: var(--kb-accent);
-  display: inline-flex;
-  flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 600;
-  gap: 5px;
-  height: 24px;
-  max-width: 132px;
-  overflow: hidden;
-  padding: 0 8px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dm-kb-badge > span {
-  background: currentColor;
-  border-radius: 50%;
-  flex: 0 0 5px;
-  height: 5px;
-  width: 5px;
-}
-
-.chat-kb-color.tone-0,
-.dm-kb-badge.tone-0 {
+.chat-kb-color.tone-0 {
   --kb-accent: #2563eb;
   --kb-surface: color-mix(in srgb, #2563eb 9%, var(--surface-raised));
 }
 
-.chat-kb-color.tone-1,
-.dm-kb-badge.tone-1 {
+.chat-kb-color.tone-1 {
   --kb-accent: #0f766e;
   --kb-surface: color-mix(in srgb, #0f766e 9%, var(--surface-raised));
 }
 
-.chat-kb-color.tone-2,
-.dm-kb-badge.tone-2 {
+.chat-kb-color.tone-2 {
   --kb-accent: #b45309;
   --kb-surface: color-mix(in srgb, #b45309 10%, var(--surface-raised));
 }
 
-.chat-kb-color.tone-3,
-.dm-kb-badge.tone-3 {
+.chat-kb-color.tone-3 {
   --kb-accent: #7c3aed;
   --kb-surface: color-mix(in srgb, #7c3aed 9%, var(--surface-raised));
 }
 
-.chat-kb-color.tone-4,
-.dm-kb-badge.tone-4 {
+.chat-kb-color.tone-4 {
   --kb-accent: #be123c;
   --kb-surface: color-mix(in srgb, #be123c 9%, var(--surface-raised));
 }
 
-.chat-kb-color.tone-5,
-.dm-kb-badge.tone-5 {
+.chat-kb-color.tone-5 {
   --kb-accent: #0e7490;
   --kb-surface: color-mix(in srgb, #0e7490 9%, var(--surface-raised));
 }
@@ -3173,13 +3125,6 @@ body > .hiddenCanvasElement {
 
   .chat-kb-menu {
     left: -12px;
-  }
-
-  .dm-kb-selection-badges {
-    flex-basis: 100%;
-    margin-left: 2px;
-    max-width: calc(100vw - 96px);
-    order: 10;
   }
 
   .dm-chat-empty {
