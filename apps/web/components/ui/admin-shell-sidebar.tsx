@@ -83,7 +83,7 @@ const tenantSections: NavSection[] = [
     title: "成员与权限",
     items: [
       { label: "成员与邀请", href: "/admin/members", icon: Users },
-      { label: "访问权限", href: "/admin/permissions", icon: Shield },
+      { label: "权限管理", href: "/tenant/permissions", icon: Shield },
       { label: "MCP 接入", href: "/admin/api-clients", icon: KeyRound },
       { label: "技能管理", href: "/admin/skills", icon: Sparkles },
     ],
