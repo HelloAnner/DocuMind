@@ -118,6 +118,8 @@ describe('api/auth', () => {
       if (query.includes('SELECT EXISTS')) return Promise.resolve([{ active: false }]);
       if (query.includes('SELECT tm.roles')) return Promise.resolve([{ roles: ['tenant_owner'], attributes: {} }]);
       if (query.includes('FROM knowledge_base')) return Promise.resolve([]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       if (query.includes('INSERT INTO audit_log')) return Promise.resolve([]);
       if (query.includes('SELECT avatar_url')) return Promise.resolve([{ avatar_url: null }]);
       if (query.includes('SELECT id, name, slug, plan, status FROM tenant')) return Promise.resolve([{
@@ -252,6 +254,7 @@ describe('api/auth', () => {
       if (query.includes('SELECT EXISTS')) return Promise.resolve([{ active: false }]);
       if (query.includes('SELECT tm.roles')) return Promise.resolve([{ roles: storedRoles, attributes }]);
       if (query.includes('FROM knowledge_base') || query.includes('FROM knowledge_base_acl')) return Promise.resolve([]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       throw new Error('unexpected identity query');
     }, { json: (value: unknown) => value,
       begin: async (run: (tx: Sql) => Promise<unknown>) => run(sql),
@@ -328,6 +331,7 @@ describe('api/auth', () => {
       if (query.includes('FROM tenant WHERE')) return Promise.resolve([
         { id: '33333333-3333-4333-8333-333333333333' },
       ]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       if (query.includes('INSERT INTO audit_log')) return Promise.resolve([]);
       throw new Error('callback must not provision into an unapproved local tenant');
     }, { json: (value: unknown) => JSON.stringify(value) });
@@ -479,6 +483,7 @@ describe('api/auth', () => {
         { roles: ['tenant_admin'], attributes: memberAttributes },
       ]);
       if (query.includes('FROM knowledge_base')) return Promise.resolve([]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       if (query.includes('SELECT u.id, u.sso_subject')) return Promise.resolve(candidates);
       throw new Error('callback must not provision an unverified local identity');
     }, { json: (value: unknown) => value,
@@ -616,6 +621,7 @@ describe('api/auth', () => {
       if (query.includes('SELECT origin FROM portal_tenant_mapping')) return Promise.resolve([
         { origin: 'approved' },
       ]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       if (query.includes('INSERT INTO audit_log')) return Promise.resolve([]);
       if (query.includes('SELECT avatar_url')) return Promise.resolve([{ avatar_url: null }]);
       if (query.includes('SELECT id, name, slug, plan, status FROM tenant')) return Promise.resolve([{
@@ -627,6 +633,7 @@ describe('api/auth', () => {
       if (query.includes('SELECT EXISTS')) return Promise.resolve([{ active: false }]);
       if (query.includes('SELECT tm.roles')) return Promise.resolve(member ? [member] : []);
       if (query.includes('FROM knowledge_base')) return Promise.resolve([]);
+      if (query.includes('FROM permission_override')) return Promise.resolve([]);
       throw new Error(`unexpected committed query ${query}`);
     }, {
       json: (value: unknown) => value,

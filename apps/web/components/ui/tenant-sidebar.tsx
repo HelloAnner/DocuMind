@@ -9,7 +9,7 @@ import { BrandMark } from "./brand-mark";
 const nav = [
   { label: "知识库", href: "/tenant/knowledge", icon: BookOpen },
   { label: "用户管理", href: "/tenant/members", icon: Users },
-  { label: "权限策略", href: "/tenant/permissions", icon: Shield },
+  { label: "权限管理", href: "/tenant/permissions", icon: Shield },
 ];
 
 export function TenantSidebar() {

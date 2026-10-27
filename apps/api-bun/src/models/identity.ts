@@ -9,6 +9,8 @@ export interface CurrentActor {
   roles: string[];
   permissions: string[];
   allowed_kb_ids: string[];
+  /** 个人覆盖存在时按 KB 下发 view/edit/manage；未设置时沿用 allowed_kb_ids 的旧语义。 */
+  kb_actions?: Record<string, string[]>;
   is_super_admin: boolean;
   api_client_id: string | null;
   api_token_id: string | null;
@@ -24,6 +26,11 @@ export function actorHasPermission(actor: CurrentActor, permission: string): boo
   return actor.permissions.includes(permission);
 }
 export function actorCanManageKb(actor: CurrentActor, kbId: string): boolean {
+  return actor.allowed_kb_ids.includes(kbId);
+}
+
+export function actorCanKbAction(actor: CurrentActor, kbId: string, action: string): boolean {
+  if (actor.kb_actions) return actor.kb_actions[kbId]?.includes(action) ?? false;
   return actor.allowed_kb_ids.includes(kbId);
 }
 

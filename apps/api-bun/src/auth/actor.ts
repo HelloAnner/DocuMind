@@ -8,6 +8,7 @@ import type { Claims } from './jwt.ts';
 import {
   effectivePermissionsForMembership, isDocumindAdmin, normalizedActorRoles,
 } from './permissions.ts';
+import { applyActorOverrides } from '../rbac.ts';
 
 interface ActorDeps {
   sql: Sql | null;
@@ -102,14 +103,14 @@ export async function resolveActorFromDb(
     : authSource === 'local' ? derivePermissions(roles)
       : effectivePermissionsForMembership(roles, attributes);
   const loginId = String(user.login_id);
-  return {
+  return applyActorOverrides(sql, {
     user_id: userId, tenant_id: tenantId, login_id: loginId,
     email: (user.email as string | null) ?? '',
     name: (user.name as string | null) ?? loginId,
     scope: isSuperAdmin ? 'platform' : 'tenant',
     roles, permissions, allowed_kb_ids: kbIds, is_super_admin: isSuperAdmin,
     api_client_id: null, api_token_id: null, api_scopes: [], api_token_expires_at: null,
-  };
+  });
 }
 
 export async function authenticateFromDb(
@@ -208,7 +209,7 @@ export async function authenticateFromDb(
       UPDATE app_user SET last_active_tenant = ${tenantId}, updated_at = NOW() WHERE id = ${userId}
     `;
   }
-  return actor;
+  return applyActorOverrides(sql, actor);
 }
 
 export function authenticateFromConfig(

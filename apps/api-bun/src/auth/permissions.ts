@@ -87,6 +87,11 @@ export function requireKbPermission(actor: CurrentActor, kbId: string, permissio
     : permission === 'write' ? 'kb.write'
     : permission === 'manage' ? 'kb.manage' : permission;
   if (!actor.permissions.includes(required)) throw AppError.forbidden();
+  if (actor.kb_actions) {
+    const action = permission === 'read' ? 'view' : permission === 'write' ? 'edit' : permission;
+    if (!actor.kb_actions[kbId]?.includes(action)) throw AppError.kbScopeDenied();
+    return;
+  }
   if (!actor.allowed_kb_ids.includes(kbId)) throw AppError.kbScopeDenied();
 }
 

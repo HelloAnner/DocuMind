@@ -9,10 +9,16 @@ DEPLOY_BASE_PATH ?= /documind
 DEPLOY_TARGET_DIR ?= dist/linux-x86_64
 DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(BIN_NAME)
 
-.PHONY: install docs deploy-web-build deploy-build deploy deploy-remote sync-remote-source status health release-gate logs clean
+.PHONY: install docs deploy-web-build deploy-build deploy deploy-remote sync-remote-source sync-rbac-panel check-rbac-panel status health release-gate logs clean
 
 install:
 	cd $(WEB_DIR) && npm install
+
+sync-rbac-panel:
+	cp ../Portal/web/src/rbac-panel.ts apps/web/lib/rbac/panel.ts
+
+check-rbac-panel:
+	@cmp -s ../Portal/web/src/rbac-panel.ts apps/web/lib/rbac/panel.ts || { echo "RBAC panel drift: run make sync-rbac-panel"; exit 1; }
 
 docs:
 	python3 scripts/build-docs.py

@@ -14,6 +14,10 @@ export function printHelp(path: string[]): void {
     process.stdout.write(ADMIN_HELP);
     return;
   }
+  if (topic === "perm") {
+    process.stdout.write(PERM_HELP);
+    return;
+  }
   if (topic === "invitation") {
     process.stdout.write(INVITATION_HELP);
     return;
@@ -103,7 +107,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `  --json, -j                   机器可读 JSON 输出\n` +
   `  --help, -h                   查看帮助\n` +
   `  --version, -V                查看版本\n\n` +
-  `运行 documind help system|admin|chat|a2a|run|files|kb|documents|skills|vector 查看详细帮助。\n`;
+  `运行 documind help system|admin|perm|chat|a2a|run|files|kb|documents|skills|vector 查看详细帮助。\n`;
 
 const SKILLS_HELP = `用法: documind skills <subcommand> [options]\n\n` +
   `  list [--search TEXT] | show <技能ID或名称>\n` +
@@ -276,3 +280,14 @@ const DOCUMENTS_HELP = `用法: documind documents <subcommand> [options]\n\n` +
   `  --timeout SECONDS            最长等待时间，默认 300\n` +
   `  --interval SECONDS           轮询间隔，默认 1\n` +
   `所有管理操作自动限定为当前登录租户，并由服务端校验权限。\n`;
+
+const PERM_HELP = `用法: documind perm <subcommand> [options]\n\n` +
+  `  catalog                         列出功能与知识库权限实体\n` +
+  `  subjects                        列出可授权的成员\n` +
+  `  matrix --user ID|USERNAME       查看某成员的有效权限矩阵\n` +
+  `  set --user U --type kb|feature --id ID --action view|edit|manage --effect allow|deny|reset\n` +
+  `  reset --user U                  恢复该成员的全部个人设置\n` +
+  `  check --user U --type T --id ID --action A   校验单格有效权限（拒绝时退出码 1）\n` +
+  `  migrate-legacy [--dry-run]      把已有个人 KB ACL 迁移成 allow 覆盖\n` +
+  `  prune [--dry-run]               清理已删除知识库留下的覆盖\n\n` +
+  `所有命令支持 --json。功能实体不支持个人 allow；资源 allow 不能绕过功能闸门。\n`;

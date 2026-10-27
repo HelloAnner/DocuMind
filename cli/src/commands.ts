@@ -22,6 +22,7 @@ import { CliError } from "./errors.ts";
 import { verifyExternalApi } from "./external_verify.ts";
 import { printHelp } from "./help.ts";
 import { adminCommand, invitationCommand, systemCommand } from "./management_commands.ts";
+import { permCommand } from "./rbac_commands.ts";
 import {
   citationLocationSuffix,
   LiveChatRenderer,
@@ -72,6 +73,7 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "system": return systemCommand(args, api);
     case "portal-sync": return portalSyncCommand(args, api, json);
     case "admin": return adminCommand(args, api);
+    case "perm": return permCommand(args, api, json);
     case "invitation": return invitationCommand(args, api);
     case "api-clients": return apiClientsCommand(args, api, json);
     case "skills": return skillCommand(args, api, json);

@@ -75,6 +75,42 @@ export class ApiClient {
     return this.requestJson<T>(path, init, false, false);
   }
 
+  async rbacCatalog<T = any>(): Promise<T> {
+    return this.requestJson("/api/v1/rbac/catalog");
+  }
+
+  async rbacSubjects<T = any>(): Promise<T> {
+    return this.requestJson("/api/v1/rbac/subjects");
+  }
+
+  async rbacMatrix<T = any>(subjectId: string): Promise<T> {
+    return this.requestJson(`/api/v1/rbac/matrix?subject_id=${encodeURIComponent(subjectId)}`);
+  }
+
+  async rbacSetCell<T = any>(input: {
+    subject_id: string; type: string; id: string; action: string; effect: "allow" | "deny" | null;
+  }): Promise<T> {
+    return this.requestJson("/api/v1/rbac/matrix", { method: "PUT", body: JSON.stringify(input) });
+  }
+
+  async rbacReset<T = any>(subjectId: string): Promise<T> {
+    return this.requestJson(`/api/v1/rbac/matrix?subject_id=${encodeURIComponent(subjectId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async rbacMigrate<T = any>(dryRun = false): Promise<T> {
+    return this.requestJson(`/api/v1/rbac/migrate-legacy?dry_run=${dryRun ? "true" : "false"}`, {
+      method: "POST",
+    });
+  }
+
+  async rbacPrune<T = any>(dryRun = false): Promise<T> {
+    return this.requestJson(`/api/v1/rbac/prune?dry_run=${dryRun ? "true" : "false"}`, {
+      method: "POST",
+    });
+  }
+
   async listApiClients(): Promise<ApiClientSummary[]> {
     return this.requestJson("/api/admin/api-clients");
   }
