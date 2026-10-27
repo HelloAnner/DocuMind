@@ -45,25 +45,31 @@ export async function seedIdentity(sql: Sql, config: AppConfig): Promise<void> {
   `;
 
   await upsertSeedUser(sql, config.defaultUserId, config.enterpriseAdminEmail,
-    'DocuMind Enterprise Admin', config.enterpriseAdminPassword);
+    config.enterpriseAdminName, config.enterpriseAdminPassword);
   await upsertSeedUser(sql, config.superAdminUserId, config.superAdminEmail,
-    'Anner', config.superAdminPassword);
+    config.superAdminName, config.superAdminPassword);
   await sql`
     INSERT INTO platform_admin (user_id, role, status)
     VALUES (${config.superAdminUserId}, 'super_admin', 'active')
     ON CONFLICT (user_id)
     DO UPDATE SET role = 'super_admin', status = 'active', updated_at = NOW()
   `;
-  await upsertSeedUser(sql, config.standardUserId, config.standardUserEmail,
-    'DocuMind User', config.standardUserPassword);
+  if (config.seedStandardUser) {
+    await upsertSeedUser(sql, config.standardUserId, config.standardUserEmail,
+      'DocuMind User', config.standardUserPassword);
+  }
 
-  await upsertMembership(sql, config.defaultTenantId, config.defaultUserId, ['tenant_admin']);
-  await sql`
-    INSERT INTO tenant_member (tenant_id, user_id, roles, status, joined_at)
-    VALUES (${config.defaultTenantId}, ${config.superAdminUserId}, ARRAY['super_admin'], 'active', NOW())
-    ON CONFLICT (tenant_id, user_id) DO NOTHING
-  `;
-  await upsertMembership(sql, config.defaultTenantId, config.standardUserId, ['end_user']);
+  await upsertMembership(sql, config.defaultTenantId, config.defaultUserId, config.enterpriseAdminRoles);
+  if (config.seedSuperAdminTenantMembership) {
+    await sql`
+      INSERT INTO tenant_member (tenant_id, user_id, roles, status, joined_at)
+      VALUES (${config.defaultTenantId}, ${config.superAdminUserId}, ARRAY['super_admin'], 'active', NOW())
+      ON CONFLICT (tenant_id, user_id) DO NOTHING
+    `;
+  }
+  if (config.seedStandardUser) {
+    await upsertMembership(sql, config.defaultTenantId, config.standardUserId, ['end_user']);
+  }
 
   const productKbId = config.defaultKbIds[0] ?? '00000000-0000-0000-0000-000000000010';
   await sql`

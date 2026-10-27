@@ -37,8 +37,10 @@ export interface AppConfig {
   defaultTenantId: string; defaultUserId: string; defaultRole: string; defaultKbIds: string[];
   defaultTenantName: string; defaultTenantSlug: string;
   superAdminUserId: string; standardUserId: string;
-  superAdminEmail: string; superAdminPassword: string;
-  enterpriseAdminEmail: string; enterpriseAdminPassword: string;
+  superAdminEmail: string; superAdminPassword: string; superAdminName: string;
+  enterpriseAdminEmail: string; enterpriseAdminPassword: string; enterpriseAdminName: string;
+  enterpriseAdminRoles: string[];
+  seedStandardUser: boolean; seedSuperAdminTenantMembership: boolean;
   standardUserEmail: string; standardUserPassword: string;
   rag: RagConfig; agent: AgentConfig; chatModels: string[];
 }
@@ -242,8 +244,13 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
     standardUserId: envUuid('STANDARD_USER_ID', STANDARD_USER_ID),
     superAdminEmail: envStr('SUPER_ADMIN_EMAIL') ?? 'Anner',
     superAdminPassword: envStr('SUPER_ADMIN_PASSWORD') ?? '1',
+    superAdminName: envStr('SUPER_ADMIN_NAME') ?? 'Anner',
     enterpriseAdminEmail: envStr('ENTERPRISE_ADMIN_EMAIL') ?? 'admin@documind.local',
     enterpriseAdminPassword: envStr('ENTERPRISE_ADMIN_PASSWORD') ?? 'documind123',
+    enterpriseAdminName: envStr('ENTERPRISE_ADMIN_NAME') ?? 'DocuMind Enterprise Admin',
+    enterpriseAdminRoles: envList('ENTERPRISE_ADMIN_ROLES', ['tenant_admin']),
+    seedStandardUser: envBool('SEED_STANDARD_USER', true),
+    seedSuperAdminTenantMembership: envBool('SEED_SUPER_ADMIN_TENANT_MEMBERSHIP', true),
     standardUserEmail: envStr('STANDARD_USER_EMAIL') ?? 'user@documind.local',
     standardUserPassword: envStr('STANDARD_USER_PASSWORD') ?? 'documind123',
     rag,
