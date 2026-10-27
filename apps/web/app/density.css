@@ -1,0 +1,337 @@
+/*
+ * 密度/字号对齐 Portal（最后加载，覆盖 product-theme 的宽松尺度）。
+ * Portal 基准：正文 13/1.55，阅读正文 13.5/1.8，次级 12.5，元信息 11–11.5，
+ * 侧栏行 32–36，表格 cell 12.5–13，聊天内容宽 780–880，卡片内边距 12–14。
+ */
+
+body {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* ---------- 对话侧栏 ---------- */
+.dm-new-session-button {
+  font-size: 13px;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+}
+
+.dm-chat-history {
+  padding: 0 10px 10px;
+}
+
+.dm-history-group-title {
+  font-size: 11px;
+  font-weight: 500;
+  padding: 8px 6px 4px;
+}
+
+.dm-history-item {
+  height: 34px;
+}
+
+.dm-history-item-main {
+  font-size: 13px;
+  height: 34px;
+  padding: 0 10px;
+}
+
+.dm-history-menu button {
+  font-size: 12.5px;
+  height: 30px;
+}
+
+.dm-chat-history-toolbar {
+  font-size: 11.5px;
+  padding: 10px 14px 4px;
+}
+
+.dm-chat-session-title .dm-chat-agent-name {
+  font-size: 13px;
+}
+
+.dm-chat-session-title strong {
+  font-size: 12.5px;
+}
+
+/* ---------- 消息流 ---------- */
+.dm-chat-shell {
+  --dm-chat-content-width: min(880px, 100%);
+}
+
+.dm-chat-stream {
+  gap: 10px;
+  padding: 62px 24px 16px;
+}
+
+.dm-chat-stream-end {
+  height: 40px;
+  min-height: 40px;
+}
+
+.dm-user-message-avatar,
+.dm-answer-avatar {
+  flex-basis: 28px;
+  height: 28px;
+  width: 28px;
+}
+
+.dm-user-message-meta {
+  margin-bottom: 4px;
+}
+
+.dm-user-message-meta strong,
+.dm-message-identity strong {
+  font-size: 12px;
+}
+
+.dm-user-message-meta time,
+.dm-message-identity time {
+  font-size: 11px;
+}
+
+.dm-user-bubble {
+  border-radius: 10px;
+  font-size: 13px;
+  line-height: 1.65;
+  padding: 9px 12px;
+}
+
+.dm-answer-card {
+  gap: 6px;
+}
+
+.dm-answer-head {
+  min-height: 26px;
+}
+
+.dm-answer-head strong {
+  font-size: 12.5px;
+}
+
+.dm-answer-head p {
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.dm-answer-content {
+  border-radius: 12px;
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--text-primary) 4%, transparent);
+  font-size: 13.5px;
+  gap: 8px;
+  line-height: 1.8;
+  padding: 14px 16px;
+}
+
+.dm-reasoning-toggle,
+.action-feed-row-text,
+.dm-process-copy {
+  font-size: 12.5px;
+}
+
+.follow-up-question-button {
+  font-size: 12.5px;
+  min-height: 28px;
+  padding: 4px 10px;
+}
+
+.dm-citation-chip {
+  font-size: 11.5px;
+  height: 26px;
+  padding: 0 9px;
+}
+
+/* ---------- Markdown ---------- */
+.dm-markdown-content {
+  gap: 8px;
+}
+
+.dm-markdown-content h1 { font-size: 17px; }
+.dm-markdown-content h2 { font-size: 15px; }
+.dm-markdown-content h3 { font-size: 14px; }
+.dm-markdown-content h4,
+.dm-markdown-content h5,
+.dm-markdown-content h6 { font-size: 13.5px; }
+
+.dm-markdown-content ul,
+.dm-markdown-content ol {
+  gap: 4px;
+  padding-left: 18px;
+}
+
+.dm-markdown-content blockquote {
+  padding: 8px 10px;
+}
+
+.dm-markdown-table-wrap table {
+  font-size: 12.5px;
+}
+
+.dm-markdown-table-wrap th,
+.dm-markdown-table-wrap td {
+  padding: 6px 10px;
+}
+
+/* ---------- 输入区 ---------- */
+.dm-composer {
+  padding: 4px 24px 10px;
+}
+
+.dm-composer-box {
+  border-radius: 12px;
+}
+
+.dm-composer-input-row {
+  min-height: 46px;
+  padding: 10px 12px 6px;
+}
+
+.dm-composer-box textarea {
+  font-size: 13.5px;
+  height: 28px;
+  line-height: 1.6;
+  max-height: 120px;
+  min-height: 28px;
+  padding: 2px 4px;
+}
+
+.dm-composer-toolbar {
+  gap: 8px;
+  padding: 8px 12px;
+}
+
+.dm-composer-tool {
+  height: 26px;
+}
+
+.dm-send-button {
+  border-radius: 9px;
+  flex-basis: 32px;
+  height: 32px;
+  width: 32px;
+}
+
+.dm-chat-footer-note {
+  font-size: 11.5px;
+  padding: 0 0 8px;
+}
+
+/* ---------- 空态 ---------- */
+.dm-chat-empty {
+  padding: 28px 24px 16px;
+}
+
+.dm-chat-empty-orb-wrap {
+  height: 112px;
+  margin-bottom: 8px;
+}
+
+.dm-chat-empty-orb-wrap .dm-agent-orb-large {
+  height: 96px;
+  width: 96px;
+}
+
+.dm-chat-empty-greeting {
+  font-size: 13px;
+}
+
+.dm-chat-empty h2 {
+  font-size: clamp(22px, 2.6vw, 30px);
+  margin: 6px 0 10px;
+}
+
+.dm-chat-empty > .dm-chat-empty-description {
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.dm-chat-empty-suggestions button {
+  border-radius: 8px;
+  font-size: 12.5px;
+  padding: 7px 11px;
+}
+
+/* ---------- 后台通用 ---------- */
+.dm-admin-content {
+  padding: 20px 24px;
+}
+
+.dm-nav-item,
+.dm-system-sidebar .dm-nav-item,
+.dm-return-row,
+.dm-button {
+  font-size: 13px;
+}
+
+.dm-nav-item,
+.dm-return-row {
+  min-height: 34px;
+  height: 34px;
+}
+
+.dm-button {
+  height: 32px;
+  padding: 0 12px;
+}
+
+.dm-table-row {
+  font-size: 13px;
+  min-height: 32px;
+  padding: 6px 0;
+}
+
+.dm-document-row,
+.dm-recent-doc-row {
+  min-height: 44px;
+  padding: 6px 0;
+}
+
+.dm-document-cell,
+.dm-document-name strong,
+.dm-recent-doc-name strong {
+  font-size: 13px;
+}
+
+.dm-document-name small,
+.dm-recent-doc-name small {
+  font-size: 11.5px;
+}
+
+.dm-field-row {
+  min-height: 42px;
+}
+
+.dm-field-row span {
+  font-size: 13px;
+}
+
+.dm-panel,
+.dm-knowledge-card {
+  padding: 14px;
+}
+
+.dm-panel-title,
+.dm-knowledge-card > strong {
+  font-size: 13px;
+}
+
+.dm-knowledge-card {
+  gap: 10px;
+}
+
+.dm-knowledge-card > p {
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+@media (max-width: 720px) {
+  .dm-chat-stream {
+    gap: 10px;
+    padding: 58px 14px 14px;
+  }
+
+  .dm-composer {
+    padding: 4px 14px 10px;
+  }
+}

@@ -3,6 +3,7 @@ import { BRAND_ICON_URL } from "@/components/ui/brand-mark";
 import "streamdown/styles.css";
 import "./globals.css";
 import "./product-theme.css";
+import "./density.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
 
 
