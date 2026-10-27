@@ -1,0 +1,64 @@
+DocuMind 权限覆盖（RBAC）
+============================================================
+
+模型
+----
+  人员 × 权限实体 × 动作（view/edit/manage）
+  功能实体: kb / document / member / config / model / api_client / audit
+  资源实体: 知识库(kb)
+
+  有效值 = 个人 deny ? false
+         : 个人 allow ? true
+         : 角色基线（不带个人覆盖的原逻辑）
+
+  资源动作还受功能闸门约束：kb.read / kb.write / kb.manage。
+  功能 allow 本期不支持；功能 deny 会移除对应原生权限点。
+
+数据
+----
+  permission_override (
+    tenant_id, subject_type='user', subject_id,
+    entity_type, entity_id, action, effect, updated_by, updated_at
+  )
+  迁移 0040_permission_override:
+    knowledge_base_acl 中 subject_type='user' 的记录 -> allow 覆盖；
+    role ACL 继续作为基线。
+
+接口
+----
+本地（租户管理员）:
+  GET    /api/v1/rbac/catalog
+  GET    /api/v1/rbac/subjects
+  GET    /api/v1/rbac/matrix?subject_id=...
+  PUT    /api/v1/rbac/matrix
+  DELETE /api/v1/rbac/matrix?subject_id=...
+  POST   /api/v1/rbac/migrate-legacy?dry_run=true|false
+  POST   /api/v1/rbac/prune?dry_run=true|false
+
+Portal 内部:
+  /api/portal/rbac/v1/{catalog|subjects|matrix}
+
+执行点
+------
+  auth/actor.ts: 每个请求加载一次覆盖；无覆盖时完全走原逻辑。
+    - permissions 减去功能 deny 的原生权限点
+    - allowed_kb_ids = 有效 view 的 KB
+    - kb_actions = 每个 KB 的 view/edit/manage
+  auth/permissions.ts: requireKbPermission 优先读 kb_actions。
+  knowledge/conversations: allowed_kb_ids 已生效。
+
+CLI
+---
+  documind perm catalog
+  documind perm subjects
+  documind perm matrix --user anner
+  documind perm set --user anner --type kb --id <kb> --action view --effect deny
+  documind perm set --user anner --type kb --id <kb> --action view --effect reset
+  documind perm check --user anner --type kb --id <kb> --action view
+  documind perm migrate-legacy --dry-run
+  documind perm prune --dry-run
+
+页面
+----
+  /tenant/permissions  →  共享 <rbac-panel>
+  入口: 租户管理侧栏“权限管理”
