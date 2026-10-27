@@ -462,7 +462,6 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
     foot.className = 'rbac-people-foot';
 
     const renderPeopleList = () => {
-      if (!list.isConnected) return;
       list.innerHTML = '';
       const keyword = state.search.trim().toLowerCase();
       const filtered = state.subjects.filter((subject) => {
