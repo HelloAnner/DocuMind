@@ -407,7 +407,10 @@ async function subjectsHandler(ctx: Context<AppEnv>) {
     LEFT JOIN portal_identity_mapping pim
       ON pim.local_user_id = u.id AND pim.portal_tenant_id = ptm.portal_tenant_id
     WHERE tm.tenant_id = ${actor.tenant_id} AND tm.status <> 'removed'
-    ORDER BY CASE WHEN 'tenant_admin' = ANY(tm.roles) THEN 0 ELSE 1 END,
+    ORDER BY CASE
+               WHEN tm.roles && ARRAY['tenant_owner','tenant_admin']::text[] THEN 0
+               WHEN tm.roles && ARRAY['super_admin']::text[] THEN 2
+               ELSE 1 END,
              COALESCE(NULLIF(u.name, ''), u.login_id), u.login_id
   `;
   return ctx.json({
@@ -605,7 +608,10 @@ async function internalSubjects(ctx: Context<AppEnv>) {
     LEFT JOIN portal_identity_mapping pim
       ON pim.local_user_id = u.id AND pim.portal_tenant_id = ptm.portal_tenant_id
     WHERE tm.tenant_id = ${tenantId} AND tm.status <> 'removed'
-    ORDER BY CASE WHEN 'tenant_admin' = ANY(tm.roles) THEN 0 ELSE 1 END,
+    ORDER BY CASE
+               WHEN tm.roles && ARRAY['tenant_owner','tenant_admin']::text[] THEN 0
+               WHEN tm.roles && ARRAY['super_admin']::text[] THEN 2
+               ELSE 1 END,
              COALESCE(NULLIF(u.name, ''), u.login_id), u.login_id
   `;
   return ctx.json({
