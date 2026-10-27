@@ -117,6 +117,12 @@ if [[ "$super_admin_allow_weak" != "0" && "$super_admin_allow_weak" != "1" ]]; t
   echo "Invalid SUPER_ADMIN_ALLOW_WEAK: expected 0 or 1" >&2
   exit 1
 fi
+enterprise_admin_allow_weak="$(remote_env_value ENTERPRISE_ADMIN_ALLOW_WEAK)"
+enterprise_admin_allow_weak="${ENTERPRISE_ADMIN_ALLOW_WEAK:-${enterprise_admin_allow_weak:-0}}"
+if [[ "$enterprise_admin_allow_weak" != "0" && "$enterprise_admin_allow_weak" != "1" ]]; then
+  echo "Invalid ENTERPRISE_ADMIN_ALLOW_WEAK: expected 0 or 1" >&2
+  exit 1
+fi
 super_admin_email="$(seed_identifier "$(remote_env_value SUPER_ADMIN_EMAIL)" 'Anner')"
 enterprise_admin_email="$(seed_identifier "$(remote_env_value ENTERPRISE_ADMIN_EMAIL)" 'admin@documind.local')"
 standard_user_email="$(seed_identifier "$(remote_env_value STANDARD_USER_EMAIL)" 'user@documind.local')"
@@ -128,7 +134,14 @@ if [[ "$super_admin_allow_weak" == "1" ]]; then
 else
   super_admin_password="$(resolve_strong_secret "$(remote_env_value SUPER_ADMIN_PASSWORD)")"
 fi
-enterprise_admin_password="$(resolve_strong_secret "$(remote_env_value ENTERPRISE_ADMIN_PASSWORD)")"
+if [[ "$enterprise_admin_allow_weak" == "1" ]]; then
+  enterprise_admin_password="$(remote_env_value ENTERPRISE_ADMIN_PASSWORD)"
+  if [[ -z "$enterprise_admin_password" ]]; then
+    enterprise_admin_password="$(resolve_strong_secret "")"
+  fi
+else
+  enterprise_admin_password="$(resolve_strong_secret "$(remote_env_value ENTERPRISE_ADMIN_PASSWORD)")"
+fi
 standard_user_password="$(resolve_strong_secret "$(remote_env_value STANDARD_USER_PASSWORD)")"
 report_rotation() {
   if [[ "$2" != "$3" ]]; then
@@ -296,6 +309,7 @@ SUPER_ADMIN_PASSWORD=$super_admin_password
 SUPER_ADMIN_ALLOW_WEAK=$super_admin_allow_weak
 ENTERPRISE_ADMIN_EMAIL=$enterprise_admin_email
 ENTERPRISE_ADMIN_PASSWORD=$enterprise_admin_password
+ENTERPRISE_ADMIN_ALLOW_WEAK=$enterprise_admin_allow_weak
 STANDARD_USER_EMAIL=$standard_user_email
 STANDARD_USER_PASSWORD=$standard_user_password
 
@@ -440,6 +454,7 @@ upsert_env_var SUPER_ADMIN_PASSWORD '$super_admin_password'
 upsert_env_var SUPER_ADMIN_ALLOW_WEAK '$super_admin_allow_weak'
 upsert_env_var ENTERPRISE_ADMIN_EMAIL '$enterprise_admin_email'
 upsert_env_var ENTERPRISE_ADMIN_PASSWORD '$enterprise_admin_password'
+upsert_env_var ENTERPRISE_ADMIN_ALLOW_WEAK '$enterprise_admin_allow_weak'
 upsert_env_var STANDARD_USER_EMAIL '$standard_user_email'
 upsert_env_var STANDARD_USER_PASSWORD '$standard_user_password'
 seed_password="\$(grep -E '^SUPER_ADMIN_PASSWORD=' "\$remote_env" | tail -1 | cut -d= -f2-)"
