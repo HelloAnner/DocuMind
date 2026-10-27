@@ -120,13 +120,12 @@ async function loadKbs(sql: Sql, tenantId: string): Promise<KbLike[]> {
 }
 
 async function loadAclKbIds(sql: Sql, tenantId: string, userId: string, roles: string[]): Promise<Set<string>> {
+  // 个人用户授权来自 permission_override；user ACL 仅供 API 客户端。
   const rows = await sql`
     SELECT DISTINCT kb_id FROM knowledge_base_acl
     WHERE tenant_id = ${tenantId}
-      AND (
-        (subject_type = 'user' AND subject_id = ${userId}::text)
-        OR (subject_type = 'role' AND subject_id = ANY(${roles}::text[]))
-      )
+      AND subject_type = 'role'
+      AND subject_id = ANY(${roles}::text[])
   `;
   return new Set(rows.map((row) => String(row.kb_id)));
 }

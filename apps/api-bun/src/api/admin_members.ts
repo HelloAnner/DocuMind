@@ -110,6 +110,10 @@ async function removeMember(c: Context<AppEnv>) {
       DELETE FROM knowledge_base_acl
       WHERE tenant_id = ${actor.tenant_id} AND subject_type = 'user' AND subject_id = ${userId}
     `;
+    await tx`
+      DELETE FROM permission_override
+      WHERE tenant_id = ${actor.tenant_id} AND subject_type = 'user' AND subject_id = ${userId}
+    `;
     return currentRoles;
   });
 

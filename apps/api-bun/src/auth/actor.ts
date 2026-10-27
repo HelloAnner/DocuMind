@@ -29,15 +29,14 @@ async function allowedKbIds(sql: Sql, tenantId: string, userId: string, roles: s
     `;
     return rows.map((row) => String(row.id));
   }
+  // 人类用户的个人授权只来自 permission_override；user ACL 仅供 API 客户端。
   const rows = await sql`
     SELECT DISTINCT kb_id
     FROM knowledge_base_acl
     WHERE tenant_id = ${tenantId}
       AND permission IN ('read', 'write', 'manage')
-      AND (
-        (subject_type = 'role' AND subject_id = ANY(${roles}))
-        OR (subject_type = 'user' AND subject_id = ${userId})
-      )
+      AND subject_type = 'role'
+      AND subject_id = ANY(${roles}::text[])
   `;
   return rows.map((row) => String(row.kb_id));
 }

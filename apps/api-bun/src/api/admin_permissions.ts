@@ -100,6 +100,18 @@ async function grantPermission(c: Context<AppEnv>) {
   if (!row) throw AppError.internal('knowledge_base_acl upsert returned no row');
   const aclId = String(row.id);
 
+  // 人类用户的个人授权同时写入 permission_override；user ACL 仅供 API 客户端。
+  if (subjectType === 'user') {
+    const action = permission === 'read' ? 'view' : permission === 'write' ? 'edit' : 'manage';
+    await sql`
+      INSERT INTO permission_override
+        (tenant_id, subject_type, subject_id, entity_type, entity_id, action, effect, updated_by)
+      VALUES (${actor.tenant_id}, 'user', ${subjectId}, 'kb', ${req.kb_id}, ${action}, 'allow', ${actor.user_id})
+      ON CONFLICT (tenant_id, subject_type, subject_id, entity_type, entity_id, action)
+      DO UPDATE SET effect = 'allow', updated_by = EXCLUDED.updated_by, updated_at = NOW()
+    `;
+  }
+
   const authorization = await fetchPermission(sql, actor.tenant_id, aclId);
   await recordAuditEvent(sql, actor, 'knowledge_base_acl.grant', 'knowledge_base_acl', aclId, {
     kb_id: authorization.kb_id,
@@ -126,6 +138,15 @@ async function revokePermission(c: Context<AppEnv>) {
   `;
   if (result.count === 0) {
     throw AppError.notFound('ACL_NOT_FOUND', '授权记录不存在或无权限');
+  }
+  if (existing.subject_type === 'user') {
+    const action = existing.permission === 'read' ? 'view' : existing.permission === 'write' ? 'edit' : 'manage';
+    await sql`
+      DELETE FROM permission_override
+      WHERE tenant_id = ${actor.tenant_id} AND subject_type = 'user'
+        AND subject_id = ${existing.subject_id} AND entity_type = 'kb'
+        AND entity_id = ${existing.kb_id} AND action = ${action}
+    `;
   }
   await recordAuditEvent(sql, actor, 'knowledge_base_acl.revoke', 'knowledge_base_acl', aclId, {
     kb_id: existing.kb_id,

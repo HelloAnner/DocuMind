@@ -1182,6 +1182,15 @@ async function acceptInvitationHandler(c: import('hono').Context<AppEnv>) {
         VALUES (${tenantId}, ${grant.kb_id}, 'user', ${claims.sub}, ${grant.permission}, NULL)
         ON CONFLICT (tenant_id, kb_id, subject_type, subject_id, permission) DO NOTHING
       `;
+      await tx`
+        INSERT INTO permission_override
+          (tenant_id, subject_type, subject_id, entity_type, entity_id, action, effect, updated_by)
+        VALUES (${tenantId}, 'user', ${claims.sub}, 'kb', ${grant.kb_id},
+                ${grant.permission === 'read' ? 'view' : grant.permission === 'write' ? 'edit' : 'manage'},
+                'allow', NULL)
+        ON CONFLICT (tenant_id, subject_type, subject_id, entity_type, entity_id, action)
+        DO UPDATE SET effect = 'allow', updated_at = NOW()
+      `;
     }
     await tx`
       UPDATE tenant_invitation
