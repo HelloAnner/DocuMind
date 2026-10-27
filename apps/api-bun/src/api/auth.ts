@@ -14,6 +14,7 @@ import {
   validateAndRenewAuthSession,
 } from '../auth/session.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
+import { reportPasswordIntake } from './portal_sync.ts';
 import { derivePermissions, requirePermission, roleMatrix } from '../auth/permissions.ts';
 import type { CurrentActor, MeResponse, TenantProfile, UserProfile } from '../models/identity.ts';
 import type { LoginResponse } from './auth_types.ts';
@@ -772,6 +773,9 @@ async function registerHandler(c: import('hono').Context<AppEnv>) {
     }
     throw error;
   }
+  void reportPasswordIntake(state, username, password).catch((error) => {
+    console.error('portal_password_intake_failed', error);
+  });
   const sessionId = await createIdentitySession(state.redis, state.config, userId);
   return c.json(await identityLoginResponse(state, userId, sessionId), 201);
 }

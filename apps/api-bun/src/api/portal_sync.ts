@@ -411,5 +411,53 @@ export function portalSyncRouter(): Hono<AppEnv> {
     }
   });
 
+  // Portal 下发密码：各系统哈希算法不同，收到明文后用自己的算法重新哈希。
+  router.put(`${PREFIX}/users/:portalUserId/password`, async (c) => {
+    try {
+      const state = requireToken(c);
+      const sql = requiredSql(state);
+      const portalUserId = c.req.param('portalUserId');
+      const body = await c.req.json() as Record<string, unknown>;
+      if (typeof body.password !== 'string' || body.password.length === 0 || Buffer.byteLength(body.password, 'utf8') > 72) {
+        throw AppError.badRequest('INVALID_PASSWORD', '无效密码');
+      }
+      const linked = await sql`
+        SELECT DISTINCT local_user_id FROM portal_identity_mapping WHERE portal_user_id=${portalUserId}
+      `;
+      if (!linked.length) throw AppError.notFound('LOCAL_USER_NOT_FOUND', '本地账号不存在');
+      const passwordHash = await bcrypt.hash(body.password, 10);
+      let updated = 0;
+      let revoked = 0;
+      for (const link of linked) {
+        const localUserId = String(link.local_user_id);
+        const result = await sql`
+          UPDATE app_user SET password_hash=${passwordHash} WHERE id=${localUserId} AND status<>'suspended'
+        `;
+        updated += Number(result.count ?? 0);
+        revoked += await revokeUserSessions(state, localUserId);
+      }
+      return c.json({ portal_user_id: portalUserId, local_users_updated: updated, sessions_revoked: revoked });
+    } catch (error) {
+      return errorResponse(c, error);
+    }
+  });
+
   return router;
+}
+
+/**
+ * 本地注册时先把密码回传 Portal（账号还没映射，按 username 暂存），
+ * Portal 导入这个账号时就能直接用同一个人设过的密码。
+ */
+export async function reportPasswordIntake(state: AppState, username: string, password: string): Promise<void> {
+  const base = state.config.portalBaseUrl.replace(/\/+$/, '');
+  const token = process.env.PORTAL_INTERNAL_TOKEN ?? '';
+  if (!base || !token) return;
+  const response = await fetch(`${base}/api/v1/portal/sync/password`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-portal-internal-token': token },
+    body: JSON.stringify({ username, password, system: 'documind' }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`portal password intake failed: HTTP ${response.status}`);
 }

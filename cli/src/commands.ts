@@ -110,6 +110,13 @@ async function portalSyncCommand(args: ParsedArgs, api: ApiClient, json: boolean
     printJson(await api.portalSync(`/api/portal/sync/v1/tenants/${encodeURIComponent(tenantId)}/members`));
     return 0;
   }
+  if (action === "password") {
+    const portalUserId = stringOption(args, "portal-user-id");
+    const password = stringOption(args, "password");
+    if (!portalUserId || !password) throw new CliError("portal-sync password 需要 --portal-user-id 和 --password", 2);
+    printJson(await api.portalSync(`/api/portal/sync/v1/users/${encodeURIComponent(portalUserId)}/password`, "PUT", { password }));
+    return 0;
+  }
   if (action === "selftest") {
     const health = await api.portalSync<Record<string, unknown>>("/api/portal/sync/v1/health");
     const capabilities = await api.portalSync<Record<string, unknown>>("/api/portal/sync/v1/capabilities");
@@ -126,7 +133,7 @@ async function portalSyncCommand(args: ParsedArgs, api: ApiClient, json: boolean
     });
     return 0;
   }
-  throw new CliError("portal-sync 支持 status|tenants|members|selftest", 2);
+  throw new CliError("portal-sync 支持 status|tenants|members|password|selftest", 2);
 }
 
 async function shareCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
