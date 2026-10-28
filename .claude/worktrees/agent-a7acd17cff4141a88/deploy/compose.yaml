@@ -1,0 +1,125 @@
+# Documind 中间件统一声明。
+#
+# 应用本体仍由 scripts/deploy.sh 以「单二进制 + nohup/PID」发布，不进容器。
+# 本文件只负责 Postgres / Redis / RabbitMQ / Elasticsearch / MinIO。
+#
+# 用法（服务器上）：
+#   docker compose --env-file /opt/documind/shared/compose.env -f compose.yaml up -d
+#   docker compose --env-file /opt/documind/shared/compose.env -f compose.yaml --profile init up minio-init
+#
+# 数据全部是宿主 bind mount（/opt/documind/shared/*），切换容器运行时不会丢数据。
+# 永远不要执行 down -v。
+
+name: documind
+
+# 镜像默认走 m.daocloud.io 国内镜像：服务器在国内，直连 Docker Hub / elastic.co 会超时。
+# 与迁移前容器使用的镜像完全一致，避免切换运行时后还要重新拉境外源。
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-m.daocloud.io/docker.io/library/postgres:16-alpine}
+    container_name: documind-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?compose.env 缺少 POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?compose.env 缺少 POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:?compose.env 缺少 POSTGRES_DB}
+      PGDATA: /var/lib/postgresql/data
+      LANG: en_US.utf8
+    ports:
+      - "127.0.0.1:8100:5432"
+    volumes:
+      - /opt/documind/shared/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  redis:
+    image: ${REDIS_IMAGE:-m.daocloud.io/docker.io/library/redis:7-alpine}
+    container_name: documind-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "127.0.0.1:8101:6379"
+    volumes:
+      - /opt/documind/shared/redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  rabbitmq:
+    image: ${RABBITMQ_IMAGE:-m.daocloud.io/docker.io/library/rabbitmq:3-management-alpine}
+    container_name: documind-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8102:5672"
+      - "127.0.0.1:8103:15672"
+    volumes:
+      - /opt/documind/shared/rabbitmq:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 15s
+      timeout: 10s
+      retries: 30
+
+  elasticsearch:
+    image: ${ELASTICSEARCH_IMAGE:-m.daocloud.io/docker.elastic.co/elasticsearch/elasticsearch:8.14.3}
+    container_name: documind-elasticsearch
+    restart: unless-stopped
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms512m -Xmx512m}
+    ports:
+      - "127.0.0.1:8104:9200"
+    volumes:
+      - /opt/documind/shared/elasticsearch:/usr/share/elasticsearch/data
+    ulimits:
+      nproc: 4194304
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 40
+
+  minio:
+    image: ${MINIO_IMAGE:-m.daocloud.io/docker.io/minio/minio:RELEASE.2024-07-16T23-46-41Z}
+    container_name: documind-minio
+    restart: unless-stopped
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?compose.env 缺少 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?compose.env 缺少 MINIO_ROOT_PASSWORD}
+    command: ["server", "/data", "--console-address", ":9001"]
+    ports:
+      - "127.0.0.1:9010:9000"
+      - "127.0.0.1:9011:9001"
+    volumes:
+      - /opt/documind/shared/minio:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+
+  # 一次性任务：确保 bucket 存在。用 --profile init 显式触发，不随 up -d 启动。
+  minio-init:
+    # tag 必须是本地已有的那个：MinIO 镜像已拉不到，mc 只能从 podman 存储搬过来，
+    # 而本地存的是 :latest。写成别的 tag 会导致 compose 去仓库拉并失败。
+    image: ${MINIO_MC_IMAGE:-m.daocloud.io/docker.io/minio/mc:latest}
+    profiles: ["init"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?compose.env 缺少 MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?compose.env 缺少 MINIO_ROOT_PASSWORD}
+      BUCKET: ${OBJECT_STORAGE_BUCKET:-documind}
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD"
+        mc ready local
+        mc mb --ignore-existing "local/$$BUCKET"

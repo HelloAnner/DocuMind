@@ -1,0 +1,832 @@
+import { ApiError, CliError } from "./errors.ts";
+import {
+  clearSession,
+  configuredApiToken,
+  configuredPassword,
+  readSession,
+  writeSession,
+} from "./config.ts";
+import type {
+  AdminDocument,
+  AdminDocumentDetail,
+  ApiClientSummary,
+  ApiTokenSummary,
+  CreatedApiClient,
+  ExternalIdentity,
+  ChatModelCatalog,
+  CliConfig,
+  ConversationSummary,
+  DeleteDocumentResponse,
+  DeleteKnowledgeBaseResponse,
+  DocumentJobDetail,
+  DocumentJobsResponse,
+  DocumentPage,
+  DownloadedDocument,
+  ExcludeFromSearchResponse,
+  FilePreviewTransport,
+  Identity,
+  KnowledgeBase,
+  KnowledgeBaseUpsert,
+  JsonObject,
+  LoginResponse,
+  MessageListResponse,
+  MessageTraceResponse,
+  ReplaceDocumentFileResponse,
+  ReprocessDocumentResponse,
+  RetryDocumentsResponse,
+  SendToOcrResponse,
+  SessionState,
+  TenantProfile,
+  UploadDocumentResponse,
+  UserFile,
+  VectorIndexSummary,
+} from "./types.ts";
+
+export class ApiClient {
+  readonly baseUrl: string;
+  private session: SessionState | undefined;
+  private externalMode = false;
+
+  constructor(
+    readonly config: CliConfig,
+    readonly configPath: string,
+    private readonly fetcher: typeof fetch = fetch,
+  ) {
+    this.baseUrl = buildBaseUrl(config);
+  }
+
+  enableExternalMode(): this {
+    this.externalMode = true;
+    return this;
+  }
+
+  async externalMe(): Promise<ExternalIdentity> {
+    return this.requestJson("/api/v1/external/me", undefined, true, false);
+  }
+
+  async listApiClients(): Promise<ApiClientSummary[]> {
+    return this.requestJson("/api/admin/api-clients");
+  }
+
+  async createApiClient(input: {
+    name: string;
+    description?: string;
+    kb_ids: string[];
+    scopes?: string[];
+    expires_in_days?: number;
+    rate_limit_per_minute?: number;
+  }): Promise<CreatedApiClient> {
+    return this.requestJson("/api/admin/api-clients", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async createApiToken(clientId: string, expiresInDays = 90): Promise<{ token: ApiTokenSummary; secret: string }> {
+    return this.requestJson(`/api/admin/api-clients/${encodeURIComponent(clientId)}/tokens`, {
+      method: "POST",
+      body: JSON.stringify({ expires_in_days: expiresInDays }),
+    });
+  }
+
+  async revokeApiToken(clientId: string, tokenId: string): Promise<unknown> {
+    return this.requestJson(
+      `/api/admin/api-clients/${encodeURIComponent(clientId)}/tokens/${encodeURIComponent(tokenId)}/revoke`,
+      { method: "POST" },
+    );
+  }
+
+  async updateApiClientStatus(clientId: string, status: "active" | "disabled"): Promise<ApiClientSummary> {
+    return this.requestJson(`/api/admin/api-clients/${encodeURIComponent(clientId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    });
+  }
+  async listSkills(search = ""): Promise<{ items: unknown[] }> {
+    const query = search ? `?q=${encodeURIComponent(search)}` : "";
+    return this.requestJson(`/api/admin/skills${query}`);
+  }
+
+  async getSkill(id: string): Promise<Record<string, unknown>> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`);
+  }
+
+  async createSkill(input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.requestJson("/api/admin/skills", { method: "POST", body: JSON.stringify(input) });
+  }
+
+  async updateSkill(id: string, input: Record<string, unknown>): Promise<Record<string, unknown>> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`, {
+      method: "PUT", body: JSON.stringify(input),
+    });
+  }
+
+  async deleteSkill(id: string): Promise<unknown> {
+    return this.requestJson(`/api/admin/skills/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async uploadSkill(file: Blob, fileName: string): Promise<Record<string, unknown>> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    return this.requestJson("/api/admin/skills/upload", { method: "POST", body: form });
+  }
+
+  async importSkill(url: string): Promise<Record<string, unknown>> {
+    return this.requestJson("/api/admin/skills/import", {
+      method: "POST", body: JSON.stringify({ url }),
+    });
+  }
+
+
+  async register(): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>(
+      "/api/v1/auth/register",
+      {
+        method: "POST",
+        body: JSON.stringify({
+          username: this.config.auth.username,
+          password: configuredPassword(this.config),
+        }),
+      },
+      false,
+      false,
+    );
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
+  async login(force = false, platform = false): Promise<Identity> {
+    const previous = await this.getSession();
+    if (!force) {
+      if (previous.access_token) {
+        try {
+          return await this.me(false);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 401) throw error;
+        }
+      }
+    }
+    const credentials = {
+      username: this.config.auth.username,
+      password: configuredPassword(this.config),
+    };
+    let response: LoginResponse;
+    try {
+      response = await this.requestJson<LoginResponse>(
+        "/api/auth/login",
+        {
+          method: "POST",
+          body: JSON.stringify(platform
+            ? credentials
+            : { ...credentials, tenant_slug: this.config.auth.tenant }),
+        },
+        false,
+        false,
+      );
+    } catch (error) {
+      const body = error instanceof ApiError && error.body && typeof error.body === "object"
+        ? error.body as Record<string, unknown>
+        : null;
+      const platformScopeError = body?.code === "PLATFORM_ADMIN_TENANT_LOGIN_FORBIDDEN"
+        || body?.code === "PLATFORM_ADMIN_TENANT_MEMBERSHIP_REQUIRED";
+      if (error instanceof ApiError && platformScopeError) {
+        response = await this.requestJson<LoginResponse>(
+          "/api/auth/login",
+          { method: "POST", body: JSON.stringify(credentials) },
+          false,
+          false,
+        );
+      } else {
+        throw error;
+      }
+    }
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      ...(previous.last_conversation_id
+        ? { last_conversation_id: previous.last_conversation_id }
+        : {}),
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
+  async loginPortalTicket(code: string, createIntent = false): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>(
+      "/api/auth/portal/ticket",
+      { method: "POST", body: JSON.stringify({ code, create_intent: createIntent }) },
+      false, false,
+    );
+    return this.storePortalSession(response.access_token, response);
+  }
+
+  async linkPortalTicket(code: string): Promise<Identity> {
+    const local = await this.getSession();
+    if (!local.access_token || local.auth_source === "portal") {
+      throw new CliError("先使用 auth login 验证需要关联的本地账号，再运行 auth portal-link", 2);
+    }
+    let login: LoginResponse;
+    try {
+      login = await this.requestJson<LoginResponse>(
+        "/api/auth/portal/ticket",
+        { method: "POST", body: JSON.stringify({ code }) },
+        false, false,
+      );
+    } catch (error) {
+      const body = error instanceof ApiError && error.status === 409
+        && error.body && typeof error.body === "object"
+        ? error.body as Record<string, unknown> : null;
+      if (body?.code !== "PORTAL_LINK_REQUIRED"
+        || typeof body.challenge !== "string") throw error;
+      const linked = await this.requestJson<{ auth: { token: string } }>(
+        "/api/auth/portal/link",
+        { method: "POST", body: JSON.stringify({ challenge: body.challenge, explicit_link: true }),
+          headers: { Authorization: `Bearer ${local.access_token}` } },
+        false, false,
+      );
+      const identity = await this.requestJson<Identity>(
+        "/api/me", { headers: { Authorization: `Bearer ${linked.auth.token}` } },
+        false, false,
+      );
+      return this.storePortalSession(linked.auth.token, identity);
+    }
+    if (!local.user?.id || login.user.id !== local.user.id) {
+      throw new CliError("门户身份已关联其他本地账号，拒绝覆盖已验证的账号");
+    }
+    return this.storePortalSession(login.access_token, login);
+  }
+
+  private async storePortalSession(token: string, identity: Identity): Promise<Identity> {
+    const { user, tenant, roles, permissions, allowed_kb_ids } = identity;
+    this.session = {
+      access_token: token, auth_source: "portal",
+      user, tenant, roles, permissions, allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return { user, tenant, roles, permissions, allowed_kb_ids };
+  }
+
+  async listTenants(): Promise<{ items: TenantProfile[]; active_tenant_id: string | null }> {
+    return this.requestJson("/api/v1/auth/tenants");
+  }
+
+  async switchTenant(tenantId: string): Promise<Identity> {
+    const response = await this.requestJson<LoginResponse>("/api/v1/auth/switch-tenant", {
+      method: "POST",
+      body: JSON.stringify({ tenant_id: tenantId }),
+    });
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return {
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+    };
+  }
+
+  async acceptInvitation(token: string): Promise<LoginResponse> {
+    const response = await this.requestJson<LoginResponse>("/api/v1/invitations/accept", {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    const previous = await this.getSession();
+    this.session = {
+      access_token: response.access_token,
+      user: response.user,
+      tenant: response.tenant,
+      roles: response.roles,
+      permissions: response.permissions,
+      allowed_kb_ids: response.allowed_kb_ids,
+      ...(previous.last_conversation_id
+        ? { last_conversation_id: previous.last_conversation_id }
+        : {}),
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+    return response;
+  }
+
+  async logout(): Promise<void> {
+    const current = await this.getSession();
+    if (current.access_token) {
+      try {
+        await this.requestJson("/api/auth/logout", { method: "POST" }, true, false);
+      } catch (error) {
+        if (!(error instanceof ApiError) || error.status !== 401) throw error;
+      }
+    }
+    this.session = {};
+    await clearSession(this.configPath);
+  }
+
+  async me(autoLogin = true): Promise<Identity> {
+    const identity = await this.requestJson<Identity>(
+      "/api/me",
+      undefined,
+      true,
+      autoLogin,
+    );
+    await this.updateSession(identity);
+    return identity;
+  }
+
+  async updateProfile(name: string, avatarUrl: string | null): Promise<Identity> {
+    const identity = await this.requestJson<Identity>("/api/account/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ name, avatar_url: avatarUrl }),
+    });
+    await this.updateSession(identity);
+    return identity;
+  }
+
+  async health(): Promise<unknown> {
+    return this.requestJson("/api/health", undefined, false, false);
+  }
+
+  async chatModels(): Promise<ChatModelCatalog> {
+    return this.requestJson("/api/chat/models");
+  }
+
+  async listKnowledgeBases(): Promise<KnowledgeBase[]> {
+    return this.requestJson(
+      this.externalMode ? "/api/v1/external/knowledge-bases" : "/api/knowledge-bases",
+    );
+  }
+
+  async listAdminKnowledgeBases(): Promise<KnowledgeBase[]> {
+    return this.requestJson("/api/admin/knowledge-bases");
+  }
+
+  async createKnowledgeBase(input: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+    return this.requestJson("/api/admin/knowledge-bases", {
+      method: "POST",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async updateKnowledgeBase(id: string, input: KnowledgeBaseUpsert): Promise<KnowledgeBase> {
+    return this.requestJson(`/api/admin/knowledge-bases/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteKnowledgeBase(id: string): Promise<DeleteKnowledgeBaseResponse> {
+    return this.requestJson(`/api/admin/knowledge-bases/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  conversationPath(suffix = ""): string {
+    const base = this.externalMode ? "/api/v1/external/conversations" : "/api/conversations";
+    return `${base}${suffix}`;
+  }
+
+  async listConversations(limit = 20, cursor?: string): Promise<{
+    items: ConversationSummary[];
+    next_cursor?: string;
+  }> {
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (cursor) query.set("cursor", cursor);
+    return this.requestJson(`${this.conversationPath()}?${query}`);
+  }
+
+  async createConversation(kbIds: string[], title?: string): Promise<ConversationSummary> {
+    return this.requestJson(this.conversationPath(), {
+      method: "POST",
+      body: JSON.stringify({ kb_ids: kbIds, ...(title ? { title } : {}) }),
+    });
+  }
+
+  async getConversation(id: string): Promise<ConversationSummary> {
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`));
+  }
+
+  async updateConversation(
+    id: string,
+    input: { title?: string; kb_ids?: string[] },
+  ): Promise<ConversationSummary> {
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`), {
+      method: "PATCH",
+      body: JSON.stringify(input),
+    });
+  }
+
+  async deleteConversation(id: string): Promise<unknown> {
+    return this.requestJson(this.conversationPath(`/${encodeURIComponent(id)}`), {
+      method: "DELETE",
+    });
+  }
+
+  async getMessages(conversationId: string): Promise<MessageListResponse> {
+    return this.requestJson(
+      this.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
+    );
+  }
+
+  async listUserFiles(conversationId?: string, scope?: string): Promise<{ items: UserFile[] }> {
+    const params = new URLSearchParams();
+    if (scope) params.set("scope", scope);
+    if (conversationId) params.set("conversation_id", conversationId);
+    const query = params.toString() ? `?${params.toString()}` : "";
+    return this.requestJson(`/api/files${query}`);
+  }
+
+  async getUserFile(id: string): Promise<UserFile> {
+    return this.requestJson(`/api/files/${encodeURIComponent(id)}`);
+  }
+
+  async uploadUserFile(
+    file: Blob,
+    fileName: string,
+    path?: string,
+    conversationId?: string,
+    scope?: string,
+  ): Promise<UserFile> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    if (path) form.set("path", path);
+    if (conversationId) form.set("conversation_id", conversationId);
+    // scope 走 query 参数，与后端 fileScope(c) 的读取方式一致
+    const query = scope ? `?scope=${encodeURIComponent(scope)}` : "";
+    return this.requestJson(`/api/files${query}`, { method: "POST", body: form });
+  }
+
+  async downloadUserFile(id: string): Promise<Uint8Array> {
+    const response = await this.request(
+      `/api/files/${encodeURIComponent(id)}/download`,
+      { headers: { Accept: "application/octet-stream" } },
+    );
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  async deleteUserFile(id: string): Promise<unknown> {
+    return this.requestJson(`/api/files/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async getMessageTrace(
+    conversationId: string,
+    messageId: string,
+  ): Promise<MessageTraceResponse> {
+    return this.requestJson(
+      this.conversationPath(`/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/traces`),
+    );
+  }
+
+  async listDocuments(options: {
+    kbId?: string;
+    status?: string;
+    query?: string;
+    page?: number;
+    pageSize?: number;
+  } = {}): Promise<DocumentPage> {
+    const query = new URLSearchParams();
+    if (options.kbId) query.set("kb_id", options.kbId);
+    if (options.status) query.set("status", options.status);
+    if (options.query) query.set("q", options.query);
+    if (options.page) query.set("page", String(options.page));
+    if (options.pageSize) query.set("page_size", String(options.pageSize));
+    const suffix = query.size ? `?${query}` : "";
+    return this.requestJson(`/api/admin/documents${suffix}`);
+  }
+
+  async getDocument(id: string): Promise<AdminDocumentDetail> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}`);
+  }
+
+  async uploadDocument(
+    kbId: string,
+    file: Blob,
+    fileName: string,
+    uploadBatchId?: string,
+  ): Promise<UploadDocumentResponse> {
+    const form = new FormData();
+    if (uploadBatchId) form.set("upload_batch_id", uploadBatchId);
+    form.set("file", file, fileName);
+    return this.requestJson(
+      `/api/knowledge-bases/${encodeURIComponent(kbId)}/documents`,
+      { method: "POST", body: form },
+    );
+  }
+
+  async listDocumentJobs(options: { status?: string; kbId?: string; batchId?: string; query?: string; limit?: number } = {}): Promise<DocumentJobsResponse> {
+    const query = new URLSearchParams();
+    if (options.status) query.set("status", options.status);
+    if (options.kbId) query.set("kb_id", options.kbId);
+    if (options.batchId) query.set("batch_id", options.batchId);
+    if (options.query) query.set("q", options.query);
+    if (options.limit) query.set("limit", String(options.limit));
+    return this.requestJson(`/api/admin/document-jobs${query.size ? `?${query}` : ""}`);
+  }
+
+  async getDocumentJob(id: string): Promise<DocumentJobDetail> {
+    return this.requestJson(`/api/admin/document-jobs/${encodeURIComponent(id)}`);
+  }
+
+  async retryDocument(id: string): Promise<AdminDocument> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/retry`, {
+      method: "POST",
+    });
+  }
+
+  async retryDocuments(ids: string[]): Promise<RetryDocumentsResponse> {
+    return this.requestJson("/api/admin/documents/retry", {
+      method: "POST",
+      body: JSON.stringify({ doc_ids: ids }),
+    });
+  }
+
+  async forceIndexDocument(id: string): Promise<ReprocessDocumentResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/force-index`, {
+      method: "POST",
+    });
+  }
+
+  async excludeDocumentFromSearch(id: string): Promise<ExcludeFromSearchResponse> {
+    return this.requestJson(
+      `/api/admin/documents/${encodeURIComponent(id)}/exclude-from-search`,
+      { method: "POST" },
+    );
+  }
+
+  async replaceDocumentFile(
+    id: string,
+    file: Blob,
+    fileName: string,
+  ): Promise<ReplaceDocumentFileResponse> {
+    const form = new FormData();
+    form.set("file", file, fileName);
+    return this.requestJson(
+      `/api/admin/documents/${encodeURIComponent(id)}/replace-file`,
+      { method: "POST", body: form },
+    );
+  }
+
+  async sendDocumentToOcr(id: string): Promise<SendToOcrResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/send-to-ocr`, {
+      method: "POST",
+    });
+  }
+
+  async moveDocument(id: string, kbId: string): Promise<AdminDocument> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}/move`, {
+      method: "POST",
+      body: JSON.stringify({ kb_id: kbId }),
+    });
+  }
+
+  async deleteDocument(id: string): Promise<DeleteDocumentResponse> {
+    return this.requestJson(`/api/admin/documents/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async filePreviewTransport(docId: string, rangeBytes = 64): Promise<FilePreviewTransport> {
+    const base = `/api/files/${encodeURIComponent(docId)}`;
+    const [preview, manifest, signed] = await Promise.all([
+      this.requestJson<JsonObject>(`${base}/preview`),
+      this.requestJson<JsonObject>(`${base}/preview/manifest`),
+      this.requestJson<JsonObject>(`${base}/preview-url`),
+    ]);
+    const response = await this.request(`${base}/preview/content`, {
+      headers: { Accept: "*/*", Range: `bytes=0-${rangeBytes - 1}` },
+    });
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    return {
+      preview,
+      manifest,
+      signed,
+      range: {
+        status: response.status,
+        content_type: response.headers.get("content-type") ?? "",
+        content_range: response.headers.get("content-range") ?? "",
+        accept_ranges: response.headers.get("accept-ranges") ?? "",
+        byte_length: bytes.byteLength,
+        head: new TextDecoder("latin1").decode(bytes.subarray(0, 5)),
+      },
+    };
+  }
+
+  async downloadDocument(id: string): Promise<DownloadedDocument> {
+    const response = await this.request(
+      `/api/admin/documents/${encodeURIComponent(id)}/original`,
+      { headers: { Accept: "application/octet-stream" } },
+    );
+    const contentType = response.headers.get("content-type");
+    const contentDisposition = response.headers.get("content-disposition");
+    return {
+      bytes: new Uint8Array(await response.arrayBuffer()),
+      ...(contentType ? { content_type: contentType } : {}),
+      ...(contentDisposition ? { content_disposition: contentDisposition } : {}),
+    };
+  }
+
+  async listVectorIndexes(): Promise<VectorIndexSummary[]> {
+    return this.requestJson("/api/diagnostics/vector-indexes");
+  }
+
+  async saveLastConversation(conversationId: string): Promise<void> {
+    const state = await this.getSession();
+    state.last_conversation_id = conversationId;
+    state.saved_at = new Date().toISOString();
+    await writeSession(this.configPath, state);
+  }
+
+  async lastConversationId(): Promise<string | undefined> {
+    return (await this.getSession()).last_conversation_id;
+  }
+
+  async mcpCall(method: string, params: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+    const body = {
+      jsonrpc: "2.0",
+      id: "documind-cli",
+      method,
+      params: {
+        ...params,
+        _meta: {
+          "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+          "io.modelcontextprotocol/clientInfo": { name: "documind-cli", version: "0.1.0" },
+          "io.modelcontextprotocol/clientCapabilities": {},
+        },
+      },
+    };
+    const headers = new Headers({
+      Accept: "application/json, text/event-stream",
+      Authorization: `Bearer ${configuredApiToken(this.config)}`,
+      "Content-Type": "application/json",
+      "MCP-Protocol-Version": "2026-07-28",
+      "Mcp-Method": method,
+    });
+    if (method === "tools/call" && typeof params.name === "string") {
+      headers.set("Mcp-Name", params.name);
+    }
+    const response = await this.fetcher(this.url("/mcp"), {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
+    });
+    if (!response.ok) {
+      throw new ApiError("POST", this.url("/mcp"), response.status, await responseBody(response));
+    }
+    const text = await response.text();
+    if (response.headers.get("content-type")?.includes("text/event-stream")) {
+      const messages = text
+        .split("\n")
+        .filter((line) => line.startsWith("data:") && line.slice(5).trim())
+        .map((line) => JSON.parse(line.slice(5).trim()) as Record<string, unknown>);
+      const last = messages.at(-1);
+      if (!last) throw new CliError("MCP 返回了空 SSE 响应");
+      return last;
+    }
+    return JSON.parse(text) as Record<string, unknown>;
+  }
+
+  async sse(path: string, body: unknown, retryAuthentication = true): Promise<Response> {
+    const token = await this.accessToken();
+    const response = await this.fetcher(this.url(path), {
+      method: "POST",
+      headers: {
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+        "X-DocuMind-Event-Protocol": "atom",
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
+    });
+    if (response.status === 401 && retryAuthentication && !this.externalMode) {
+      if ((await this.getSession()).auth_source === "portal") {
+        throw new CliError("Portal 会话已过期，请重新运行 auth portal-login");
+      }
+      await this.login(true);
+      return this.sse(path, body, false);
+    }
+    if (!response.ok) {
+      throw new ApiError("POST", this.url(path), response.status, await responseBody(response));
+    }
+    if (!response.body) throw new CliError("SSE 响应没有 body");
+    return response;
+  }
+
+  async requestJson<T = unknown>(
+    path: string,
+    init: RequestInit = {},
+    authenticated = true,
+    retryAuthentication = true,
+  ): Promise<T> {
+    const response = await this.request(path, init, authenticated, retryAuthentication);
+    const method = init.method ?? "GET";
+    const url = this.url(path);
+    if (response.status === 204) return undefined as T;
+    const text = await response.text();
+    if (!text) return undefined as T;
+    try {
+      return JSON.parse(text) as T;
+    } catch {
+      throw new CliError(`API ${method} ${url} 返回了非 JSON 内容`, 1, text.slice(0, 500));
+    }
+  }
+
+  private async request(
+    path: string,
+    init: RequestInit = {},
+    authenticated = true,
+    retryAuthentication = true,
+  ): Promise<Response> {
+    const headers = new Headers(init.headers);
+    headers.set("Accept", headers.get("Accept") ?? "application/json");
+    if (
+      init.body !== undefined &&
+      !(init.body instanceof FormData) &&
+      !headers.has("Content-Type")
+    ) {
+      headers.set("Content-Type", "application/json");
+    }
+    if (authenticated) headers.set("Authorization", `Bearer ${await this.accessToken()}`);
+    const method = init.method ?? "GET";
+    const url = this.url(path);
+    const response = await this.fetcher(url, {
+      ...init,
+      headers,
+      signal: init.signal ?? AbortSignal.timeout(this.config.server.timeout_seconds * 1000),
+    });
+    if (authenticated && retryAuthentication && response.status === 401 && !this.externalMode
+      && (await this.getSession()).auth_source !== "portal") {
+      await this.login(true);
+      return this.request(path, init, authenticated, false);
+    }
+    if (!response.ok) {
+      throw new ApiError(method, url, response.status, await responseBody(response));
+    }
+    return response;
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+  }
+
+  private async accessToken(): Promise<string> {
+    if (this.externalMode) return configuredApiToken(this.config);
+    const state = await this.getSession();
+    if (state.access_token) return state.access_token;
+    await this.login(true);
+    const refreshed = await this.getSession();
+    if (!refreshed.access_token) throw new CliError("登录成功但未得到 access token");
+    return refreshed.access_token;
+  }
+
+  private async getSession(): Promise<SessionState> {
+    this.session ??= await readSession(this.configPath);
+    return this.session;
+  }
+
+  private async updateSession(identity: Identity): Promise<void> {
+    const state = await this.getSession();
+    this.session = {
+      ...state,
+      ...identity,
+      saved_at: new Date().toISOString(),
+    };
+    await writeSession(this.configPath, this.session);
+  }
+}
+
+function buildBaseUrl(config: CliConfig): string {
+  const server = config.server.url.replace(/\/+$/, "");
+  const path = config.server.base_path.trim();
+  if (!path || path === "/") return server;
+  return `${server}/${path.replace(/^\/+|\/+$/g, "")}`;
+}
+
+async function responseBody(response: Response): Promise<unknown> {
+  const text = await response.text().catch(() => "");
+  if (!text) return "";
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return text;
+  }
+}

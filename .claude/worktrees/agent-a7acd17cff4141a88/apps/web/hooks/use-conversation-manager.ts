@@ -1,0 +1,1047 @@
+"use client";
+
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  cancelMessage,
+  createConversation,
+  deleteFeedback,
+  deleteConversation,
+  getMessages,
+  listConversations,
+  listKnowledgeBases,
+  renameConversation,
+  updateConversationKnowledgeBases,
+  retryMessageStreamUrl,
+  sendMessageStreamUrl,
+  submitFeedback,
+  type KnowledgeBase,
+} from "@/lib/api";
+import { streamSse } from "@/lib/sse";
+import { getStoredAuth } from "@/lib/auth";
+import type {
+  ChatFile,
+  Citation,
+  Conversation,
+  FeedbackReason,
+  Message,
+  MessageStatus,
+  Rating,
+  RetryMessageRequest,
+  RuntimeReasoningStep,
+  RuntimeToolCall,
+  RuntimeEventEnvelope,
+  SendMessageRequest,
+} from "@/lib/types";
+
+const FAVORITES_KEY = "documind:favorite-conversations";
+type MessageListUpdate = (messages: Message[]) => Message[];
+
+function isRuntimeEvent(data: unknown): data is RuntimeEventEnvelope {
+  if (!data || typeof data !== "object") return false;
+  const event = data as Partial<RuntimeEventEnvelope>;
+  return event.schema_version === "moss.execution.event.v1" && typeof event.event_type === "string";
+}
+
+function confidenceFromRuntime(value: unknown): "high" | "medium" | "low" {
+  return value === "high" || value === "medium" || value === "low" ? value : "medium";
+}
+
+function firstRuntimeString(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
+}
+
+function runtimeToolId(event: RuntimeEventEnvelope) {
+  return firstRuntimeString(event.payload.tool_call_id, event.step?.step_id, event.step?.name);
+}
+
+function normalizeToolStatus(value: unknown): RuntimeToolCall["status"] {
+  if (value === "failed" || value === "cancelled" || value === "succeeded") return value;
+  return "running";
+}
+
+function runtimeToolName(event: RuntimeEventEnvelope, fallback: string) {
+  return firstRuntimeString(event.payload.name, event.step?.name, event.payload.display_name, fallback);
+}
+
+function runtimeStepNumber(value: unknown) {
+  return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : null;
+}
+
+function mergeCitations(current: Citation[], incoming: Citation[]) {
+  const merged = new Map(current.map((citation) => [citation.citation_id, citation]));
+  for (const citation of incoming) merged.set(citation.citation_id, citation);
+  return [...merged.values()];
+}
+
+export function useConversationManager() {
+  const router = useRouter();
+  const favoriteStorageKey = useMemo(
+    () => `${FAVORITES_KEY}:${getStoredAuth()?.tenantId ?? "none"}`,
+    []
+  );
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [streamingId, setStreamingId] = useState<string | null>(null);
+  const [rightOpen, setRightOpen] = useState(false);
+  const [availableKbs, setAvailableKbs] = useState<KnowledgeBase[]>([]);
+  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [selectedKbIds, setSelectedKbIds] = useState<string[]>([]);
+  const [updatingKbSelection, setUpdatingKbSelection] = useState(false);
+  const [kbSelectionError, setKbSelectionError] = useState<string>();
+  const [sendNotice, setSendNotice] = useState<string>();
+  const pendingRef = useRef<{ userTempId: string; assistantTempId: string } | null>(null);
+  const abortControllersRef = useRef<Map<string, AbortController>>(new Map());
+  const requestActiveRef = useRef(false);
+  const skipLoadRef = useRef<string | null>(null);
+  // 当前流属于哪个会话 + 代次：切会话时用它判断该不该中断，也用来让旧的 finally 失效。
+  const activeRequestRef = useRef<{ conversationId: string; generation: number } | null>(null);
+  const generationRef = useRef(0);
+
+  const loadConversations = useCallback(async () => {
+    try {
+      const res = await listConversations();
+      setConversations(res.items);
+    } catch (e) {
+      console.error("failed to load conversations", e);
+    }
+  }, []);
+
+  const loadKnowledgeBases = useCallback(async () => {
+    try {
+      const kbs = await listKnowledgeBases();
+      setAvailableKbs(kbs);
+    } catch (e) {
+      console.error("failed to load knowledge bases", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadConversations();
+    loadKnowledgeBases();
+    try {
+      const raw = localStorage.getItem(favoriteStorageKey);
+      if (raw) {
+        const ids = JSON.parse(raw) as string[];
+        setFavorites(new Set(ids));
+      }
+    } catch {
+      // ignore
+    }
+  }, [favoriteStorageKey, loadConversations, loadKnowledgeBases]);
+
+  useEffect(() => {
+    if (!currentId) {
+      setMessages([]);
+      setLoading(false);
+      return;
+    }
+    if (skipLoadRef.current === currentId) {
+      skipLoadRef.current = null;
+      return;
+    }
+
+    let active = true;
+    setMessages([]);
+    setLoading(true);
+    getMessages(currentId)
+      .then((response) => {
+        if (active) setMessages(response.messages);
+      })
+      .catch((error) => {
+        if (active) console.error("failed to load messages", error);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentId]);
+
+  // 切换会话：属于旧会话的流必须断开，否则会出现“在新会话点停止去取消旧消息”的错位；
+  // 新建会话发首条消息时 activeRequestRef 已经是新 id，不会被误杀。
+  useEffect(() => {
+    const active = activeRequestRef.current;
+    if (!active || active.conversationId === currentId) return;
+    abortControllersRef.current.forEach((controller) => controller.abort());
+    abortControllersRef.current.clear();
+    activeRequestRef.current = null;
+    requestActiveRef.current = false;
+    generationRef.current += 1;
+    pendingRef.current = null;
+    setStreamingId(null);
+    setSendNotice(undefined);
+  }, [currentId]);
+
+  const allKbIds = useMemo(() => availableKbs.map((kb) => kb.id), [availableKbs]);
+
+  useEffect(() => {
+    setKbSelectionError(undefined);
+    if (!currentId) {
+      setSelectedKbIds(allKbIds);
+      return;
+    }
+    const conversation = conversations.find((item) => item.conversation_id === currentId);
+    if (conversation) {
+      setSelectedKbIds(conversation.kb_ids.filter((id) => allKbIds.includes(id)));
+    }
+  }, [allKbIds, conversations, currentId]);
+
+  const createAndSelect = useCallback(
+    async (title?: string) => {
+      try {
+        const conv = await createConversation({
+          kb_ids: selectedKbIds,
+          title,
+        });
+        setConversations((prev) => [conv, ...prev]);
+        skipLoadRef.current = conv.conversation_id;
+        setCurrentId(conv.conversation_id);
+        router.push(`/chat?c=${encodeURIComponent(conv.conversation_id)}`);
+        return conv.conversation_id;
+      } catch (e) {
+        console.error("failed to create conversation", e);
+        return null;
+      }
+    },
+    [router, selectedKbIds]
+  );
+
+  const updateKnowledgeBaseSelection = useCallback(async (kbIds: string[]) => {
+    const next = availableKbs.filter((kb) => kbIds.includes(kb.id)).map((kb) => kb.id);
+    if (next.length === 0) {
+      setKbSelectionError("请至少选择一个知识库");
+      return false;
+    }
+    setKbSelectionError(undefined);
+    if (!currentId) {
+      setSelectedKbIds(next);
+      return true;
+    }
+    setUpdatingKbSelection(true);
+    try {
+      const updated = await updateConversationKnowledgeBases(currentId, next);
+      setSelectedKbIds(updated.kb_ids);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id === currentId
+            ? { ...conversation, kb_ids: updated.kb_ids }
+            : conversation
+        )
+      );
+      return true;
+    } catch (error) {
+      setKbSelectionError(error instanceof Error ? error.message : "知识库范围保存失败");
+      return false;
+    } finally {
+      setUpdatingKbSelection(false);
+    }
+  }, [availableKbs, currentId]);
+
+  const updateMessage = useCallback((messageId: string, patch: Partial<Message>) => {
+    setMessages((prev) =>
+      prev.map((m) => (m.message_id === messageId ? { ...m, ...patch } : m))
+    );
+  }, []);
+
+  const processStream = useCallback(
+    async (
+      conversationId: string,
+      userContent: string,
+      req: SendMessageRequest | RetryMessageRequest,
+      url: string,
+      controller: AbortController,
+      isRetry = false,
+      files?: ChatFile[],
+      generation = generationRef.current
+    ) => {
+      const userTempId = `tmp-user-${Date.now()}`;
+      const assistantTempId = `tmp-assistant-${Date.now()}`;
+      // 旧请求（会话已切换 / 已被新请求顶掉）不再写共享状态，避免覆盖新会话的 streaming 态。
+      const isCurrent = () => generationRef.current === generation;
+      pendingRef.current = { userTempId, assistantTempId };
+
+      if (!isRetry) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            message_id: userTempId,
+            role: "user",
+            content: userContent,
+            status: "completed",
+            citations: [],
+            files,
+            created_at: new Date().toISOString(),
+          },
+          {
+            message_id: assistantTempId,
+            role: "assistant",
+            content: "",
+            status: "answering",
+            citations: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      } else {
+        setMessages((prev) => [
+          ...prev,
+          {
+            message_id: assistantTempId,
+            role: "assistant",
+            content: "",
+            status: "answering",
+            citations: [],
+            created_at: new Date().toISOString(),
+          },
+        ]);
+      }
+
+      let assistantId = assistantTempId;
+      let activeReasoningStep: number | null = null;
+      let pendingMessageUpdates: MessageListUpdate[] = [];
+      let pendingMessageFrame: number | null = null;
+      const applyPendingMessageUpdates = () => {
+        const updates = pendingMessageUpdates;
+        pendingMessageUpdates = [];
+        if (updates.length === 0) return;
+        setMessages((current) => updates.reduce((messages, update) => update(messages), current));
+      };
+      const flushPendingMessageUpdates = () => {
+        if (pendingMessageFrame !== null && typeof window !== "undefined") {
+          window.cancelAnimationFrame(pendingMessageFrame);
+        }
+        pendingMessageFrame = null;
+        applyPendingMessageUpdates();
+      };
+      const queueMessageUpdate = (update: MessageListUpdate) => {
+        pendingMessageUpdates.push(update);
+        if (pendingMessageFrame !== null) return;
+        if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") {
+          applyPendingMessageUpdates();
+          return;
+        }
+        // 与 Moss 一致：把同一动画帧内的 token、thinking 和工具事件合并成一次 React 提交。
+        pendingMessageFrame = window.requestAnimationFrame(() => {
+          pendingMessageFrame = null;
+          applyPendingMessageUpdates();
+        });
+      };
+      const appendAnswerText = (messageId: string, text: string) => {
+        if (!text) return;
+        queueMessageUpdate((prev) =>
+          prev.map((message) =>
+            message.message_id === messageId || message.message_id === assistantTempId
+              ? { ...message, content: message.content + text }
+              : message
+          )
+        );
+      };
+      const updateAssistantInStream = (patch: Partial<Message>) => {
+        const messageId = assistantId;
+        queueMessageUpdate((prev) =>
+          prev.map((m) =>
+            m.message_id === messageId || m.message_id === assistantTempId ? { ...m, ...patch } : m
+          )
+        );
+      };
+      const updateToolCallInStream = (
+        toolId: string,
+        recipe: (tool?: RuntimeToolCall) => RuntimeToolCall
+      ) => {
+        const messageId = assistantId;
+        queueMessageUpdate((prev) =>
+          prev.map((m) => {
+            if (m.message_id !== messageId && m.message_id !== assistantTempId) return m;
+            const tools = m.tool_calls ?? [];
+            const exists = tools.some((tool) => tool.id === toolId);
+            const nextTools = exists
+              ? tools.map((tool) => (tool.id === toolId ? recipe(tool) : tool))
+              : [...tools, recipe(undefined)];
+            return { ...m, tool_calls: nextTools };
+          })
+        );
+      };
+      const updateReasoningStepInStream = (
+        stepNumber: number,
+        recipe: (step?: RuntimeReasoningStep) => RuntimeReasoningStep
+      ) => {
+        const messageId = assistantId;
+        queueMessageUpdate((prev) =>
+          prev.map((m) => {
+            if (m.message_id !== messageId && m.message_id !== assistantTempId) return m;
+            const steps = m.reasoning_steps ?? [];
+            const exists = steps.some((step) => step.step === stepNumber);
+            const nextSteps = exists
+              ? steps.map((step) => (step.step === stepNumber ? recipe(step) : step))
+              : [...steps, recipe(undefined)];
+            return { ...m, reasoning_steps: nextSteps };
+          })
+        );
+      };
+      const completeActiveReasoningStep = (completedAt: string) => {
+        const stepNumber = activeReasoningStep;
+        if (stepNumber === null) return;
+        activeReasoningStep = null;
+        updateReasoningStepInStream(stepNumber, (step) => ({
+          step: stepNumber,
+          action: step?.action ?? "respond",
+          decision_summary: step?.decision_summary ?? "",
+          output: step?.output,
+          tool_calls: step?.tool_calls ?? [],
+          warnings: step?.warnings,
+          started_at: step?.started_at,
+          completed_at: step?.completed_at ?? completedAt,
+        }));
+      };
+      try {
+        for await (const sse of streamSse(url, req, controller.signal)) {
+          if (controller.signal.aborted) {
+            break;
+          }
+          const runtime = isRuntimeEvent(sse.data) ? sse.data : null;
+          if (runtime) {
+            if (runtime.event_type === "execution.started") {
+              const data = runtime.payload as {
+                user_message_id?: string;
+                assistant_message_id?: string;
+              };
+              if (!isRetry && data.user_message_id) {
+                updateMessage(userTempId, { message_id: data.user_message_id });
+              }
+              const runtimeAssistantId = data.assistant_message_id ?? runtime.response_message_id;
+              updateMessage(assistantTempId, { message_id: runtimeAssistantId });
+              assistantId = runtimeAssistantId;
+              abortControllersRef.current.set(assistantId, controller);
+              if (isCurrent()) setStreamingId(assistantId);
+              continue;
+            }
+
+            if (runtime.event_type === "response.stage") {
+              const stage = runtime.payload.stage;
+              if (typeof stage === "string") updateAssistantInStream({ runtime_stage: stage });
+              continue;
+            }
+
+            if (runtime.event_type === "agent.step.started") {
+              const stepNumber = runtimeStepNumber(runtime.payload.step);
+              if (stepNumber !== null) {
+                if (activeReasoningStep !== null && activeReasoningStep !== stepNumber) {
+                  completeActiveReasoningStep(runtime.occurred_at);
+                }
+                activeReasoningStep = stepNumber;
+                const action = firstRuntimeString(runtime.payload.action, "tool");
+                const decisionSummary = firstRuntimeString(runtime.payload.decision_summary);
+                updateReasoningStepInStream(stepNumber, (existing) => ({
+                  step: stepNumber,
+                  action,
+                  decision_summary: decisionSummary,
+                  output: existing?.output,
+                  tool_calls: existing?.tool_calls ?? [],
+                  warnings: existing?.warnings,
+                  started_at: existing?.started_at ?? runtime.occurred_at,
+                  completed_at: existing?.completed_at,
+                }));
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "thinking.delta") {
+              const delta = runtime.payload.delta;
+              if (typeof delta !== "string") continue;
+              const stepNumber = activeReasoningStep ?? 1;
+              activeReasoningStep = stepNumber;
+              updateReasoningStepInStream(stepNumber, (step) => ({
+                step: stepNumber,
+                action: step?.action ?? "tool",
+                decision_summary: step?.decision_summary ?? "",
+                output: `${step?.output ?? ""}${delta}`,
+                tool_calls: step?.tool_calls ?? [],
+                warnings: step?.warnings,
+                started_at: step?.started_at ?? runtime.occurred_at,
+                completed_at: step?.completed_at,
+              }));
+              continue;
+            }
+
+            if (runtime.event_type === "response.replace") {
+              completeActiveReasoningStep(runtime.occurred_at);
+              const content = runtime.payload.content;
+              if (typeof content === "string") updateAssistantInStream({ content });
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.preview") {
+              // Preview events describe a possible call; only started/result events are real calls.
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.started") {
+              const toolId = runtimeToolId(runtime);
+              if (toolId) {
+                updateToolCallInStream(toolId, (tool) => ({
+                  id: toolId,
+                  name: runtimeToolName(runtime, tool?.name ?? toolId),
+                  arguments: runtime.payload.arguments ?? tool?.arguments,
+                  arguments_preview: tool?.arguments_preview,
+                  status: "running",
+                  step: tool?.step ?? activeReasoningStep ?? undefined,
+                  started_at: tool?.started_at ?? runtime.occurred_at,
+                  display: runtime.payload.display ?? tool?.display,
+                }));
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "tool.call.update") {
+              const toolId = runtimeToolId(runtime);
+              if (!toolId) continue;
+              const progress = runtime.payload.progress;
+              const message = runtime.payload.message;
+              updateToolCallInStream(toolId, (tool) => ({
+                id: toolId,
+                name: runtimeToolName(runtime, tool?.name ?? toolId),
+                arguments: tool?.arguments,
+                arguments_preview: tool?.arguments_preview,
+                status: tool?.status ?? "running",
+                step: tool?.step ?? activeReasoningStep ?? undefined,
+                progress: typeof progress === "number" ? progress : tool?.progress,
+                message: typeof message === "string" ? message : tool?.message,
+                started_at: tool?.started_at,
+                display: runtime.payload.display ?? tool?.display,
+              }));
+              continue;
+            }
+
+            if (
+              runtime.event_type === "tool.call.result" ||
+              runtime.event_type === "tool.call.failed"
+            ) {
+              const toolId = runtimeToolId(runtime);
+              if (toolId) {
+                updateToolCallInStream(toolId, (tool) => ({
+                  id: toolId,
+                  name: runtimeToolName(runtime, tool?.name ?? toolId),
+                  arguments: runtime.payload.arguments ?? tool?.arguments,
+                  arguments_preview: tool?.arguments_preview,
+                  status:
+                    runtime.event_type === "tool.call.failed"
+                      ? "failed"
+                      : normalizeToolStatus(runtime.payload.status),
+                  result: runtime.payload.result ?? tool?.result,
+                  error: runtime.payload.error ?? tool?.error,
+                  step: tool?.step ?? activeReasoningStep ?? undefined,
+                  progress: typeof runtime.payload.progress === "number"
+                    ? runtime.payload.progress
+                    : tool?.progress,
+                  message: typeof runtime.payload.message === "string"
+                    ? runtime.payload.message
+                    : tool?.message,
+                  display: runtime.payload.display ?? tool?.display,
+                  started_at: tool?.started_at,
+                  completed_at: runtime.occurred_at,
+                  duration_ms: typeof runtime.payload.duration_ms === "number"
+                    ? runtime.payload.duration_ms
+                    : tool?.duration_ms,
+                }));
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "response.delta") {
+              const delta = runtime.payload.delta;
+              if (typeof delta !== "string") continue;
+              completeActiveReasoningStep(runtime.occurred_at);
+              appendAnswerText(runtime.response_message_id, delta);
+              continue;
+            }
+
+            if (runtime.event_type === "sources.reported") {
+              const sources = runtime.payload.sources;
+              if (!Array.isArray(sources)) continue;
+              const citations = sources
+                .map((source) =>
+                  source && typeof source === "object"
+                    ? (source as { documind_citation?: Citation }).documind_citation
+                    : undefined
+                )
+                .filter((citation): citation is Citation => !!citation);
+              if (citations.length === 0) continue;
+              const messageId = runtime.response_message_id;
+              queueMessageUpdate((prev) =>
+                prev.map((m) =>
+                  m.message_id === messageId || m.message_id === assistantTempId
+                    ? { ...m, citations: mergeCitations(m.citations, citations) }
+                    : m
+                )
+              );
+              continue;
+            }
+
+            if (runtime.event_type === "response.completed") {
+              completeActiveReasoningStep(runtime.occurred_at);
+              flushPendingMessageUpdates();
+              const confidence = confidenceFromRuntime(runtime.payload.confidence);
+              const manualCorrection = runtime.payload.answer_source === "manual_correction";
+              updateMessage(runtime.response_message_id, {
+                status: "completed",
+                confidence,
+                answer_source: manualCorrection ? "manual_correction" : "rag",
+                correction_id: manualCorrection && typeof runtime.payload.correction_id === "string"
+                  ? runtime.payload.correction_id
+                  : null,
+                correction_version_id:
+                  manualCorrection && typeof runtime.payload.correction_version_id === "string"
+                    ? runtime.payload.correction_version_id
+                    : null,
+                correction_match_type:
+                  runtime.payload.correction_match_type === "exact" ||
+                  runtime.payload.correction_match_type === "alias"
+                    ? runtime.payload.correction_match_type
+                    : null,
+                correction_match_score:
+                  typeof runtime.payload.correction_match_score === "number"
+                    ? runtime.payload.correction_match_score
+                    : null,
+                runtime_stage: undefined,
+              });
+              continue;
+            }
+
+            if (runtime.event_type === "conversation.title.updated") {
+              const conversationTitle = runtime.payload.title;
+              const updatedConversationId = runtime.payload.conversation_id;
+              if (
+                typeof conversationTitle === "string" &&
+                typeof updatedConversationId === "string"
+              ) {
+                setConversations((current) =>
+                  current.map((conversation) =>
+                    conversation.conversation_id === updatedConversationId
+                      ? { ...conversation, title: conversationTitle }
+                      : conversation
+                  )
+                );
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "followup.suggested") {
+              const questions = runtime.payload.questions ?? runtime.payload.items;
+              if (Array.isArray(questions)) {
+                updateAssistantInStream({
+                  follow_up_questions: questions
+                    .map((item, index) => {
+                      if (typeof item === "string") return { id: `followup-${index}`, text: item };
+                      if (item && typeof item === "object") {
+                        const text = (item as { text?: unknown }).text;
+                        const id = (item as { id?: unknown }).id;
+                        if (typeof text === "string") {
+                          return {
+                            id: typeof id === "string" ? id : `followup-${index}`,
+                            text,
+                          };
+                        }
+                      }
+                      return null;
+                    })
+                    .filter((item): item is { id: string; text: string } => !!item),
+                });
+              }
+              continue;
+            }
+
+            if (runtime.event_type === "usage.reported") {
+              updateAssistantInStream({
+                usage: {
+                  input_tokens:
+                    typeof runtime.payload.prompt_tokens === "number"
+                      ? runtime.payload.prompt_tokens
+                      : undefined,
+                  output_tokens:
+                    typeof runtime.payload.completion_tokens === "number"
+                      ? runtime.payload.completion_tokens
+                      : undefined,
+                  total_tokens:
+                    typeof runtime.payload.total_tokens === "number"
+                      ? runtime.payload.total_tokens
+                      : undefined,
+                },
+              });
+              continue;
+            }
+
+            if (runtime.event_type === "execution.completed") {
+              completeActiveReasoningStep(runtime.occurred_at);
+              flushPendingMessageUpdates();
+              updateMessage(runtime.response_message_id, {
+                status: "completed",
+                duration_ms:
+                  typeof runtime.payload.duration_ms === "number"
+                    ? runtime.payload.duration_ms
+                    : undefined,
+              });
+              abortControllersRef.current.delete(runtime.response_message_id);
+              setStreamingId((current) =>
+                current === runtime.response_message_id ? null : current
+              );
+              continue;
+            }
+
+            if (runtime.event_type === "execution.cancelled") {
+              flushPendingMessageUpdates();
+              updateMessage(runtime.response_message_id, { status: "cancelled" as MessageStatus });
+              continue;
+            }
+
+            if (runtime.event_type === "execution.failed") {
+              flushPendingMessageUpdates();
+              const error = runtime.payload.error as { message?: string } | undefined;
+              updateMessage(runtime.response_message_id, {
+                status: "failed",
+                content: error?.message ?? "生成失败，请重试",
+              });
+              continue;
+            }
+
+            continue;
+          }
+
+          if (sse.event === "message.created") {
+            const data = sse.data as {
+              user_message_id: string;
+              assistant_message_id: string;
+            };
+            if (!isRetry) {
+              updateMessage(userTempId, { message_id: data.user_message_id });
+            }
+            updateMessage(assistantTempId, { message_id: data.assistant_message_id });
+            assistantId = data.assistant_message_id;
+            abortControllersRef.current.set(assistantId, controller);
+            if (isCurrent()) setStreamingId(assistantId);
+          } else if (sse.event === "answer.delta") {
+            const data = sse.data as { message_id: string; text: string };
+            appendAnswerText(data.message_id, data.text);
+          } else if (sse.event === "citation.delta") {
+            const data = sse.data as { message_id: string; citation: Citation };
+            queueMessageUpdate((prev) =>
+              prev.map((m) =>
+                m.message_id === data.message_id || m.message_id === assistantTempId
+                  ? { ...m, citations: mergeCitations(m.citations, [data.citation]) }
+                  : m
+              )
+            );
+          } else if (sse.event === "answer.completed") {
+            flushPendingMessageUpdates();
+            const data = sse.data as {
+              message_id: string;
+              confidence: "high" | "medium" | "low";
+              answer_source?: "rag" | "manual_correction";
+              correction_id?: string | null;
+              correction_version_id?: string | null;
+              correction_match_type?: "exact" | "alias" | null;
+              correction_match_score?: number | null;
+            };
+            updateMessage(data.message_id, {
+              status: "completed",
+              confidence: data.confidence,
+              answer_source: data.answer_source ?? "rag",
+              correction_id: data.correction_id ?? null,
+              correction_version_id: data.correction_version_id ?? null,
+              correction_match_type: data.correction_match_type ?? null,
+              correction_match_score: data.correction_match_score ?? null,
+              thinking: undefined,
+            });
+            abortControllersRef.current.delete(data.message_id);
+            setStreamingId((current) => (current === data.message_id ? null : current));
+          } else if (sse.event === "conversation.title.updated") {
+            const data = sse.data as { conversation_id?: string; title?: string };
+            if (data.conversation_id && data.title) {
+              setConversations((current) =>
+                current.map((conversation) =>
+                  conversation.conversation_id === data.conversation_id
+                    ? { ...conversation, title: data.title as string }
+                    : conversation
+                )
+              );
+            }
+          } else if (sse.event === "answer.failed") {
+            flushPendingMessageUpdates();
+            const data = sse.data as { message_id: string; code: string; message: string };
+            updateMessage(data.message_id, {
+              status: "failed",
+              content: data.message,
+            });
+          }
+        }
+      } catch (e) {
+        flushPendingMessageUpdates();
+        if ((e as Error).name !== "AbortError") console.error("stream error", e);
+        if (isCurrent()) {
+          // 会话已切换时结果不属于当前视图，丢弃；旧代次也不写共享状态。
+          if ((e as Error).name === "AbortError") {
+            updateMessage(assistantId, { status: "cancelled" as MessageStatus });
+          } else {
+            updateMessage(assistantId, {
+              status: "failed",
+              content: "连接中断，请稍后重试。",
+            });
+          }
+        }
+      } finally {
+        flushPendingMessageUpdates();
+        abortControllersRef.current.delete(assistantId);
+        if (isCurrent()) {
+          setStreamingId(null);
+          pendingRef.current = null;
+          setSendNotice(undefined);
+          loadConversations();
+        }
+      }
+    },
+    [updateMessage, loadConversations]
+  );
+
+  const sendMessage = useCallback(
+    async (
+      content: string,
+      runtime?: Pick<SendMessageRequest, "model_id" | "thinking_enabled">,
+      files?: ChatFile[]
+    ): Promise<boolean> => {
+      if (requestActiveRef.current) {
+        setSendNotice("当前会话正在生成，请先停止或等待完成");
+        return false;
+      }
+      requestActiveRef.current = true;
+      setSendNotice(undefined);
+      const generation = (generationRef.current += 1);
+      try {
+        let conversationId = currentId;
+        if (!conversationId) {
+          const created = await createAndSelect();
+          if (!created) return false;
+          conversationId = created;
+        }
+        activeRequestRef.current = { conversationId, generation };
+
+        const req: SendMessageRequest = {
+          content,
+          client_request_id: `req-${Date.now()}`,
+          stream: true,
+          ...(files && files.length > 0 ? { file_ids: files.map((file) => file.id) } : {}),
+          ...runtime,
+        };
+        const controller = new AbortController();
+        await processStream(
+          conversationId,
+          content,
+          req,
+          sendMessageStreamUrl(conversationId),
+          controller,
+          false,
+          files,
+          generation
+        );
+        return true;
+      } finally {
+        // 会话切换会抢先递增代次；此时所有权已交给新请求，旧请求不得回收。
+        if (generationRef.current === generation) {
+          requestActiveRef.current = false;
+          activeRequestRef.current = null;
+        }
+      }
+    },
+    [currentId, createAndSelect, processStream]
+  );
+
+  const retryMessage = useCallback(
+    async (messageId: string) => {
+      if (!currentId || requestActiveRef.current) return;
+      requestActiveRef.current = true;
+      setSendNotice(undefined);
+      const generation = (generationRef.current += 1);
+      try {
+        activeRequestRef.current = { conversationId: currentId, generation };
+        const controller = new AbortController();
+        const url = retryMessageStreamUrl(currentId, messageId);
+        const req: RetryMessageRequest = { stream: true };
+        await processStream(currentId, "", req, url, controller, true, undefined, generation);
+      } finally {
+        if (generationRef.current === generation) {
+          requestActiveRef.current = false;
+          activeRequestRef.current = null;
+        }
+      }
+    },
+    [currentId, processStream]
+  );
+
+  const doCancelMessage = useCallback(
+    async (messageId: string) => {
+      if (!currentId) return;
+      const controller = abortControllersRef.current.get(messageId);
+      if (controller) {
+        controller.abort();
+      }
+      try {
+        const res = await cancelMessage(currentId, messageId);
+        updateMessage(res.message_id, { status: "cancelled" as MessageStatus });
+      } catch (e) {
+        console.error("cancel failed", e);
+      }
+    },
+    [currentId, updateMessage]
+  );
+
+  const doSubmitFeedback = useCallback(
+    async (
+      messageId: string,
+      rating: Rating,
+      reason?: FeedbackReason,
+      comment?: string,
+      correction?: string
+    ) => {
+      if (!currentId) return false;
+      try {
+        const feedback = await submitFeedback(currentId, messageId, {
+          rating,
+          reason,
+          comment,
+          correction,
+        });
+        updateMessage(messageId, { feedback });
+        return true;
+      } catch (e) {
+        console.error("feedback failed", e);
+        return false;
+      }
+    },
+    [currentId, updateMessage]
+  );
+
+  const doClearFeedback = useCallback(
+    async (messageId: string) => {
+      if (!currentId) return false;
+      try {
+        await deleteFeedback(currentId, messageId);
+        updateMessage(messageId, { feedback: undefined });
+        return true;
+      } catch (e) {
+        console.error("clear feedback failed", e);
+        return false;
+      }
+    },
+    [currentId, updateMessage]
+  );
+
+  const isFavorite = useCallback(
+    (conversationId: string) => favorites.has(conversationId),
+    [favorites]
+  );
+
+  const toggleFavorite = useCallback((conversationId: string) => {
+    setFavorites((prev) => {
+      const next = new Set(prev);
+      if (next.has(conversationId)) {
+        next.delete(conversationId);
+      } else {
+        next.add(conversationId);
+      }
+      try {
+        localStorage.setItem(favoriteStorageKey, JSON.stringify(Array.from(next)));
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, [favoriteStorageKey]);
+
+  const doDeleteConversation = useCallback(
+    async (conversationId: string) => {
+      try {
+        await deleteConversation(conversationId);
+        setConversations((prev) => prev.filter((c) => c.conversation_id !== conversationId));
+        if (currentId === conversationId) {
+          if (streamingId) {
+            abortControllersRef.current.get(streamingId)?.abort();
+            abortControllersRef.current.delete(streamingId);
+            setStreamingId(null);
+          }
+          setCurrentId(null);
+          setMessages([]);
+        }
+        setFavorites((prev) => {
+          const next = new Set(prev);
+          next.delete(conversationId);
+          try {
+            localStorage.setItem(
+              favoriteStorageKey,
+              JSON.stringify(Array.from(next))
+            );
+          } catch {
+            // ignore
+          }
+          return next;
+        });
+        return true;
+      } catch (e) {
+        console.error("delete conversation failed", e);
+        return false;
+      }
+    },
+    [currentId, favoriteStorageKey]
+  );
+
+  const doRenameConversation = useCallback(async (conversationId: string, title: string) => {
+    const nextTitle = title.trim();
+    if (!nextTitle) return false;
+    try {
+      const updated = await renameConversation(conversationId, nextTitle);
+      setConversations((current) =>
+        current.map((conversation) =>
+          conversation.conversation_id === conversationId
+            ? { ...conversation, title: updated.title }
+            : conversation
+        )
+      );
+      return true;
+    } catch (error) {
+      console.error("rename conversation failed", error);
+      return false;
+    }
+  }, []);
+
+  return {
+    conversations,
+    currentId,
+    messages,
+    loading,
+    streamingId,
+    rightOpen,
+    setRightOpen,
+    setCurrentId,
+    availableKbs,
+    selectedKbIds,
+    updatingKbSelection,
+    kbSelectionError,
+    sendNotice,
+    updateKnowledgeBaseSelection,
+    createAndSelect,
+    sendMessage,
+    retryMessage,
+    cancelMessage: doCancelMessage,
+    submitFeedback: doSubmitFeedback,
+    clearFeedback: doClearFeedback,
+    refreshConversations: loadConversations,
+    isFavorite,
+    toggleFavorite,
+    renameConversation: doRenameConversation,
+    deleteConversation: doDeleteConversation,
+  };
+}

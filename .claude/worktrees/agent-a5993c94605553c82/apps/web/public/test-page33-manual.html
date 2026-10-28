@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Test</title><style>body{margin:0;background:#333} canvas{display:block;margin:20px auto}</style></head>
+<body>
+<script type="module">
+import * as pdfjs from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.min.mjs";
+pdfjs.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.min.mjs";
+const pdf = await pdfjs.getDocument("page33-manual.pdf").promise;
+console.log("pages:", pdf.numPages);
+const page = await pdf.getPage(1);
+const viewport = page.getViewport({scale: 1.2});
+const canvas = document.createElement("canvas");
+canvas.width = viewport.width; canvas.height = viewport.height;
+document.body.appendChild(canvas);
+await page.render({canvasContext: canvas.getContext("2d"), viewport}).promise;
+</script>
+</body>
+</html>

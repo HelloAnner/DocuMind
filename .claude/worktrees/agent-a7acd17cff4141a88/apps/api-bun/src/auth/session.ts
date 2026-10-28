@@ -1,0 +1,106 @@
+// 移植自 apps/api-rs/src/auth.rs 的 AuthSession / create / validate_and_renew / delete
+import type Redis from 'ioredis';
+import type { AppConfig } from '../config.ts';
+import { AppError } from '../errors.ts';
+import { nowSeconds } from '../infra/time.ts';
+import type { CurrentActor } from '../models/identity.ts';
+import type { Claims } from './jwt.ts';
+
+interface AuthSession {
+  user_id: string; tenant_id: string | null; role: string; scope: string;
+  created_at: number; last_seen_at: number; auth_source?: 'portal';
+}
+
+function authSessionKey(sessionId: string): string {
+  return `documind:auth:session:${sessionId}`;
+}
+
+export async function createAuthSession(
+  redis: Redis | null, config: AppConfig, actor: CurrentActor, authSource?: 'portal',
+): Promise<string> {
+  const sessionId = crypto.randomUUID();
+  if (!redis) return sessionId;
+  const now = nowSeconds();
+  const session: AuthSession = {
+    user_id: actor.user_id, tenant_id: actor.tenant_id,
+    role: actor.roles[0] ?? 'user', scope: actor.scope,
+    created_at: now, last_seen_at: now, ...(authSource ? { auth_source: authSource } : {}),
+  };
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
+  return sessionId;
+}
+
+export async function createIdentitySession(
+  redis: Redis | null, config: AppConfig, userId: string,
+): Promise<string> {
+  const sessionId = crypto.randomUUID();
+  if (!redis) return sessionId;
+  const now = nowSeconds();
+  const session: AuthSession = {
+    user_id: userId, tenant_id: null, role: '', scope: 'tenant',
+    created_at: now, last_seen_at: now,
+  };
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
+  return sessionId;
+}
+
+export async function setAuthSessionTenant(
+  redis: Redis | null, config: AppConfig, sessionId: string,
+  userId: string, tenantId: string, role: string,
+): Promise<void> {
+  if (!redis) return;
+  const raw = await redis.get(authSessionKey(sessionId));
+  const now = nowSeconds();
+  const prior = raw ? JSON.parse(raw) as AuthSession : null;
+  const session: AuthSession = {
+    user_id: userId, tenant_id: tenantId, role, scope: 'tenant',
+    created_at: prior?.created_at ?? now, last_seen_at: now,
+  };
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
+}
+
+export async function validateAndRenewAuthSession(
+  redis: Redis | null, config: AppConfig, claims: Claims,
+): Promise<void> {
+  if (!redis) return;
+  const sessionId = claims.sid;
+  if (!sessionId) throw AppError.unauthorized();
+  const raw = await redis.get(authSessionKey(sessionId));
+  if (!raw) throw AppError.unauthorized();
+  let session: AuthSession;
+  try {
+    session = JSON.parse(raw) as AuthSession;
+  } catch {
+    throw AppError.unauthorized();
+  }
+  if (session.user_id !== claims.sub || session.tenant_id !== claims.tenant_id
+    || session.role !== claims.role || session.scope !== claims.scope) {
+    throw AppError.unauthorized();
+  }
+  if (session.auth_source === 'portal' || claims.auth_source === 'portal') {
+    if (session.auth_source !== claims.auth_source
+      || nowSeconds() >= session.created_at + Math.max(1, config.authTokenExpireHours) * 3600) {
+      throw AppError.unauthorized();
+    }
+    return;
+  }
+  session.last_seen_at = nowSeconds();
+  await redis.set(
+    authSessionKey(sessionId), JSON.stringify(session), 'EX',
+    Math.max(1, config.authTokenExpireHours) * 3600,
+  );
+}
+
+export async function deleteAuthSession(redis: Redis | null, sessionId: string): Promise<void> {
+  if (!redis) return;
+  await redis.del(authSessionKey(sessionId));
+}

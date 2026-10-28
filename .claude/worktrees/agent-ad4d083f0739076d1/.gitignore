@@ -1,0 +1,62 @@
+# ── Rust ──
+**/*.rs.bk
+*.pdb
+
+# ── Node / Next.js ──
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+/apps/web/node_modules/
+/apps/web/.next/
+/apps/web/.turbo/
+!/apps/web/out/
+/apps/web/out/*
+!/apps/web/out/.gitkeep
+
+# ── Environment ──
+.env
+.env.local
+.env.*.local
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Build ──
+/dist/
+/apps/api-bun/dist/
+/apps/api-bun/src/generated/
+
+# ── Python ──
+__pycache__/
+*.pyc
+
+# ── Data ──
+/data/uploads/*
+!/data/.gitkeep
+
+# ── Logs ──
+*.log
+/logs/
+/tmp/
+
+# ── Misc ──
+/.worktree/
+*.tmp
+*.temp
+.playwright-mcp/
+
+
+/**/*.png

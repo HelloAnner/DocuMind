@@ -1,0 +1,10 @@
+输出协议（所有裁判角色共用）：
+输入含 applicable:boolean、checks_spec:[{check_id,target_id,required,rule}]、severity_rules、
+default_severity，输出schema_version固定"evaluation.judgment.v1"，字段如下：
+dimension:string；verdict:pass|fail|unknown|not_applicable；
+checks:[{check_id,target_id,status:pass|fail|unknown|not_applicable,reason_code,evidence_refs:[string],reason}]；
+failed_fact_ids:[string]；evidence_refs:[string]；reason:string；severity:info|minor|major|critical。
+聚合规则：applicable=false才not_applicable；适用且空检查阻断为unknown；
+任一required fail或证实禁止行为=>fail；无fail但required unknown=>unknown；
+全部required pass且无禁止行为=>pass。failed_fact_ids只用输入fact_id，非事实检查为[]。
+只输出一个JSON对象；无总分、概率、隐式推理；程序重算聚合。

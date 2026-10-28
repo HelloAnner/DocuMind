@@ -1,0 +1,654 @@
+export type JsonObject = Record<string, unknown>;
+
+export interface ServerConfig {
+  url: string;
+  base_path: string;
+  timeout_seconds: number;
+}
+
+export interface AuthConfig {
+  username: string;
+  password: string;
+  password_env: string;
+  tenant: string;
+}
+
+export interface ChatConfig {
+  kb_ids: string[];
+  trace: "off" | "summary" | "full";
+  stream: boolean;
+}
+
+export interface ExternalConfig {
+  token_env: string;
+}
+
+export interface DiagnosticsConfig {
+  ssh_host: string;
+  elasticsearch_url: string;
+  elasticsearch_index: string;
+}
+
+export interface CliConfig {
+  version: number;
+  server: ServerConfig;
+  auth: AuthConfig;
+  external: ExternalConfig;
+  chat: ChatConfig;
+  diagnostics: DiagnosticsConfig;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  name?: string | null;
+  avatar_url?: string | null;
+  status: string;
+}
+
+export interface TenantProfile {
+  id: string;
+  name: string;
+  slug: string;
+  plan: string;
+  status: string;
+}
+
+export interface Identity {
+  user: UserProfile;
+  tenant: TenantProfile;
+  roles: string[];
+  permissions: string[];
+  allowed_kb_ids: string[];
+}
+
+export interface LoginResponse extends Identity {
+  access_token: string;
+  token_type: string;
+}
+
+export interface SessionState extends Partial<Identity> {
+  access_token?: string;
+  auth_source?: "portal";
+  last_conversation_id?: string;
+  saved_at?: string;
+}
+
+export interface ApiTokenSummary {
+  id: string;
+  token_prefix: string;
+  status: string;
+  expires_at: string;
+  last_used_at?: string | null;
+  created_at: string;
+}
+
+export interface ApiClientSummary {
+  id: string;
+  name: string;
+  description?: string | null;
+  scopes: string[];
+  status: string;
+  rate_limit_per_minute: number;
+  kb_ids: string[];
+  tokens: ApiTokenSummary[];
+  created_at: string;
+}
+
+export interface CreatedApiClient {
+  client: ApiClientSummary;
+  token: string;
+}
+
+export interface ExternalIdentity {
+  client_id: string;
+  client_name: string;
+  tenant_id: string;
+  scopes: string[];
+  allowed_kb_ids: string[];
+  token_expires_at: string;
+}
+
+export interface KnowledgeBase {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description?: string | null;
+  status: string;
+  tags: string[];
+  doc_count: number;
+  chunk_count: number;
+  query_count: number;
+  updated_at: string;
+}
+
+export interface KnowledgeBaseUpsert {
+  name: string;
+  description?: string;
+  status?: string;
+  tags?: string[];
+}
+
+export interface DeleteKnowledgeBaseResponse {
+  kb_id: string;
+  status: string;
+}
+
+export interface ConversationSummary {
+  conversation_id: string;
+  title: string;
+  kb_ids?: string[];
+  last_message_preview?: string;
+  created_at?: string;
+  updated_at: string;
+}
+
+export interface CitationAnchor {
+  anchor_id?: string;
+  parse_job_id?: string;
+  format?: string;
+  kind?: string;
+  page?: number;
+  slide?: number;
+  block_ids?: string[];
+  table_ids?: string[];
+  char_range?: { start: number; end: number };
+  bbox?: {
+    x0: number;
+    y0: number;
+    x1: number;
+    y1: number;
+    unit?: string;
+    rotation?: number;
+  };
+  location_status?: string;
+}
+
+export interface Citation {
+  index: number;
+  doc_id: string;
+  chunk_id: string;
+  doc_title: string;
+  page_range: number[];
+  quote: string;
+  score?: number;
+  source_status?: string;
+  anchor?: CitationAnchor;
+}
+
+export interface UserFile {
+  id: string;
+  scope?: "personal" | "space";
+  name: string;
+  path: string;
+  mime_type: string;
+  size_bytes: number;
+  source: "upload" | "sandbox";
+  conversation_id?: string;
+  created_at: string;
+  updated_at: string;
+  download_url: string;
+}
+
+export interface Message {
+  message_id: string;
+  role: "user" | "assistant";
+  content: string;
+  status: "created" | "answering" | "completed" | "failed" | "cancelled";
+  confidence?: "high" | "medium" | "low";
+  no_answer_reason?: string;
+  agent_mode?: string;
+  prompt_versions?: Record<string, string>;
+  citations: Citation[];
+  files: UserFile[];
+  feedback?: {
+    id: string;
+    rating: "up" | "down";
+    reason?: string | null;
+    comment?: string | null;
+    correction?: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
+  answer_source?: "rag" | "manual_correction";
+  correction_id?: string | null;
+  correction_version_id?: string | null;
+  correction_match_type?: "exact" | "alias" | "semantic" | null;
+  correction_match_score?: number | null;
+  parent_message_id?: string;
+  retry_of_message_id?: string;
+  created_at: string;
+  completed_at?: string;
+}
+
+export interface MessageListResponse {
+  conversation_id: string;
+  messages: Message[];
+}
+
+export interface ResolvedRef {
+  text: string;
+  resolved_to: string;
+  source_message_id?: string;
+  evidence_message_id?: string;
+}
+
+export interface QueryTrace {
+  id: string;
+  message_id: string;
+  original_query: string;
+  rewritten_query?: string | null;
+  keywords: string[];
+  hypothetical_answer?: string | null;
+  resolved_refs: ResolvedRef[];
+  effective_kb_ids: string[];
+  rewrite_model: string;
+  created_at: string;
+}
+
+export interface RetrievalTrace {
+  id: string;
+  message_id: string;
+  chunk_id: string;
+  doc_id: string;
+  source: "dense" | "bm25" | "rrf" | "rerank";
+  rank: number;
+  score: number;
+  heading_path: string[];
+  page_range: number[];
+  content_preview: string;
+}
+
+export interface AgentTrace {
+  mode: string;
+  mode_reason: string;
+  rewritten_query?: string | null;
+  keywords: string[];
+  resolved_refs: ResolvedRef[];
+  retrieval_plan: {
+    mode: string;
+    queries: Array<{ query: string; reason: string }>;
+  };
+  prompt_versions: Record<string, string>;
+  model: string;
+  usage?: { input_tokens: number; output_tokens: number } | null;
+  started_at: string;
+}
+
+export interface MessageTraceResponse {
+  message_id: string;
+  agent_trace?: AgentTrace | null;
+  query_trace?: QueryTrace | null;
+  retrieval_traces: RetrievalTrace[];
+}
+
+export interface RuntimeStep {
+  step_id: string;
+  parent_step_id?: string | null;
+  step_type: string;
+  name: string;
+}
+
+export interface RuntimeEventEnvelope {
+  schema_version: string;
+  event_id: string;
+  job_id: string;
+  tenant_id: string;
+  user_id: string;
+  agent_id: string;
+  session_id: string;
+  execution_id: string;
+  event_seq: number;
+  event_type: string;
+  occurred_at: string;
+  response_message_id: string;
+  trace_id: string;
+  step?: RuntimeStep | null;
+  payload: JsonObject;
+}
+
+export interface SseFrame {
+  event: string;
+  id?: string;
+  data: unknown;
+}
+
+export interface ObservedEvent extends SseFrame {
+  received_at: string;
+  elapsed_ms: number;
+  envelope?: RuntimeEventEnvelope;
+}
+
+export interface ExecutionRound {
+  round: number;
+  tool_call_id: string;
+  name: string;
+  status: "running" | "succeeded" | "failed" | "cancelled";
+  started_at?: string;
+  completed_at?: string;
+  duration_ms?: number;
+  arguments?: unknown;
+  result?: unknown;
+}
+
+export interface ChatModelOption {
+  id: string;
+  name: string;
+  thinking_mode: "switchable" | "always_on" | "unsupported";
+  thinking_default: boolean;
+}
+
+export interface ChatModelCatalog {
+  default_model_id: string;
+  models: ChatModelOption[];
+}
+
+export interface ChatRequest {
+  content: string;
+  conversation_id?: string;
+  kb_ids?: string[];
+  file_ids?: string[];
+  title?: string;
+  client_request_id?: string;
+  model_id?: string;
+  thinking_enabled?: boolean;
+}
+
+export interface ChatRunReport {
+  schema_version: "documind.cli.chat.v1";
+  server: string;
+  identity: {
+    user_id: string;
+    username: string;
+    tenant_id: string;
+    tenant: string;
+  };
+  request: {
+    conversation_id: string;
+    content: string;
+    kb_ids: string[];
+    file_ids?: string[];
+    client_request_id: string;
+    model_id?: string;
+    thinking_enabled?: boolean;
+  };
+  response: {
+    user_message_id?: string;
+    assistant_message_id: string;
+    content: string;
+    status: string;
+    confidence?: string;
+    no_answer_reason?: string;
+    files: UserFile[];
+  };
+  timing: {
+    total_ms: number;
+    time_to_first_event_ms?: number;
+    time_to_first_token_ms?: number;
+    persisted_duration_ms?: number;
+  };
+  execution: {
+    job_id?: string;
+    execution_id?: string;
+    trace_id?: string;
+    round_source: "agent_iterations" | "runtime_tool_events";
+    react_round_count: number;
+    react_rounds: ExecutionRound[];
+    usage?: JsonObject;
+  };
+  citations: Citation[];
+  trace: MessageTraceResponse;
+  events: ObservedEvent[];
+}
+
+export interface AdminDocument {
+  doc_id: string;
+  kb_id: string;
+  kb_name: string;
+  title: string;
+  file_name: string;
+  file_type: string;
+  mime_type: string;
+  file_size: number;
+  file_sha256: string;
+  parse_status: string;
+  parse_version: number;
+  latest_parse_job_id?: string;
+  quality_score?: number;
+  chunk_count: number;
+  table_count: number;
+  page_count?: number;
+  uploaded_at: string;
+  updated_at: string;
+}
+
+export interface DocumentPage {
+  items: AdminDocument[];
+  total: number;
+  page: number;
+  page_size: number;
+}
+
+export interface DocumentChunk {
+  chunk_id: string;
+  chunk_index: number;
+  source_type: string;
+  content: string;
+  heading_path: string[];
+  page_start?: number;
+  page_end?: number;
+  slide_start?: number;
+  slide_end?: number;
+  token_count: number;
+}
+
+export interface FilePreviewRange {
+  status: number;
+  content_type: string;
+  content_range: string;
+  accept_ranges: string;
+  byte_length: number;
+  head: string;
+}
+
+export interface FilePreviewTransport {
+  preview: JsonObject;
+  manifest: JsonObject;
+  signed: JsonObject;
+  range: FilePreviewRange;
+}
+
+export interface AdminDocumentDetail {
+  document: AdminDocument;
+  latest_job?: JsonObject | null;
+  preview: JsonObject;
+  blocks: JsonObject[];
+  cleaned_blocks: JsonObject[];
+  chunks: DocumentChunk[];
+  tables: JsonObject[];
+}
+
+export interface DocumentJob {
+  job_id: string;
+  doc_id: string;
+  upload_batch_id?: string;
+  kb_id: string;
+  kb_name: string;
+  file_name: string;
+  file_type: string;
+  file_size: number;
+  uploaded_by?: string;
+  parse_status: string;
+  job_status: "queued" | "processing" | "completed" | "warning" | "failed";
+  current_stage: string;
+  queue_position?: number;
+  stalled: boolean;
+  attempt_count: number;
+  max_attempts: number;
+  quality_score?: number;
+  page_count?: number;
+  block_count?: number;
+  table_count?: number;
+  chunk_count: number;
+  error_code?: string;
+  error_message?: string;
+  created_at: string;
+  started_at?: string;
+  completed_at?: string;
+  updated_at: string;
+}
+
+export interface DocumentJobsResponse {
+  items: DocumentJob[];
+  summary: { queued: number; processing: number; failed_24h: number; completed_24h: number; stalled: number };
+}
+
+export interface DocumentJobDetail {
+  job: DocumentJob;
+  events: Array<{ id: string; stage: string; status: string; message: string; metrics: JsonObject; error_code?: string; error_message?: string; created_at: string }>;
+  vector_job?: { id: string; status: string; attempt_count: number; max_attempts: number; error_message?: string; available_at: string; started_at?: string; completed_at?: string };
+}
+
+export interface UploadDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  title: string;
+  file_type: string;
+  parse_status: string;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  storage_key: string;
+}
+
+export interface DeleteDocumentResponse {
+  document_id: string;
+  status: string;
+}
+
+export interface ReprocessDocumentResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  block_count: number;
+  table_count: number;
+  chunk_count: number;
+  reused_existing_parse: boolean;
+}
+
+export interface ExcludeFromSearchResponse {
+  document_id: string;
+  status: string;
+  es_deleted_chunks: number;
+}
+
+export interface ReplaceDocumentFileResponse {
+  document_id: string;
+  parse_job_id: string;
+  parse_status: string;
+  parse_version: number;
+  title: string;
+  file_type: string;
+  file_sha256: string;
+  storage_key: string;
+}
+
+export interface SendToOcrResponse {
+  document_id: string;
+  ocr_job_id: string;
+  parse_status: string;
+  ocr_status: string;
+}
+
+export interface RetryDocumentsResponse {
+  retried: number;
+}
+
+export interface DownloadedDocument {
+  bytes: Uint8Array;
+  content_type?: string;
+  content_disposition?: string;
+}
+
+export interface VectorIndexSummary {
+  id: string;
+  name: string;
+  alias: string;
+  tenant_id: string;
+  tenant: string;
+  kb_id: string;
+  kb_name: string;
+  embedding_model: string;
+  index_version: string;
+  dimension: number;
+  documents: number;
+  building_documents: number;
+  degraded_documents: number;
+  chunks: number;
+  searchable_chunks: number;
+  embedded_chunks: number;
+  failed_embeddings: number;
+  excluded_chunks: number;
+  status: string;
+  lastIndexed?: string;
+}
+
+export interface ScenarioExpectation {
+  status?: string;
+  confidence?: string | string[];
+  citations_min?: number;
+  retrievals_min?: number;
+  react_rounds_min?: number;
+  contains?: string | string[];
+  not_contains?: string | string[];
+  max_duration_ms?: number;
+  files_min?: number;
+  file_extensions?: string[];
+  /** 断言这些用户文件 ID 出现在本轮 response.files 中（用于确认改动落在目标文件上）。 */
+  file_ids?: string[];
+  /**
+   * 断言至少一个输入文件被原地写回（其 ID 出现在 response.files）。
+   * 同轮新建的中间文件不影响判定；但指定 file_extensions 时，被写回的输入文件本身必须命中期望扩展名。
+   */
+  input_files_modified?: boolean;
+}
+
+export interface ScenarioTurn {
+  content: string;
+  kb_ids?: string[];
+  file_ids?: string[];
+  expect?: ScenarioExpectation;
+}
+
+export interface Scenario {
+  name?: string;
+  conversation?: {
+    id?: string;
+    title?: string;
+    kb_ids?: string[];
+  };
+  turns: ScenarioTurn[];
+}
+
+export interface AssertionResult {
+  field: string;
+  passed: boolean;
+  expected: unknown;
+  actual: unknown;
+}
+
+export interface ScenarioReport {
+  schema_version: "documind.cli.scenario.v1";
+  name: string;
+  conversation_id: string;
+  started_at: string;
+  completed_at: string;
+  duration_ms: number;
+  passed: boolean;
+  turns: Array<{
+    report: ChatRunReport;
+    assertions: AssertionResult[];
+    passed: boolean;
+  }>;
+}

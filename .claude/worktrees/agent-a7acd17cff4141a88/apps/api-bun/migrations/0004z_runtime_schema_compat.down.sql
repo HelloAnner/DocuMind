@@ -1,0 +1,2 @@
+-- Intentionally left blank. This migration only adds compatibility columns and
+-- renames legacy runtime columns into the schema expected by current code.

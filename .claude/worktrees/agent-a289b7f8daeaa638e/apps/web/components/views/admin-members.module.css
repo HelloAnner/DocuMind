@@ -1,0 +1,177 @@
+.overlay {
+  align-items: stretch;
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  inset: 0;
+  justify-content: flex-end;
+  position: fixed;
+  z-index: 100;
+}
+
+.drawer {
+  background: var(--bg-secondary);
+  border-left: 1px solid var(--border-subtle);
+  box-shadow: -16px 0 48px rgba(0, 0, 0, 0.1);
+  max-width: 100%;
+  overflow-y: auto;
+  padding: 24px 28px;
+  width: 440px;
+}
+
+.drawerHeader {
+  align-items: flex-start;
+  display: flex;
+  justify-content: space-between;
+}
+
+.drawerHeader span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.drawerHeader h2 {
+  color: var(--text-primary);
+  font-size: 18px;
+  font-weight: 600;
+  margin: 4px 0 0;
+}
+
+.drawerHeader button {
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  height: 32px;
+  justify-content: center;
+  width: 32px;
+}
+
+.drawerIntro {
+  background: var(--bg-tertiary);
+  border-left: 3px solid var(--text-primary);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+  margin: 20px 0;
+  padding: 10px 12px;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+}
+
+.field span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input,
+.field select {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  height: 40px;
+  outline: 0;
+  padding: 0 11px;
+}
+
+.field input:focus,
+.field select:focus {
+  border-color: var(--text-primary);
+}
+
+.inviteResult {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+  padding: 12px;
+}
+
+.inviteResult span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.inviteResult code {
+  color: var(--text-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.inviteResult button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 12px;
+  gap: 6px;
+  padding: 0;
+}
+
+.inviteResult button:hover {
+  color: var(--text-primary);
+}
+
+.drawerActions {
+  border-top: 1px solid var(--border-muted);
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 28px;
+  padding-top: 18px;
+}
+
+.drawerActions > button {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: inline-flex;
+  font-size: 14px;
+  height: 36px;
+  padding: 0 14px;
+}
+
+.drawerActions > button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.primary {
+  background: var(--text-primary) !important;
+  border-color: var(--text-primary) !important;
+  color: var(--bg-primary) !important;
+}
+
+.primary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+@media (max-width: 560px) {
+  .drawer {
+    padding: 20px;
+    width: 100%;
+  }
+}

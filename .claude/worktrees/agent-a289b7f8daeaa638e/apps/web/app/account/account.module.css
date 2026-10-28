@@ -1,0 +1,253 @@
+.page {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  padding: 88px 24px 80px;
+}
+
+.container {
+  margin: 0 auto;
+  max-width: 920px;
+}
+
+.back {
+  align-items: center;
+  color: var(--text-tertiary);
+  display: inline-flex;
+  font-size: 14px;
+  gap: 6px;
+  margin-bottom: 24px;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.back:hover {
+  color: var(--text-primary);
+}
+
+.header h1 {
+  color: var(--text-primary);
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.header p {
+  color: var(--text-tertiary);
+  font-size: 14px;
+  margin: 8px 0 28px;
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 1.15fr 0.85fr;
+}
+
+.card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 24px;
+}
+
+.card h2 {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+
+.card > p {
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0 0 22px;
+}
+
+.profilePreview {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin: 18px 0 20px;
+}
+
+.profilePreview > span:last-child {
+  min-width: 0;
+}
+
+.profilePreview strong,
+.profilePreview small {
+  display: block;
+}
+
+.profilePreview strong {
+  font-size: 14px;
+}
+
+.profilePreview small {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.avatar {
+  align-items: center;
+  background: var(--text-primary);
+  border-radius: 50%;
+  color: var(--bg-primary);
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 16px;
+  font-weight: 600;
+  height: 52px;
+  justify-content: center;
+  overflow: hidden;
+  width: 52px;
+}
+
+.avatar img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.field {
+  display: grid;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.field span {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.field input {
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+  height: 42px;
+  outline: 0;
+  padding: 0 12px;
+}
+
+.field input:focus {
+  border-color: var(--text-primary);
+}
+
+.field input:disabled {
+  color: var(--text-muted);
+}
+
+.actions {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  margin-top: 22px;
+}
+
+.primary {
+  background: var(--text-primary);
+  border: 1px solid var(--text-primary);
+  border-radius: var(--radius-sm);
+  color: var(--bg-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+.primary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.message {
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.tenantList {
+  display: grid;
+  gap: 10px;
+}
+
+.tenant {
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-sm);
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  padding: 13px;
+}
+
+.tenant strong,
+.tenant small {
+  display: block;
+}
+
+.tenant strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tenant small {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.tenant button {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 14px;
+  min-height: 32px;
+  padding: 0 10px;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+}
+
+.tenant button:hover {
+  background: var(--hover-bg);
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
+}
+
+.current {
+  background: var(--success-bg);
+  border-radius: 5px;
+  color: var(--color-success);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 5px 8px;
+}
+
+.empty {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 16px;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 76px 16px 60px;
+  }
+
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

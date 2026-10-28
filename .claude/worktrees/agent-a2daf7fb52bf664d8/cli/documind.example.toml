@@ -1,0 +1,22 @@
+version = 1
+
+[server]
+url = "http://123.57.255.204:8089"
+base_path = ""
+timeout_seconds = 300
+
+[auth]
+username = "Anner"
+password = ""
+password_env = "DOCUMIND_PASSWORD"
+tenant = "acme"
+
+[chat]
+kb_ids = []
+trace = "full"
+stream = true
+
+[diagnostics]
+ssh_host = "documind"
+elasticsearch_url = "http://127.0.0.1:8104"
+elasticsearch_index = "chunks"

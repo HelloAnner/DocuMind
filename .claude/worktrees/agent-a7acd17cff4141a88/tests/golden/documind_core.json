@@ -1,0 +1,142 @@
+{
+  "schema_version": "documind.golden.v1",
+  "name": "documind-core-multiformat",
+  "description": "Fifty deterministic questions over generated DOCX, PDF, PPTX, Markdown, and TXT fixtures.",
+  "baseline": {
+    "min_overall_pass_rate": 0.82,
+    "min_citation_coverage_rate": 0.86,
+    "min_target_doc_hit_rate": 0.82,
+    "min_no_answer_accuracy": 0.8
+  },
+  "documents": [
+    {
+      "id": "reimbursement_docx",
+      "file_name": "DocuMind-Golden-Reimbursement.docx",
+      "format": "docx",
+      "paragraphs": [
+        "DocuMind Golden reimbursement policy.",
+        "Reimbursement deadline: employees must submit expense claims within 30 working days after the expense occurs.",
+        "Required reimbursement materials are the original invoice, an expense detail sheet, and an approval form.",
+        "Missing approval form rule: if the approval form is missing, finance must not enter the payment workflow.",
+        "Travel meal allowance is 80 RMB per person per day for approved business trips.",
+        "Taxi reimbursement above 200 RMB requires a trip explanation and department manager approval.",
+        "Conference fee reimbursement requires the conference notice and attendee list.",
+        "Finance review must finish within 5 working days after complete materials are submitted.",
+        "Rejected reimbursement claims can be resubmitted within 10 working days after the rejection notice.",
+        "The reimbursement owner is the Finance Operations team."
+      ]
+    },
+    {
+      "id": "procurement_pdf",
+      "file_name": "DocuMind-Golden-Procurement.pdf",
+      "format": "pdf",
+      "paragraphs": [
+        "DocuMind Golden procurement contract.",
+        "Payment milestone one: 30 percent is paid after contract signing.",
+        "Payment milestone two: 60 percent is paid after written acceptance.",
+        "Payment milestone three: 10 percent is paid after the warranty period ends with no quality issues.",
+        "Acceptance record rule: the written acceptance record is the basis for the second payment.",
+        "Penalty rule: a party that fails to perform must pay liquidated damages equal to 10 percent of the contract amount.",
+        "Delivery deadline: the supplier must complete delivery within 45 calendar days after signing.",
+        "Warranty period: the warranty lasts 12 months after acceptance.",
+        "Change order rule: scope changes require written confirmation from both parties.",
+        "Contract risk owner: the Procurement Management Office tracks supplier delivery risk."
+      ]
+    },
+    {
+      "id": "sales_pptx",
+      "file_name": "DocuMind-Golden-Sales.pptx",
+      "format": "pptx",
+      "slides": [
+        [
+          "DocuMind Golden East China Sales Plan",
+          "Q3 East China revenue target is 12 million RMB.",
+          "The expected year-over-year growth rate is 15 percent."
+        ],
+        [
+          "Customer Mix",
+          "New customers must contribute at least 30 percent of Q3 revenue.",
+          "Strategic accounts are reviewed every month."
+        ],
+        [
+          "Operating Cadence",
+          "Sales owners update the risk list every week.",
+          "Pipeline review happens every Monday morning."
+        ],
+        [
+          "Discount Governance",
+          "Discounts above 15 percent require regional director approval.",
+          "Deals over 2 million RMB need legal review before signing."
+        ]
+      ]
+    },
+    {
+      "id": "security_md",
+      "file_name": "DocuMind-Golden-Security.md",
+      "format": "md",
+      "content": "# DocuMind Golden Security Handbook\n\n## Password Policy\nPassword rotation happens every 90 days. Password length must be at least 12 characters.\n\n## Multi Factor Authentication\nMFA is mandatory for administrator accounts and remote access.\n\n## Data Export\nCustomer data exports require approval from the data protection officer. Export logs must be retained for 180 days.\n\n## Incident Response\nSecurity incidents must be reported within 2 hours. The incident commander must publish a closure report within 5 working days.\n\n## Device Control\nUnencrypted removable storage is prohibited for customer data.\n"
+    },
+    {
+      "id": "onboarding_txt",
+      "file_name": "DocuMind-Golden-Onboarding.txt",
+      "format": "txt",
+      "content": "DocuMind Golden onboarding checklist.\n\nNew hires must finish account activation on day 1.\n\nSecurity training must be completed within 7 calendar days after joining.\n\nThe mentor assignment must be completed before the end of week 1.\n\nProbation review happens in month 3 and requires manager written feedback.\n\nEquipment return must be completed within 3 working days after offboarding.\n\nThe HR Service Desk owns onboarding ticket closure.\n"
+    }
+  ],
+  "cases": [
+    {"id": "docx_01", "question": "DocuMind Golden reimbursement policy 的报销提交时限是多少？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["30", "工作日"], "expected_mode": "answerer"},
+    {"id": "docx_02", "question": "DocuMind Golden reimbursement policy 需要哪些报销材料？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["发票", "费用明细", "审批单"], "expected_mode": "answerer"},
+    {"id": "docx_03", "question": "DocuMind Golden reimbursement policy 如果缺少审批单会怎样？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["不得", "付款"], "expected_mode": "answerer"},
+    {"id": "docx_04", "question": "DocuMind Golden reimbursement policy 的差旅餐补标准是多少？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["80"], "expected_mode": "answerer"},
+    {"id": "docx_05", "question": "DocuMind Golden reimbursement policy 出租车报销超过多少钱需要说明和经理审批？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["200"], "expected_mode": "answerer"},
+    {"id": "docx_06", "question": "DocuMind Golden reimbursement policy 会议费报销需要什么附件？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["会议通知", "参会"], "expected_mode": "answerer"},
+    {"id": "docx_07", "question": "DocuMind Golden reimbursement policy 财务审核完整材料要多久？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["5", "工作日"], "expected_mode": "answerer"},
+    {"id": "docx_08", "question": "DocuMind Golden reimbursement policy 被驳回后多久内可重新提交？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["10", "工作日"], "expected_mode": "answerer"},
+    {"id": "docx_09", "question": "DocuMind Golden reimbursement policy 的 owner 是谁？", "expected_doc_ids": ["reimbursement_docx"], "expected_terms": ["Finance Operations"], "expected_mode": "answerer"},
+    {"id": "docx_10", "question": "DocuMind Golden reimbursement policy 支持宠物保险报销吗？", "expected_doc_ids": [], "expected_no_answer": true, "expected_mode": "answerer"},
+
+    {"id": "pdf_01", "question": "DocuMind Golden procurement contract 的首付款比例是多少？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["30"], "expected_mode": "answerer"},
+    {"id": "pdf_02", "question": "DocuMind Golden procurement contract 验收后支付多少？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["60"], "expected_mode": "answerer"},
+    {"id": "pdf_03", "question": "DocuMind Golden procurement contract 质保期结束后支付多少？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["10"], "expected_mode": "answerer"},
+    {"id": "pdf_04", "question": "DocuMind Golden procurement contract 第二笔付款的依据是什么？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["验收", "记录"], "expected_mode": "answerer"},
+    {"id": "pdf_05", "question": "DocuMind Golden procurement contract 违约金比例是多少？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["10"], "expected_mode": "answerer"},
+    {"id": "pdf_06", "question": "DocuMind Golden procurement contract 供应商交付期限是多少天？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["45"], "expected_mode": "answerer"},
+    {"id": "pdf_07", "question": "DocuMind Golden procurement contract 质保期多长？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["12", "月"], "expected_mode": "answerer"},
+    {"id": "pdf_08", "question": "DocuMind Golden procurement contract 范围变更需要什么确认？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["书面", "双方"], "expected_mode": "answerer"},
+    {"id": "pdf_09", "question": "DocuMind Golden procurement contract 谁跟踪供应商交付风险？", "expected_doc_ids": ["procurement_pdf"], "expected_terms": ["Procurement Management Office"], "expected_mode": "answerer"},
+    {"id": "pdf_10", "question": "DocuMind Golden procurement contract 规定了供应商股票代码吗？", "expected_doc_ids": [], "expected_no_answer": true, "expected_mode": "answerer"},
+
+    {"id": "pptx_01", "question": "DocuMind Golden East China Sales Plan 的 Q3 收入目标是多少？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["12", "million"], "expected_mode": "answerer"},
+    {"id": "pptx_02", "question": "DocuMind Golden East China Sales Plan 预计同比增长多少？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["15"], "expected_mode": "answerer"},
+    {"id": "pptx_03", "question": "DocuMind Golden East China Sales Plan 新客户收入占比至少多少？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["30"], "expected_mode": "answerer"},
+    {"id": "pptx_04", "question": "DocuMind Golden East China Sales Plan 战略客户多久复盘一次？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["每月"], "expected_mode": "answerer"},
+    {"id": "pptx_05", "question": "DocuMind Golden East China Sales Plan 风险清单更新频率是什么？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["每周"], "expected_mode": "answerer"},
+    {"id": "pptx_06", "question": "DocuMind Golden East China Sales Plan pipeline review 在什么时候？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["Monday"], "expected_mode": "answerer"},
+    {"id": "pptx_07", "question": "DocuMind Golden East China Sales Plan 折扣超过多少需要区域总监审批？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["15"], "expected_mode": "answerer"},
+    {"id": "pptx_08", "question": "DocuMind Golden East China Sales Plan 超过多少钱的交易签署前需要法务审核？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["2", "million"], "expected_mode": "answerer"},
+    {"id": "pptx_09", "question": "DocuMind Golden East China Sales Plan 的 operating cadence 包含什么周度动作？", "expected_doc_ids": ["sales_pptx"], "expected_terms": ["风险清单", "每周"], "expected_mode": "answerer"},
+    {"id": "pptx_10", "question": "DocuMind Golden East China Sales Plan 是否写了北美渠道目标？", "expected_doc_ids": [], "expected_no_answer": true, "expected_mode": "answerer"},
+
+    {"id": "md_01", "question": "DocuMind Golden Security Handbook 密码多久轮换一次？", "expected_doc_ids": ["security_md"], "expected_terms": ["90"], "expected_mode": "answerer"},
+    {"id": "md_02", "question": "DocuMind Golden Security Handbook 密码至少多少字符？", "expected_doc_ids": ["security_md"], "expected_terms": ["12"], "expected_mode": "answerer"},
+    {"id": "md_03", "question": "DocuMind Golden Security Handbook 哪些场景强制 MFA？", "expected_doc_ids": ["security_md"], "expected_terms": ["administrator", "remote"], "expected_mode": "answerer"},
+    {"id": "md_04", "question": "DocuMind Golden Security Handbook 客户数据导出需要谁审批？", "expected_doc_ids": ["security_md"], "expected_terms": ["data protection officer"], "expected_mode": "answerer"},
+    {"id": "md_05", "question": "DocuMind Golden Security Handbook 导出日志保留多久？", "expected_doc_ids": ["security_md"], "expected_terms": ["180"], "expected_mode": "answerer"},
+    {"id": "md_06", "question": "DocuMind Golden Security Handbook 安全事件多久内报告？", "expected_doc_ids": ["security_md"], "expected_terms": ["2"], "expected_mode": "answerer"},
+    {"id": "md_07", "question": "DocuMind Golden Security Handbook 关闭报告多久内发布？", "expected_doc_ids": ["security_md"], "expected_terms": ["5", "工作日"], "expected_mode": "answerer"},
+    {"id": "md_08", "question": "DocuMind Golden Security Handbook 对未加密可移动存储有什么要求？", "expected_doc_ids": ["security_md"], "expected_terms": ["prohibited"], "expected_mode": "answerer"},
+    {"id": "md_09", "question": "DocuMind Golden Security Handbook 数据导出和安全事件各有什么时限？", "expected_doc_ids": ["security_md"], "expected_terms": ["180", "2"], "expected_mode": "answerer"},
+    {"id": "md_10", "question": "DocuMind Golden Security Handbook 是否规定了办公室咖啡品牌？", "expected_doc_ids": [], "expected_no_answer": true, "expected_mode": "answerer"},
+
+    {"id": "txt_01", "question": "DocuMind Golden onboarding checklist 新员工第 1 天要完成什么？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["account activation"], "expected_mode": "answerer"},
+    {"id": "txt_02", "question": "DocuMind Golden onboarding checklist 安全培训多久内完成？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["7"], "expected_mode": "answerer"},
+    {"id": "txt_03", "question": "DocuMind Golden onboarding checklist mentor assignment 什么时候完成？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["week 1"], "expected_mode": "answerer"},
+    {"id": "txt_04", "question": "DocuMind Golden onboarding checklist probation review 在第几个月？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["month 3"], "expected_mode": "answerer"},
+    {"id": "txt_05", "question": "DocuMind Golden onboarding checklist 试用期评审需要什么反馈？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["manager", "written"], "expected_mode": "answerer"},
+    {"id": "txt_06", "question": "DocuMind Golden onboarding checklist 离职设备归还多久内完成？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["3", "工作日"], "expected_mode": "answerer"},
+    {"id": "txt_07", "question": "DocuMind Golden onboarding checklist 谁负责 onboarding ticket closure？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["HR Service Desk"], "expected_mode": "answerer"},
+    {"id": "txt_08", "question": "DocuMind Golden onboarding checklist account activation 和 security training 的时限分别是什么？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["day 1", "7"], "expected_mode": "answerer"},
+    {"id": "txt_09", "question": "DocuMind Golden onboarding checklist mentor 和 probation review 分别在什么时候？", "expected_doc_ids": ["onboarding_txt"], "expected_terms": ["week 1", "month 3"], "expected_mode": "answerer"},
+    {"id": "txt_10", "question": "DocuMind Golden onboarding checklist 是否规定了午餐餐厅名单？", "expected_doc_ids": [], "expected_no_answer": true, "expected_mode": "answerer"}
+  ]
+}

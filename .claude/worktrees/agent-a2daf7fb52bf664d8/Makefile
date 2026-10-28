@@ -1,0 +1,53 @@
+SHELL := /bin/bash
+
+WEB_DIR := apps/web
+DIST_DIR := dist
+BIN_NAME := documind
+DEPLOY_HOST ?= documind
+DEPLOY_PORT ?= 8089
+DEPLOY_BASE_PATH ?= /documind
+DEPLOY_TARGET_DIR ?= dist/linux-x86_64
+DEPLOY_BINARY ?= $(DEPLOY_TARGET_DIR)/$(BIN_NAME)
+
+.PHONY: install docs deploy-web-build deploy-build deploy deploy-remote sync-remote-source status health release-gate logs clean
+
+install:
+	cd $(WEB_DIR) && npm install
+
+docs:
+	python3 scripts/build-docs.py
+
+deploy-web-build: install
+	cd $(WEB_DIR) && DOCUMIND_STATIC_EXPORT=1 DOCUMIND_BASE_PATH=$(DEPLOY_BASE_PATH) NEXT_PUBLIC_API_BASE=$(DEPLOY_BASE_PATH) npm run build
+
+deploy-build: deploy-web-build
+	DEPLOY_TARGET_DIR=$(DEPLOY_TARGET_DIR) scripts/build-linux.sh
+
+deploy:
+	DEPLOY_PORT=$(DEPLOY_PORT) DEPLOY_BASE_PATH=$(DEPLOY_BASE_PATH) REMOTE_ROOT=/opt/documind scripts/server-build-deploy.sh
+
+deploy-remote:
+	DEPLOY_HOST=$(DEPLOY_HOST) DEPLOY_PORT=$(DEPLOY_PORT) DEPLOY_BASE_PATH=$(DEPLOY_BASE_PATH) REMOTE_ROOT=/opt/documind scripts/sync-remote-source.sh --deploy
+
+sync-remote-source:
+	DEPLOY_HOST=$(DEPLOY_HOST) REMOTE_ROOT=/opt/documind scripts/sync-remote-source.sh
+
+status:
+	ssh $(DEPLOY_HOST) 'bash -lc '"'"'set -euo pipefail; \
+		echo "== documind process =="; pgrep -af "/opt/documind/.*/documind|documind" || true; \
+		echo; echo "== documind port =="; (command -v ss >/dev/null && ss -ltnp | grep ":$(DEPLOY_PORT) " || true); \
+		echo; echo "== logs =="; ls -lh /opt/documind/shared/logs 2>/dev/null || true'"'"''
+
+health:
+	ssh $(DEPLOY_HOST) 'bash -lc '"'"'set -euo pipefail; \
+		curl -fsS http://127.0.0.1:$(DEPLOY_PORT)/api/health; echo; \
+		curl -fsS -o /dev/null -w "%{http_code}\n" http://127.0.0.1:$(DEPLOY_PORT)/documind/'"'"''
+
+release-gate:
+	BASE_URL=$${BASE_URL:-http://123.57.255.204:$(DEPLOY_PORT)} scripts/release-gate.sh
+
+logs:
+	ssh $(DEPLOY_HOST) 'bash -lc '"'"'tail -n $${LINES:-300} -f /opt/documind/shared/logs/documind-$(DEPLOY_PORT).log'"'"''
+
+clean:
+	rm -rf $(DIST_DIR) $(WEB_DIR)/out $(WEB_DIR)/.next apps/api-bun/dist apps/api-bun/src/generated

@@ -1,0 +1,469 @@
+.root {
+  min-width: 0;
+  position: relative;
+}
+
+.trigger {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 32px minmax(0, 1fr);
+  min-width: 0;
+  padding: 7px 8px;
+  text-align: left;
+  width: 100%;
+}
+
+.trigger:hover,
+.trigger[aria-expanded="true"] {
+  background: var(--hover-bg);
+}
+
+.footerRow {
+  align-items: center;
+  display: grid;
+  gap: 6px;
+  grid-template-columns: minmax(0, 1fr) 40px 40px;
+}
+
+.bell {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  height: 40px;
+  justify-content: center;
+  position: relative;
+  width: 40px;
+}
+
+.bell:hover,
+.bell[aria-expanded="true"] {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.bell > span {
+  background: #ef4444;
+  border: 2px solid var(--sidebar-bg);
+  border-radius: 50%;
+  height: 7px;
+  position: absolute;
+  right: 8px;
+  top: 7px;
+  width: 7px;
+}
+
+.updates {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  bottom: 24px;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.18);
+  height: min(760px, calc(100vh - 48px));
+  left: var(--updates-left, 312px);
+  overflow: hidden;
+  position: fixed;
+  width: 520px;
+  z-index: 110;
+}
+
+.updateTabs {
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-subtle);
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  height: 64px;
+}
+
+.updateTabs > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  gap: 8px;
+  justify-content: center;
+  position: relative;
+}
+
+.updateTabs > button:hover {
+  background: var(--hover-bg);
+}
+
+.updateTabs > .updateTabActive::after {
+  background: var(--text-primary);
+  bottom: -1px;
+  content: "";
+  height: 3px;
+  left: 0;
+  position: absolute;
+  right: 0;
+}
+
+.whatsNew {
+  align-items: center;
+  color: var(--text-primary);
+  display: flex;
+  font-family: "Snell Roundhand", "Segoe Script", cursive;
+  font-size: 20px;
+  font-style: italic;
+  justify-content: center;
+  letter-spacing: -0.04em;
+}
+
+.updateFilters {
+  align-items: center;
+  display: flex;
+  height: 68px;
+  justify-content: space-between;
+  padding: 0 22px;
+}
+
+.updateFilters > div {
+  display: flex;
+  gap: 6px;
+}
+
+.updateFilters button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  height: 36px;
+  justify-content: center;
+  padding: 0 14px;
+}
+
+.updateFilters button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.updateFilters .filterActive {
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.updateList {
+  height: calc(100% - 132px);
+  overflow-y: auto;
+  padding: 12px 30px 28px;
+}
+
+.updateItem {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: block;
+  font: inherit;
+  padding: 14px 0 27px;
+  position: relative;
+  text-align: left;
+  width: 100%;
+}
+
+.updateItem:hover strong {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.updateMeta {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.updateMeta > span {
+  align-items: center;
+  background: color-mix(in srgb, #a78bfa 12%, transparent);
+  border-radius: 6px;
+  color: #9b7bea;
+  display: inline-flex;
+  font-size: 11px;
+  gap: 4px;
+  padding: 4px 7px;
+}
+
+.updateMeta time {
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.updateItem > strong {
+  display: block;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.updateItem > p {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+  margin: 3px 0 0;
+}
+
+.updateItem > i {
+  background: #8b5cf6;
+  border-radius: 50%;
+  height: 6px;
+  position: absolute;
+  right: -14px;
+  top: 52px;
+  width: 6px;
+}
+
+.updateEmpty {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin: 0;
+  padding: 72px 0;
+  text-align: center;
+}
+
+.updateEmptyState {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  min-height: 320px;
+}
+
+.updateEmptyState strong {
+  color: var(--text-primary);
+  font-size: 13px;
+}
+
+.updateEmptyState span {
+  font-size: 11px;
+}
+
+.avatar {
+  align-items: center;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 50%;
+  color: var(--text-primary);
+  display: flex;
+  flex: 0 0 32px;
+  font-size: 13px;
+  font-weight: 600;
+  height: 32px;
+  justify-content: center;
+  overflow: hidden;
+  width: 32px;
+}
+
+.avatar img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.identity {
+  min-width: 0;
+}
+
+.identity strong,
+.identity span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.identity strong {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.identity span {
+  color: var(--text-muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.menu {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 16px;
+  bottom: calc(100% - 4px);
+  box-shadow: var(--overlay-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  left: 12px;
+  padding: 12px;
+  position: absolute;
+  width: 280px;
+  z-index: 50;
+}
+
+.menu a,
+.menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: 13px;
+  gap: 10px;
+  height: 36px;
+  padding: 0 10px;
+  text-decoration: none;
+  width: 100%;
+}
+
+.menu a:hover,
+.menu button:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.menu .active {
+  background: var(--bg-tertiary);
+}
+
+.menuHeader {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.menuIdentity {
+  min-width: 0;
+}
+
+.menuIdentity strong,
+.menuIdentity span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuIdentity strong {
+  color: var(--text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.menuIdentity span {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-top: 2px;
+}
+
+.menu .danger {
+  color: var(--color-error);
+}
+
+.divider {
+  background: var(--border-subtle);
+  height: 1px;
+}
+
+.windowOverlay {
+  align-items: center;
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 24px;
+  position: fixed;
+  z-index: 220;
+}
+
+.windowBackdrop {
+  backdrop-filter: blur(1px);
+  background: rgba(0, 0, 0, 0.42);
+  border: 0;
+  inset: 0;
+  position: absolute;
+}
+
+.appWindow {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 22px;
+  box-shadow: var(--overlay-shadow);
+  height: min(820px, calc(100vh - 48px));
+  min-height: 560px;
+  overflow: hidden;
+  position: relative;
+  width: min(1240px, calc(100vw - 48px));
+}
+
+.windowFrame {
+  border: 0;
+  height: 100%;
+  width: 100%;
+}
+
+.windowClose {
+  align-items: center;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  position: absolute;
+  right: 14px;
+  top: 14px;
+  width: 34px;
+  z-index: 3;
+}
+
+.windowClose:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+@media (max-width: 720px) {
+  .updates {
+    bottom: 10px;
+    height: calc(100vh - 20px);
+    left: 10px;
+    width: calc(100vw - 20px);
+  }
+
+  .windowOverlay {
+    padding: 10px;
+  }
+
+  .appWindow {
+    border-radius: 16px;
+    height: calc(100vh - 20px);
+    min-height: 0;
+    width: calc(100vw - 20px);
+  }
+}
