@@ -4,7 +4,7 @@
 // 宿主只需要提供 5 个适配函数；组件不读 cookie、不拼 URL、不认识登录方式。
 // 三维模型：人员（左） × 权限实体（右，分组） × 查看/编辑/管理（列）。
 
-export const RBAC_PANEL_VERSION = '2026-11-01.1';
+export const RBAC_PANEL_VERSION = '2026-11-01.2';
 
 export type RbacActionKey = 'view' | 'edit' | 'manage';
 export type RbacEffect = 'allow' | 'deny';
@@ -114,7 +114,7 @@ type State = {
   loadingMatrix: boolean;
   error: string | null;
   detailError: string | null;
-  groupOpen: Map<string, boolean>;
+  groupTab: string | null;
   search: string;
   pending: Set<string>;
   toast: string | null;
@@ -181,37 +181,37 @@ const CSS = `
 .rbac-legend .rbac-mini-lock{width:15px;height:15px;border-radius:5px;background:var(--rbac-fill);display:inline-flex;align-items:center;justify-content:center;color:var(--rbac-muted)}
 .rbac-legend .rbac-mini-lock.on{background:var(--rbac-ink);color:#fff}
 .rbac-legend .rbac-mini-dot{width:4px;height:4px;border-radius:50%;background:currentColor;margin-left:1px}
+.rbac-type-tabs{display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid var(--rbac-line)}
+.rbac-type-tab{appearance:none;border:0;border-bottom:2px solid transparent;background:transparent;padding:7px 10px;margin-bottom:-1px;font-size:12px;font-weight:500;color:var(--rbac-muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+.rbac-type-tab:hover{color:var(--rbac-ink2)}
+.rbac-type-tab[aria-selected="true"]{color:var(--rbac-ink);border-bottom-color:var(--rbac-ink);font-weight:600}
+.rbac-type-count{font-size:10px;font-weight:500;color:var(--rbac-muted);background:var(--rbac-fill);border-radius:999px;padding:0 5px}
 .rbac-groups{flex:1;overflow:auto;min-height:0;padding:0 2px 24px 0}
-.rbac-group{border:1px solid var(--rbac-line);border-radius:10px;background:#fff;margin-bottom:10px;overflow:hidden}
-.rbac-group-head{display:grid;grid-template-columns:minmax(0,1fr) 58px 58px 58px;align-items:center;gap:0;padding:8px 12px;background:#fcfcfb;border-bottom:1px solid transparent;position:sticky;top:0;z-index:2}
-.rbac-group[data-open="true"] .rbac-group-head{border-bottom-color:var(--rbac-line)}
-.rbac-group-toggle{appearance:none;border:0;background:transparent;display:flex;align-items:center;gap:7px;padding:0;font-size:12px;font-weight:600;color:var(--rbac-ink);cursor:pointer;text-align:left;min-width:0}
-.rbac-group-toggle svg{color:var(--rbac-muted);flex:0 0 auto;transition:transform .15s}
-.rbac-group-toggle[aria-expanded="false"] svg{transform:rotate(-90deg)}
-.rbac-group-title{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.rbac-count{font-size:10.5px;font-weight:500;color:var(--rbac-muted);margin-left:6px;background:var(--rbac-fill);border-radius:999px;padding:1px 6px}
+.rbac-table{border:1px solid var(--rbac-line);border-radius:10px;background:#fff;margin-top:12px;overflow:hidden}
+.rbac-table-head{display:grid;grid-template-columns:minmax(0,1fr) 50px 50px 50px;align-items:center;padding:6px 12px;background:#fcfcfb;border-bottom:1px solid var(--rbac-line)}
+.rbac-table-title{font-size:10.5px;font-weight:500;color:var(--rbac-muted)}
 .rbac-col-head{font-size:10.5px;font-weight:500;color:var(--rbac-muted);text-align:center;white-space:nowrap}
 .rbac-rows{display:flex;flex-direction:column}
-.rbac-row{display:grid;grid-template-columns:minmax(0,1fr) 58px 58px 58px;align-items:center;padding:5px 12px;border-top:1px solid rgba(17,17,17,.05);min-height:40px}
+.rbac-row{display:grid;grid-template-columns:minmax(0,1fr) 50px 50px 50px;align-items:center;padding:3px 12px;border-top:1px solid rgba(17,17,17,.05);min-height:32px}
 .rbac-row:first-child{border-top:0}
 .rbac-row:hover{background:#fcfcfb}
 .rbac-row.is-child{padding-left:26px}
 .rbac-entity{font-size:12.5px;color:var(--rbac-ink2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-right:10px}
 .rbac-entity small{display:inline;font-size:10px;color:var(--rbac-muted);margin-left:6px;letter-spacing:.01em}
-.rbac-action-cell{display:flex;align-items:center;justify-content:center;position:relative;min-height:30px}
-.rbac-lock{appearance:none;width:30px;height:29px;border-radius:8px;border:1px solid transparent;background:var(--rbac-fill);color:var(--rbac-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;cursor:pointer;position:relative;transition:background .14s,color .14s,border-color .14s,transform .14s}
+.rbac-action-cell{display:flex;align-items:center;justify-content:center;position:relative;min-height:26px}
+.rbac-lock{appearance:none;width:22px;height:22px;border-radius:6px;border:1px solid transparent;background:var(--rbac-fill);color:var(--rbac-muted);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:0;cursor:pointer;position:relative;transition:background .14s,color .14s,border-color .14s,transform .14s}
 .rbac-lock:hover:not(:disabled){border-color:var(--rbac-line2);transform:translateY(-1px)}
 .rbac-lock.is-on{background:var(--rbac-ink);color:#fff}
 .rbac-lock.is-on:hover:not(:disabled){background:#000}
 .rbac-lock:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(22,22,26,.18)}
 .rbac-lock:disabled{opacity:.35;cursor:not-allowed;transform:none}
-.rbac-lock .rbac-dot{width:3.5px;height:3.5px;border-radius:50%;background:currentColor;opacity:0;margin-top:1px}
+.rbac-lock .rbac-dot{width:3px;height:3px;border-radius:50%;background:currentColor;opacity:0;margin-top:1px}
 .rbac-lock.is-override .rbac-dot{opacity:.9}
 .rbac-lock.is-pending svg{opacity:.25}
-.rbac-lock.is-pending::after{content:"";position:absolute;inset:8px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:rbac-spin .7s linear infinite}
+.rbac-lock.is-pending::after{content:"";position:absolute;inset:5px;border:1.5px solid currentColor;border-top-color:transparent;border-radius:50%;animation:rbac-spin .7s linear infinite}
 @keyframes rbac-spin{to{transform:rotate(360deg)}}
-.rbac-none{color:var(--rbac-muted);font-size:12px;text-align:center;width:58px;user-select:none}
-.rbac-cell-reset{position:absolute;right:1px;top:1px;width:16px;height:16px;border-radius:50%;border:1px solid var(--rbac-line);background:#fff;color:var(--rbac-muted);display:none;align-items:center;justify-content:center;font-size:10px;line-height:1;cursor:pointer;padding:0}
+.rbac-none{color:var(--rbac-muted);font-size:12px;text-align:center;width:50px;user-select:none}
+.rbac-cell-reset{position:absolute;right:0;top:0;width:14px;height:14px;border-radius:50%;border:1px solid var(--rbac-line);background:#fff;color:var(--rbac-muted);display:none;align-items:center;justify-content:center;font-size:10px;line-height:1;cursor:pointer;padding:0}
 .rbac-action-cell:hover .rbac-cell-reset{display:flex}
 .rbac-cell-reset:hover{color:var(--rbac-ink);border-color:var(--rbac-line2)}
 .rbac-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;color:var(--rbac-muted);font-size:12.5px;padding:56px 16px;text-align:center;flex:1}
@@ -235,16 +235,14 @@ const CSS = `
 }
 `;
 
-function icon(name: 'search' | 'lock-open' | 'lock-closed' | 'chevron' | 'reset'): string {
+function icon(name: 'search' | 'lock-open' | 'lock-closed' | 'reset'): string {
   switch (name) {
     case 'search':
       return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>';
     case 'lock-open':
-      return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 7.6-1.7"/><circle cx="12" cy="15.5" r="1.1" fill="currentColor" stroke="none"/></svg>';
+      return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 7.6-1.7"/><circle cx="12" cy="15.5" r="1.1" fill="currentColor" stroke="none"/></svg>';
     case 'lock-closed':
-      return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.1" fill="currentColor" stroke="none"/></svg>';
-    case 'chevron':
-      return '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>';
+      return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/><circle cx="12" cy="15.5" r="1.1" fill="currentColor" stroke="none"/></svg>';
     case 'reset':
       return '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg>';
   }
@@ -321,7 +319,7 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
     loadingMatrix: false,
     error: null,
     detailError: null,
-    groupOpen: new Map(),
+    groupTab: null,
     search: '',
     pending: new Set(),
     toast: null,
@@ -562,25 +560,16 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
     return row;
   }
 
-  function renderGroup(key: string, entities: RbacEntity[]): HTMLElement {
+  function renderTypeTable(key: string, entities: RbacEntity[]): HTMLElement {
     const section = document.createElement('section');
-    section.className = 'rbac-group';
+    section.className = 'rbac-table';
     const isTable = key.startsWith('table:');
-    const open = state.groupOpen.get(key) ?? !isTable;
-    section.dataset.open = String(open);
-
-    const head = document.createElement('header');
-    head.className = 'rbac-group-head';
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'rbac-group-toggle';
-    toggle.setAttribute('aria-expanded', String(open));
-    toggle.innerHTML = `${icon('chevron')}<span class="rbac-group-title">${escapeHtml(groupLabel(key, entities, state.catalog?.entities ?? []))}</span><span class="rbac-count">${entities.length}</span>`;
-    toggle.addEventListener('click', () => {
-      state.groupOpen.set(key, !open);
-      render();
-    });
-    head.appendChild(toggle);
+    const head = document.createElement('div');
+    head.className = 'rbac-table-head';
+    const title = document.createElement('span');
+    title.className = 'rbac-table-title';
+    title.textContent = groupLabel(key, entities, state.catalog?.entities ?? []);
+    head.appendChild(title);
     for (const action of ACTION_FALLBACK) {
       const label = document.createElement('span');
       label.className = 'rbac-col-head';
@@ -588,14 +577,11 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
       head.appendChild(label);
     }
     section.appendChild(head);
-
-    if (open) {
-      const rows = document.createElement('div');
-      rows.className = 'rbac-rows';
-      const cells = cellMap();
-      for (const entity of entities) rows.appendChild(renderRow(entity, cells, isTable));
-      section.appendChild(rows);
-    }
+    const rows = document.createElement('div');
+    rows.className = 'rbac-rows';
+    const cells = cellMap();
+    for (const entity of entities) rows.appendChild(renderRow(entity, cells, isTable));
+    section.appendChild(rows);
     return section;
   }
 
@@ -670,8 +656,7 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
       return detail;
     }
 
-    const groups = document.createElement('div');
-    groups.className = 'rbac-groups';
+    // 功能 → 知识库/项目/数据源 → 每个数据源的表
     const entities = state.catalog?.entities ?? [];
     const grouped = new Map<string, RbacEntity[]>();
     for (const entity of entities) {
@@ -679,14 +664,42 @@ export function mountRbacPanel(host: HTMLElement, initial: RbacMountOptions): Rb
       const list = grouped.get(key);
       if (list) list.push(entity); else grouped.set(key, [entity]);
     }
-    // 功能 → 知识库/项目/数据源 → 每个数据源的表
     const order = (key: string): [number, string] =>
       key === 'feature' ? [0, ''] : key.startsWith('table:') ? [2, key] : [1, key];
     const keys = [...grouped.keys()].sort((a, b) => {
       const [oa, sa] = order(a); const [ob, sb] = order(b);
       return oa - ob || sa.localeCompare(sb);
     });
-    for (const key of keys) groups.appendChild(renderGroup(key, grouped.get(key) ?? []));
+    const active = state.groupTab && grouped.has(state.groupTab)
+      ? state.groupTab
+      : grouped.has('feature') ? 'feature' : keys[0] ?? null;
+    state.groupTab = active;
+    const typeTabs = document.createElement('div');
+    typeTabs.className = 'rbac-type-tabs';
+    typeTabs.setAttribute('role', 'tablist');
+    for (const key of keys) {
+      const list = grouped.get(key) ?? [];
+      const tab = document.createElement('button');
+      tab.type = 'button';
+      tab.className = 'rbac-type-tab';
+      tab.setAttribute('role', 'tab');
+      tab.setAttribute('aria-selected', String(key === active));
+      tab.appendChild(document.createTextNode(groupLabel(key, list, entities)));
+      const count = document.createElement('span');
+      count.className = 'rbac-type-count';
+      count.textContent = String(list.length);
+      tab.appendChild(count);
+      tab.addEventListener('click', () => {
+        if (state.groupTab === key) return;
+        state.groupTab = key;
+        render();
+      });
+      typeTabs.appendChild(tab);
+    }
+    detail.appendChild(typeTabs);
+    const groups = document.createElement('div');
+    groups.className = 'rbac-groups';
+    if (active) groups.appendChild(renderTypeTable(active, grouped.get(active) ?? []));
     detail.appendChild(groups);
     return detail;
   }
