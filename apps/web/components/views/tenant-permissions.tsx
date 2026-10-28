@@ -117,7 +117,8 @@ export function TenantPermissions() {
         return;
       }
     }
-    setMatrix(null);
+    // 重载（force）时保留旧表格直到新数据到达，避免页面闪动。
+    setMatrix((prev) => (prev && prev.subject.id === subjectId ? prev : null));
     try {
       const result = await fetchJson<RbacMatrix>(`/api/v1/rbac/matrix?subject_id=${encodeURIComponent(subjectId)}`);
       matricesRef.current.set(subjectId, result);
@@ -288,7 +289,7 @@ export function TenantPermissions() {
           onClick={() => toggleCell(entity, action.key, cell)}
           className={`${styles.lock}${allow ? ` ${styles.lockOn}` : ""}`}
         >
-          {allow ? <Unlock size={11} /> : <Lock size={11} />}
+          {allow ? <Unlock size={13} /> : <Lock size={13} />}
           {overridden && <span className={styles.overrideDot} />}
         </button>
         {overridden && !readOnly && (
@@ -396,25 +397,6 @@ export function TenantPermissions() {
                         全部恢复默认
                       </Button>
                     )}
-                  </div>
-
-                  <div className={styles.legend}>
-                    <b>
-                      <span className={`${styles.legendLock} ${styles.legendLockOn}`}>
-                        <Unlock size={9} />
-                      </span>
-                      允许
-                    </b>
-                    <b>
-                      <span className={styles.legendLock}>
-                        <Lock size={9} />
-                      </span>
-                      拒绝
-                    </b>
-                    <b>
-                      <span className={styles.miniDot} />
-                      个人设置（无点=角色默认）
-                    </b>
                   </div>
 
                   <Segmented

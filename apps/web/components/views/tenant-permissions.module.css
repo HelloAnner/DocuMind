@@ -146,52 +146,6 @@
   font-size: 11.5px;
 }
 
-.legend {
-  align-items: center;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: var(--radius-sm);
-  color: var(--text-muted);
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 11px;
-  gap: 14px;
-  margin-bottom: 12px;
-  padding: 7px 10px;
-}
-
-.legend b {
-  align-items: center;
-  color: var(--text-secondary);
-  display: inline-flex;
-  font-weight: 500;
-  gap: 5px;
-}
-
-.legendLock {
-  align-items: center;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 5px;
-  color: var(--text-muted);
-  display: inline-flex;
-  height: 16px;
-  justify-content: center;
-  width: 16px;
-}
-
-.legendLockOn {
-  background: var(--text-primary);
-  color: var(--bg-secondary);
-}
-
-.miniDot {
-  background: currentColor;
-  border-radius: 999px;
-  height: 4px;
-  width: 4px;
-}
-
 .types {
   margin-bottom: 12px;
   max-width: 100%;
@@ -273,33 +227,34 @@
 
 .lock {
   align-items: center;
-  background: var(--bg-tertiary);
-  border: 1px solid var(--border-subtle);
+  background: transparent;
+  border: 0;
   border-radius: 6px;
   color: var(--text-muted);
   cursor: pointer;
   display: flex;
-  height: 22px;
+  height: 24px;
   justify-content: center;
   padding: 0;
   position: relative;
-  transition: background var(--transition-fast, 150ms), color var(--transition-fast, 150ms);
-  width: 22px;
+  transition: color var(--transition-fast, 150ms), background var(--transition-fast, 150ms);
+  width: 24px;
 }
 
 .lock:hover:not(:disabled) {
+  background: var(--bg-tertiary);
   color: var(--text-secondary);
 }
 
 .lockOn,
 .lockOn:hover:not(:disabled) {
-  background: var(--text-primary);
-  color: var(--bg-secondary);
+  background: transparent;
+  color: var(--text-primary);
 }
 
 .lock:disabled {
   cursor: not-allowed;
-  opacity: 0.35;
+  opacity: 0.3;
 }
 
 .overrideDot {
