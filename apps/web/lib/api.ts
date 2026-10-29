@@ -702,7 +702,6 @@ export interface AdminRuntimeConfig {
     max_output_tokens: number;
     streaming_enabled: boolean;
     rewrite_enabled: boolean;
-    rewrite_model: string;
   };
 }
 

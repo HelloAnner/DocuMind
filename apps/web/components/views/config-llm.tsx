@@ -63,10 +63,6 @@ export function ConfigLlm() {
                 value={llm?.api_key_configured ? "已配置" : "未配置"}
               />
               <ReadonlyField label="模型名称" value={llm?.model ?? ""} />
-              <ReadonlyField
-                label="查询改写模型"
-                value={llm?.rewrite_enabled ? llm.rewrite_model : "未启用"}
-              />
             </div>
           </section>
 

@@ -163,13 +163,11 @@ async function runtimeConfig(c: Context<AppEnv>) {
       max_output_tokens: cfg.rag.generation.maxOutputTokens,
       streaming_enabled: cfg.rag.generation.useRealLlm,
       rewrite_enabled: cfg.rag.rewrite.enabled,
-      rewrite_model: cfg.rag.generation.model,
       verify_claims: cfg.rag.citation.verifyClaims,
       verify_consensus: cfg.rag.citation.verifyConsensus,
     },
     agent: {
       runtime: 'llm_react',
-      reasoning_model: cfg.rag.generation.model,
       max_react_steps: cfg.agent.maxReactSteps,
       max_queries_per_step: cfg.agent.maxQueriesPerStep,
       max_history_turns: cfg.agent.maxHistoryTurns,
