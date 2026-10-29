@@ -495,12 +495,12 @@
   color: var(--agent-blue);
 }
 
-.lockGrant {
-  color: var(--agent-blue);
+.lockOff {
+  color: var(--text-muted);
 }
 
 .lockDeny {
-  color: var(--text-muted);
+  color: var(--color-error, #ef4444);
 }
 
 .lockStatic {
@@ -557,7 +557,8 @@
   width: 14px;
 }
 
-.cell:hover .cellReset {
+.cell:hover .cellReset,
+.cell:focus-within .cellReset {
   display: flex;
 }
 

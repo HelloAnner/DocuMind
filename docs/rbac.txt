@@ -60,5 +60,12 @@ CLI
 
 页面
 ----
-  /tenant/permissions  →  共享 <rbac-panel>
-  入口: 租户管理侧栏“权限管理”
+  /tenant/permissions 与 /admin/permissions 共用原生 TenantPermissions。
+  实现: apps/web/components/views/tenant-permissions.tsx + .module.css。
+  入口: 租户管理侧栏“权限管理”。
+  顶部双模式：权限快速配置（点击锁即时保存）/ 用户最终权限（只读）。
+  左侧仅人员名单与搜索；右侧功能权限/知识库 Tab、权限项搜索和锁矩阵。
+  表头吸顶，行高约 32px，左右独立滚动，深浅色均使用主题 Token。
+  蓝色闭锁=已授权；灰色开锁=未授权；个人拒绝为红色，圆点=个人设置。
+  查看/编辑/管理以目录声明为准；不支持的动作显示 —，不伪造导出动作。
+  切换人员忽略迟到请求；保存只刷新操作对应人员，不串改当前矩阵。
