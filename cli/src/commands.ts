@@ -725,6 +725,7 @@ async function a2aCommand(args: ParsedArgs, api: ApiClient, json: boolean): Prom
 }
 
 async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Promise<number> {
+  if (args.positionals[1] === "retry") return chatRetryCommand(args, api, json);
   if (booleanOption(args, "interactive")) {
     if (json) throw new CliError("交互模式不能与 --json 同时使用", 2);
     return interactiveChat(args, api);
@@ -742,6 +743,44 @@ async function chatCommand(args: ParsedArgs, api: ApiClient, json: boolean): Pro
     },
     onDelta: (text) => renderer?.onDelta(text),
   });
+  if (ndjson) process.stdout.write(`${JSON.stringify({ type: "report", report })}\n`);
+  else if (json) printJson(report);
+  else printChatReport(report, { trace, quiet, streamed: true });
+  return 0;
+}
+
+/** 重试失败消息：--model 必须原样透传，服务端不会自己记住上次选的模型。 */
+async function chatRetryCommand(
+  args: ParsedArgs, api: ApiClient, json: boolean,
+): Promise<number> {
+  const messageId = args.positionals[2];
+  if (!messageId) throw new CliError("chat retry 需要 assistant message ID", 2);
+  const conversationId = stringOption(args, "conversation") ?? await api.lastConversationId();
+  if (!conversationId) throw new CliError("chat retry 需要 --conversation 或先有一次会话", 2);
+  const trace = traceOption(args, api.config.chat.trace);
+  const quiet = booleanOption(args, "quiet");
+  const ndjson = booleanOption(args, "ndjson");
+  const renderer = !json && !ndjson ? new LiveChatRenderer(quiet) : undefined;
+  const report = await new ChatService(api).retry(
+    conversationId,
+    messageId,
+    (() => {
+      const model = stringOption(args, "model");
+      return {
+        ...(model ? { model_id: model } : {}),
+        ...("thinking" in args.options
+          ? { thinking_enabled: booleanOption(args, "thinking") }
+          : {}),
+      };
+    })(),
+    {
+      onEvent: (event) => {
+        renderer?.onEvent(event);
+        if (ndjson) process.stdout.write(`${JSON.stringify({ type: "event", event })}\n`);
+      },
+      onDelta: (text) => renderer?.onDelta(text),
+    },
+  );
   if (ndjson) process.stdout.write(`${JSON.stringify({ type: "report", report })}\n`);
   else if (json) printJson(report);
   else printChatReport(report, { trace, quiet, streamed: true });

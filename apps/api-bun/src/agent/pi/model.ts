@@ -13,6 +13,8 @@ export interface PiModelSettings {
   maxTokens: number;
   temperature: number;
   thinkingEnabled?: boolean;
+  /** 只有 switchable 模型才允许显式关闭思考；always_on/unsupported 传参会被端点拒绝。 */
+  thinkingSwitchable?: boolean;
   reasoningEffort?: 'low' | 'high' | 'max';
 }
 
@@ -61,7 +63,8 @@ export async function completePiText(
   systemPrompt: string,
   userText: string,
 ): Promise<string> {
-  const generationSettings = { ...settings, thinkingEnabled: false };
+  const thinkingEnabled = settings.thinkingSwitchable === true ? false : undefined;
+  const generationSettings: PiModelSettings = { ...settings, thinkingEnabled };
   const context: Context = {
     systemPrompt: systemPrompt,
     messages: [{ role: 'user', content: userText, timestamp: Date.now() }],
@@ -70,7 +73,7 @@ export async function completePiText(
     apiKey: generationSettings.apiKey,
     temperature: generationSettings.temperature,
     maxTokens: generationSettings.maxTokens,
-    samplingParams: { enable_thinking: false },
+    ...(thinkingEnabled === undefined ? {} : { samplingParams: { enable_thinking: false } }),
   }).result();
   return message.content
     .filter((block): block is { type: 'text'; text: string } => block.type === 'text')

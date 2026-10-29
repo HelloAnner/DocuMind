@@ -107,7 +107,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
             apiKey: settings.apiKey,
             model: settings.model,
             timeoutSeconds: 120,
-            thinkingEnabled: false,
+            thinkingEnabled: settings.thinkingSwitchable === true ? false : undefined,
           }),
           settings.model,
           config.rag.citation.verifyConsensus,

@@ -71,6 +71,7 @@ export function resolveChatModel(
     maxTokens: generation.maxOutputTokens,
     temperature: generation.temperature,
     thinkingEnabled,
+    thinkingSwitchable: option.thinking_mode === 'switchable',
     reasoningEffort: thinkingEnabled && id === 'deepseek-v4.1-flash' ? 'high' : undefined,
   };
 }

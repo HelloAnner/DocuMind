@@ -173,7 +173,10 @@ const CHAT_HELP = `用法: documind chat [问题] [options]\n\n` +
   `  --ndjson                     每个 SSE 事件一行，末行输出 report\n` +
   `  --input-json <json|@file|->  用 JSON 提供 content/conversation_id/kb_ids\n` +
   `  --interactive, -i            多轮 REPL\n` +
-  `  --quiet, -q                  只输出回答正文\n`;
+  `  --quiet, -q                  只输出回答正文\n` +
+  `\n子命令:\n` +
+  `  chat retry <消息ID> [--conversation ID] [--model ID] [--thinking|--no-thinking]\n` +
+  `                               重试失败的回答；--model 必须与对话里选择的模型一致\n`;
 
 const A2A_HELP = `用法: documind a2a <subcommand> [options]\n\n` +
   `  card [--url URL]             GET /.well-known/agent-card.json（默认用配置服务器地址）\n` +

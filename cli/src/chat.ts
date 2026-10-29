@@ -38,12 +38,11 @@ export class ChatService {
       await this.createConversation(kbIds, request.title);
     const clientRequestId = request.client_request_id ?? `cli_${crypto.randomUUID()}`;
     await this.api.saveLastConversation(conversationId);
-
-    const started = performance.now();
-    const startedAt = new Date();
-    const response = await this.api.sse(
-      this.api.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
-      {
+    return this.runStream({
+      identity,
+      conversationId,
+      url: this.api.conversationPath(`/${encodeURIComponent(conversationId)}/messages`),
+      body: {
         content: request.content,
         kb_ids: kbIds,
         file_ids: fileIds,
@@ -54,6 +53,73 @@ export class ChatService {
           ? { thinking_enabled: request.thinking_enabled }
           : {}),
       },
+      requestMeta: {
+        conversation_id: conversationId,
+        content: request.content,
+        kb_ids: kbIds,
+        file_ids: fileIds,
+        client_request_id: clientRequestId,
+        ...(request.model_id ? { model_id: request.model_id } : {}),
+        ...(request.thinking_enabled !== undefined
+          ? { thinking_enabled: request.thinking_enabled }
+          : {}),
+      },
+      observer,
+    });
+  }
+
+  /** 重试失败消息：必须带上对话当前选择的模型，否则服务端会回落到默认模型。 */
+  async retry(
+    conversationId: string,
+    messageId: string,
+    runtime: { model_id?: string; thinking_enabled?: boolean } = {},
+    observer: ChatObserver = {},
+  ): Promise<ChatRunReport> {
+    const identity = await this.api.me();
+    ensureKbScope(identity, this.api.config.chat.kb_ids);
+    await this.api.saveLastConversation(conversationId);
+    return this.runStream({
+      identity,
+      conversationId,
+      url: this.api.conversationPath(
+        `/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/retry`),
+      body: {
+        stream: true,
+        ...(runtime.model_id ? { model_id: runtime.model_id } : {}),
+        ...(runtime.thinking_enabled !== undefined
+          ? { thinking_enabled: runtime.thinking_enabled }
+          : {}),
+      },
+      requestMeta: {
+        conversation_id: conversationId,
+        content: "",
+        kb_ids: [],
+        file_ids: [],
+        client_request_id: "",
+        ...(runtime.model_id ? { model_id: runtime.model_id } : {}),
+        ...(runtime.thinking_enabled !== undefined
+          ? { thinking_enabled: runtime.thinking_enabled }
+          : {}),
+      },
+      observer,
+    });
+  }
+
+  private async runStream(params: {
+    identity: Identity;
+    conversationId: string;
+    url: string;
+    body: JsonObject;
+    requestMeta: ChatRunReport["request"];
+    observer: ChatObserver;
+  }): Promise<ChatRunReport> {
+    const identity = params.identity;
+    const conversationId = params.conversationId;
+    const started = performance.now();
+    const startedAt = new Date();
+    const response = await this.api.sse(
+      params.url,
+      params.body,
     );
 
     const events: ObservedEvent[] = [];
@@ -87,7 +153,7 @@ export class ChatService {
           if (typeof delta === "string") {
             firstTokenMs ??= elapsedMs;
             streamedContent += delta;
-            observer.onDelta?.(delta);
+            params.observer.onDelta?.(delta);
           }
         }
         if (envelope.event_type === "usage.reported") usage = envelope.payload;
@@ -103,11 +169,11 @@ export class ChatService {
         if (frame.event === "answer.delta" && typeof legacy.text === "string") {
           firstTokenMs ??= elapsedMs;
           streamedContent += legacy.text;
-          observer.onDelta?.(legacy.text);
+          params.observer.onDelta?.(legacy.text);
         }
         if (frame.event === "answer.failed") failure = legacy;
       }
-      observer.onEvent?.(observed);
+      params.observer.onEvent?.(observed);
     }
 
     if (!assistantMessageId) {
@@ -115,6 +181,9 @@ export class ChatService {
     }
 
     const messages = await this.api.getMessages(conversationId);
+    const parentContent = userMessageId
+      ? messages.messages.find((message) => message.message_id === userMessageId)?.content ?? ""
+      : "";
     const persisted = messages.messages.find((message) => message.message_id === assistantMessageId);
     if (!persisted) {
       throw new CliError(`消息 ${assistantMessageId} 未在会话落库结果中找到`, 1, messages);
@@ -142,15 +211,8 @@ export class ChatService {
         tenant: identity.tenant.slug,
       },
       request: {
-        conversation_id: conversationId,
-        content: request.content,
-        kb_ids: kbIds,
-        file_ids: fileIds,
-        client_request_id: clientRequestId,
-        ...(request.model_id ? { model_id: request.model_id } : {}),
-        ...(request.thinking_enabled !== undefined
-          ? { thinking_enabled: request.thinking_enabled }
-          : {}),
+        ...params.requestMeta,
+        content: params.requestMeta.content || parentContent,
       },
       response: {
         ...(userMessageId ? { user_message_id: userMessageId } : {}),
@@ -190,6 +252,7 @@ export class ChatService {
     }
     return report;
   }
+
 }
 
 function ensureKbScope(identity: Identity, kbIds: string[]): void {
