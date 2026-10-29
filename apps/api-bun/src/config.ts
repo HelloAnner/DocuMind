@@ -1,7 +1,7 @@
 // 移植自 apps/api-rs/src/config.rs —— 环境变量加载与校验
 export type RuntimeEnvironment = 'development' | 'production';
 
-export interface RewriteConfig { enabled: boolean; hydeEnabled: boolean; model: string; }
+export interface RewriteConfig { enabled: boolean; hydeEnabled: boolean; }
 export interface RetrievalConfig { denseTopK: number; bm25TopK: number; rrfTopK: number; effectiveTopK: number; }
 export interface RerankConfig { enabled: boolean; provider: string; model: string; apiUrl: string | null; apiKey: string | null; }
 export interface EmbeddingConfig {
@@ -20,7 +20,7 @@ export interface ChunkingConfig {
 }
 export interface RagConfig { rewrite: RewriteConfig; retrieval: RetrievalConfig; rerank: RerankConfig; embedding: EmbeddingConfig; generation: GenerationConfig; citation: CitationConfig; chunking: ChunkingConfig; }
 export interface AgentConfig {
-  reasoningModel: string; defaultTone: string; proactiveFollowup: boolean; maxFollowupSuggestions: number;
+  defaultTone: string; proactiveFollowup: boolean; maxFollowupSuggestions: number;
   allowAnalystMode: boolean; requireCitationForAnalysis: boolean; clarificationStyle: string;
   maxReactSteps: number; maxQueriesPerStep: number; maxHistoryTurns: number; maxHistoryChars: number;
   maxContextChars: number; maxRepairAttempts: number; totalTimeoutSeconds: number;
@@ -138,14 +138,12 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
   const authLoginModeRaw = (envStr('AUTH_LOGIN_MODE') ?? (legacyPortalAuth ? 'portal' : 'local')).trim().toLowerCase();
   const authLoginMode = ['portal', 'portal_sso', 'portal-managed', 'portal_managed'].includes(authLoginModeRaw) ? 'portal' : 'local';
 
-  const rewriteModel = envStr('RAG_REWRITE_MODEL') ?? 'qwen-turbo';
   const embedApiKey = envStr('EMBED_API_KEY', 'EMBED_KEY', 'EMBEDDING_API_KEY', 'LLM_API', 'LLM_API_KEY') ?? null;
 
   const rag: RagConfig = {
     rewrite: {
       enabled: envBool('RAG_REWRITE_ENABLED', true) || (envStr('RAG_REWRITE_ENABLED') === undefined ? true : ['1', 'true', 'yes', 'on'].includes((env['RAG_REWRITE_ENABLED'] ?? '').toLowerCase())),
       hydeEnabled: envBool('RAG_HYDE_ENABLED', true),
-      model: rewriteModel,
     },
     retrieval: {
       denseTopK: envNum(['RAG_DENSE_TOP_K'], 100),
@@ -192,7 +190,6 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 
   const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
   const agent: AgentConfig = {
-    reasoningModel: envStr('AGENT_REASONING_MODEL') ?? rewriteModel,
     defaultTone: envStr('AGENT_DEFAULT_TONE') ?? 'concise_warm',
     proactiveFollowup: envBool('AGENT_PROACTIVE_FOLLOWUP', true),
     maxFollowupSuggestions: envNum(['AGENT_MAX_FOLLOWUP_SUGGESTIONS'], 2),

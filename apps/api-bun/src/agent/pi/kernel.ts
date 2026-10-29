@@ -119,13 +119,18 @@ export interface PiKernelOptions {
   reranker: Reranker;
   contextAssembler: ContextAssembler;
   promptRegistry: PromptRegistry;
-  answerFinalizer: GroundedAnswerFinalizer;
+  /** 按当轮对话模型构建校验器：校验必须和生成用同一个模型。 */
+  answerFinalizerFor: (settings: PiModelSettings) => GroundedAnswerFinalizer;
   sql?: Sql | null;
   fileRuntime?: { storage: ObjectStorage; sandbox: BashSandboxOptions } | null;
 }
 
 export class PiAgentKernel {
   constructor(readonly options: PiKernelOptions) {}
+
+  get answerFinalizer(): GroundedAnswerFinalizer {
+    return this.options.answerFinalizerFor(this.options.settings);
+  }
 
   get knowledgeSearchComponent(): string {
     return this.options.retriever.componentName() + '+' + this.options.reranker.componentName();
@@ -171,7 +176,7 @@ export class PiAgentKernel {
     const trace: AgentTrace = baseTrace(prepared, {
       reasoner: piComponentName(options.settings),
       search: this.knowledgeSearchComponent,
-      verifier: options.answerFinalizer.componentName(),
+      verifier: this.answerFinalizer.componentName(),
     });
     const reactSteps = trace.react_steps ?? [];
     trace.react_steps = reactSteps;
@@ -440,7 +445,7 @@ export class PiAgentKernel {
           original_query: request.original_query,
           max_context_chars: request.options.runtime.max_context_chars,
         });
-        answerStream = await options.answerFinalizer.finalize(
+        answerStream = await this.answerFinalizer.finalize(
           state.rewrittenQuery,
           finalText,
           assembled,

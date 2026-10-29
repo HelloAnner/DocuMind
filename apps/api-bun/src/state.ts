@@ -22,7 +22,6 @@ import { SimpleContextAssembler } from './rag/context.ts';
 import { embeddingClientConfigFrom } from './rag/embedding.ts';
 import { quickConsistency, startVectorWorker } from './rag/vector_pipeline.ts';
 import type { VectorConsistencySnapshot } from './http/health.ts';
-import type { ClaimVerifier } from './agent/verifier/types.ts';
 import { loadSystemSettings } from './system_settings.ts';
 
 export interface AppState {
@@ -35,8 +34,6 @@ export interface AppState {
   /** 健康检查用：rag/vector_pipeline.quickConsistency */
   vectorConsistency: (() => Promise<VectorConsistencySnapshot>) | null;
   llm: {
-    generationClient: OpenAiClient;
-    reasoningClient: OpenAiClient;
     retriever: Retriever;
     reranker: Reranker;
     contextAssembler: ContextAssembler;
@@ -69,18 +66,6 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   if (!config.rag.generation.useRealLlm) {
     throw new Error('DocuMind Agent requires USE_REAL_LLM=true; rule-based answer fallback was removed');
   }
-  const generationClient = new OpenAiClient({
-    baseUrl: config.rag.generation.baseUrl,
-    apiKey: config.rag.generation.apiKey,
-    model: config.rag.generation.model,
-    timeoutSeconds: 120,
-  });
-  const reasoningClient = new OpenAiClient({
-    baseUrl: config.rag.generation.baseUrl,
-    apiKey: config.rag.generation.apiKey,
-    model: config.agent.reasoningModel,
-    timeoutSeconds: 120,
-  });
   if (!config.rag.embedding.enabled) {
     throw new Error('DocuMind Agent requires EMBED_ENABLED=true');
   }
@@ -112,9 +97,23 @@ export async function buildState(config: AppConfig): Promise<AppState> {
   const reranker: Reranker = rerankerAdapter;
   const contextAssembler: ContextAssembler = new SimpleContextAssembler();
 
-  const verifier: ClaimVerifier = config.rag.citation.verifyClaims
-    ? new LlmClaimVerifier(reasoningClient, config.agent.reasoningModel, config.rag.citation.verifyConsensus)
-    : new StructuralClaimVerifier();
+  // 校验与生成必须用同一个模型：用户在对话里选了哪个模型，就用哪个模型校验自己的答案。
+  const answerFinalizerFor = (settings: PiModelSettings): GroundedAnswerFinalizer =>
+    new GroundedAnswerFinalizer(
+      config.rag.citation.verifyClaims
+        ? new LlmClaimVerifier(
+          new OpenAiClient({
+            baseUrl: settings.baseUrl,
+            apiKey: settings.apiKey,
+            model: settings.model,
+            timeoutSeconds: 120,
+            thinkingEnabled: false,
+          }),
+          settings.model,
+          config.rag.citation.verifyConsensus,
+        )
+        : new StructuralClaimVerifier(),
+    );
   const modelSettings: PiModelSettings = {
     model: config.rag.generation.model,
     baseUrl: config.rag.generation.baseUrl,
@@ -132,7 +131,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
     reranker: reranker,
     contextAssembler: contextAssembler,
     promptRegistry: new BuiltinPromptRegistry(),
-    answerFinalizer: new GroundedAnswerFinalizer(verifier),
+    answerFinalizerFor: answerFinalizerFor,
     sql,
     fileRuntime: {
       storage,
@@ -149,7 +148,7 @@ export async function buildState(config: AppConfig): Promise<AppState> {
 
   const state: AppState = {
     config, sql, redis, repository, agentKernel, storage, vectorConsistency,
-    llm: { generationClient, reasoningClient, retriever, reranker, contextAssembler },
+    llm: { retriever, reranker, contextAssembler },
   };
   // 与 Rust 一致：恢复上次中断遗留的待处理解析任务
   try {

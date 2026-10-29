@@ -704,7 +704,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
           <MessageRow
             message={message}
             isStreaming={message.message_id === streamingId}
-            onRetry={() => retryMessage(message.message_id)}
+            onRetry={() => retryMessage(message.message_id, runtimeOptions)}
             onSubmitFeedback={submitFeedback}
             onClearFeedback={clearFeedback}
             onCitationClick={handleCitationClick}

@@ -335,7 +335,7 @@ Context:
 #### 3.3.5 阶段 5：LLM Generation
 
 - Provider：兼容 OpenAI chat.completions 协议（DashScope / OpenAI / 内网模型）
-- 默认：qwen-turbo（性价比）或 deepseek-chat（推理强）
+- 模型由用户在对话里选择（deepseek-v4.1-flash / qwen3.8-max / glm-5.3）；改写、校验、标题等全部辅助调用都必须复用同一个模型，不允许另配“判断/打分小模型”
 - 流式输出（SSE），前端逐字展示
 
 #### 3.3.6 阶段 6：答案后处理

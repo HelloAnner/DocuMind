@@ -55,4 +55,6 @@ export interface SendMessageRequest {
   model_id?: string; thinking_enabled?: boolean;
 }
 export interface MessageListResponse { conversation_id: string; messages: MessageResponse[]; }
-export interface RetryMessageRequest { stream?: boolean; }
+export interface RetryMessageRequest {
+  stream?: boolean; model_id?: string; thinking_enabled?: boolean;
+}

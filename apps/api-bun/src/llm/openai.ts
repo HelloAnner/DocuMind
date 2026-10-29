@@ -3,6 +3,8 @@ import type { Usage } from '../models/index.ts';
 
 export interface OpenAiClientConfig {
   baseUrl: string; apiKey: string; model: string; timeoutSeconds: number;
+  /** 显式关闭深度思考：校验是 JSON 抽取任务，不需要推理链，也避免 reasoning 吃掉 max_tokens。 */
+  thinkingEnabled?: boolean;
 }
 export function defaultOpenAiClientConfig(): OpenAiClientConfig {
   return { baseUrl: 'http://localhost:11434/v1', apiKey: 'ollama', model: 'qwen2.5:14b', timeoutSeconds: 120 };
@@ -139,6 +141,7 @@ export function parseJsonCompletion<T>(text: string): T {
 
 interface ChatCompletionPayload {
   model: string; messages: ChatMessage[]; temperature: number; max_tokens: number; stream: boolean;
+  enable_thinking?: boolean;
 }
 
 export class OpenAiClient {
@@ -161,6 +164,9 @@ export class OpenAiClient {
     messages.push({ role: 'user', content: prompt });
     const payload: ChatCompletionPayload = {
       model: this.config.model, messages, temperature, max_tokens: maxTokens, stream: false,
+      ...(this.config.thinkingEnabled === undefined
+        ? {}
+        : { enable_thinking: this.config.thinkingEnabled }),
     };
     const response = await fetch(this.chatUrl(), {
       method: 'POST',

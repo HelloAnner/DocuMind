@@ -119,7 +119,7 @@ rag:
   rewrite:
     enabled: true
     hyde_enabled: true
-    model: qwen-turbo
+    # 不单独配模型：改写/校验/标题一律复用本次对话选择的生成模型
   retrieval:
     dense_top_k: 100
     bm25_top_k: 100

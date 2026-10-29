@@ -861,7 +861,10 @@ export function useConversationManager() {
   );
 
   const retryMessage = useCallback(
-    async (messageId: string) => {
+    async (
+      messageId: string,
+      runtime?: Pick<SendMessageRequest, "model_id" | "thinking_enabled">
+    ) => {
       if (!currentId || requestActiveRef.current) return;
       requestActiveRef.current = true;
       setSendNotice(undefined);
@@ -870,7 +873,7 @@ export function useConversationManager() {
         activeRequestRef.current = { conversationId: currentId, generation };
         const controller = new AbortController();
         const url = retryMessageStreamUrl(currentId, messageId);
-        const req: RetryMessageRequest = { stream: true };
+        const req: RetryMessageRequest = { stream: true, ...runtime };
         await processStream(currentId, "", req, url, controller, true, undefined, generation);
       } finally {
         if (generationRef.current === generation) {

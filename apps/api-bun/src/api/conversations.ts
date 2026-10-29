@@ -23,7 +23,9 @@ import type {
 } from '../models/feedback.ts';
 import { feedbackToResponse } from '../models/feedback.ts';
 import type { CurrentActor } from '../models/identity.ts';
-import type { ConversationMessage, MessageResponse, SendMessageRequest } from '../models/message.ts';
+import type {
+  ConversationMessage, MessageResponse, RetryMessageRequest, SendMessageRequest,
+} from '../models/message.ts';
 import { RuntimeEventFactory, sseProtocolFromHeaders } from './runtime_events.ts';
 import { SseSink, sendExecutionStarted, type PipelineContext } from './conversations_sse.ts';
 import { runAgentPipeline } from './conversations_pipeline.ts';
@@ -314,7 +316,7 @@ export async function sendMessageHandler(c: Context<AppEnv>): Promise<Response> 
   const protocol = sseProtocolFromHeaders(c.req.raw.headers);
   // Rust 在返回 SSE 之前就 spawn 标题任务，管线跑完后再推 conversation.title.updated
   const titleUpdate = spawnTitleUpdate(
-    state.repository, state.agentKernel.options.settings,
+    state.repository, modelSettings,
     actor.tenant_id, actor.user_id, session.id);
 
   return streamSSE(c, async (stream) => {
@@ -367,6 +369,15 @@ async function retryMessageHandler(c: Context<AppEnv>): Promise<Response> {
   const conversationId = uuidParam(c, 'conversation_id');
   const messageId = uuidParam(c, 'message_id');
   // Rust 签名带 Json<RetryMessageRequest>，但 stream 字段未被读取：始终返回 SSE
+  const request = await c.req.json().catch(() => ({})) as RetryMessageRequest;
+  // 重试必须沿用对话当前选择的模型，不能回落到默认模型
+  const modelSettings = resolveChatModel(
+    state.config, request.model_id, request.thinking_enabled);
+  const agentKernel = new PiAgentKernel({
+    ...state.agentKernel.options,
+    settings: modelSettings,
+    streamFn: buildPiStreamFn(modelSettings),
+  });
   const scope = await resolveConversationScope(state, actor, conversationId, []);
   const session = scope.session;
   const failedMessage = await state.repository.getMessage(actor.tenant_id, messageId);
@@ -399,7 +410,7 @@ async function retryMessageHandler(c: Context<AppEnv>): Promise<Response> {
     try {
       await runAgentPipeline({
         repo: state.repository,
-        kernel: state.agentKernel,
+        kernel: agentKernel,
         config: state.config,
         sql: state.sql,
         actor: actor,

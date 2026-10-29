@@ -186,6 +186,8 @@ export interface SendMessageRequest {
 
 export interface RetryMessageRequest {
   stream?: boolean;
+  model_id?: string;
+  thinking_enabled?: boolean;
 }
 
 export interface SubmitFeedbackRequest {

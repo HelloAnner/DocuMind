@@ -1,13 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { AlertCircle, Check, Lock, RotateCcw, Unlock } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { AlertCircle, Check, ChevronRight, Lock, RotateCcw, Search, Unlock } from "lucide-react";
 import { useAuth } from "@/components/providers/auth-provider";
-import { Topbar } from "@/components/ui/topbar";
-import { SearchInput } from "@/components/ui/search-input";
-import { Segmented } from "@/components/ui/segmented";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { fetchJson } from "@/lib/api";
 import styles from "./tenant-permissions.module.css";
 
@@ -15,6 +10,8 @@ import styles from "./tenant-permissions.module.css";
 
 type RbacActionKey = "view" | "edit" | "manage";
 type RbacEffect = "allow" | "deny";
+type Mode = "quick" | "final";
+
 interface RbacEntity {
   type: string;
   id: string;
@@ -48,6 +45,13 @@ interface RbacMatrix {
   cells: RbacCell[];
   gates?: { type: string; id?: string; action: RbacActionKey; allow: boolean }[];
 }
+interface PermGroup {
+  key: string;
+  label: string;
+  entities: RbacEntity[];
+  children: Map<string, RbacEntity[]>;
+  count: number;
+}
 
 const ACTIONS: { key: RbacActionKey; label: string }[] = [
   { key: "view", label: "查看" },
@@ -58,7 +62,7 @@ const TYPE_LABEL: Record<string, string> = {
   feature: "功能权限",
   kb: "知识库",
   project: "项目",
-  datasource: "数据源",
+  datasource: "数据连接",
   table: "数据表",
 };
 const ROLE_LABEL: Record<string, string> = {
@@ -70,38 +74,61 @@ const ROLE_LABEL: Record<string, string> = {
   viewer: "只读",
 };
 
-function groupKey(entity: RbacEntity): string {
-  if (entity.type === "feature") return "feature";
-  if (entity.type === "table" && entity.parent_id) return `table:${entity.parent_id}`;
-  return `type:${entity.type}`;
-}
-
-function groupLabel(key: string, catalog: RbacCatalog | null): string {
-  if (key === "feature") return "功能权限";
-  if (key.startsWith("table:")) {
-    const parent = key.slice("table:".length);
-    const parentEntity = catalog?.entities.find((item) => item.id === parent && item.type !== "table");
-    return `${parentEntity?.label ?? parent} · 数据表`;
+function buildGroups(entities: RbacEntity[]): PermGroup[] {
+  const groups: PermGroup[] = [];
+  const index = new Map<string, PermGroup>();
+  const get = (key: string, label: string): PermGroup => {
+    const found = index.get(key);
+    if (found) return found;
+    const group: PermGroup = { key, label, entities: [], children: new Map(), count: 0 };
+    index.set(key, group);
+    groups.push(group);
+    return group;
+  };
+  for (const entity of entities) {
+    const key =
+      entity.type === "table" && entity.parent_id
+        ? "datasource"
+        : entity.type === "feature"
+          ? "feature"
+          : entity.type;
+    const group = get(key, TYPE_LABEL[key] ?? TYPE_LABEL[entity.type] ?? entity.type);
+    group.count += 1;
+    if (entity.type === "table" && entity.parent_id) {
+      const list = group.children.get(entity.parent_id);
+      if (list) list.push(entity);
+      else group.children.set(entity.parent_id, [entity]);
+    } else {
+      group.entities.push(entity);
+    }
   }
-  return TYPE_LABEL[key.slice("type:".length)] ?? key;
+  const rank = (key: string) => (key === "feature" ? 0 : key === "kb" ? 1 : key === "project" ? 2 : key === "datasource" ? 3 : 4);
+  return groups.sort((a, b) => rank(a.key) - rank(b.key));
 }
 
-/** 租户设置 → 权限管理：原生实现，人员 × 权限类型 tab × 查看/编辑/管理。 */
+/** 租户设置 → 权限管理：人员名单 + 目录权限矩阵。 */
 export function TenantPermissions() {
   const { me } = useAuth();
-  const readOnly = me ? !me.roles.some((role) => ["tenant_admin", "tenant_owner", "enterprise_admin"].includes(role)) : true;
+  const canWrite = me
+    ? me.roles.some((role) => ["tenant_admin", "tenant_owner", "enterprise_admin"].includes(role))
+    : false;
 
   const [catalog, setCatalog] = useState<RbacCatalog | null>(null);
   const [subjects, setSubjects] = useState<RbacSubject[]>([]);
   const [matrix, setMatrix] = useState<RbacMatrix | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("quick");
   const [search, setSearch] = useState("");
+  const [entitySearch, setEntitySearch] = useState("");
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [groupTab, setGroupTab] = useState<string | null>(null);
   const [pending, setPending] = useState<ReadonlySet<string>>(new Set());
   const [loadError, setLoadError] = useState("");
   const [notice, setNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
   const matricesRef = useRef(new Map<string, RbacMatrix>());
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const readOnly = mode === "final" || !canWrite;
 
   const notify = (type: "success" | "error", message: string) => {
     setNotice({ type, message });
@@ -156,6 +183,7 @@ export function TenantPermissions() {
     if (subjectId === selectedId) return;
     setSelectedId(subjectId);
     setMatrix(null);
+    setEntitySearch("");
     void loadMatrix(subjectId);
   };
 
@@ -237,210 +265,325 @@ export function TenantPermissions() {
     return gate ? gate.allow : true;
   };
 
-  const grouped = new Map<string, RbacEntity[]>();
-  for (const entity of catalog?.entities ?? []) {
-    const key = groupKey(entity);
-    const list = grouped.get(key);
-    if (list) list.push(entity);
-    else grouped.set(key, [entity]);
-  }
-  const groupKeys = [...grouped.keys()].sort((a, b) => {
-    const rank = (key: string) => (key === "feature" ? 0 : key.startsWith("table:") ? 2 : 1);
-    return rank(a) - rank(b) || a.localeCompare(b);
-  });
-  const activeGroup = groupTab && grouped.has(groupTab) ? groupTab : grouped.has("feature") ? "feature" : groupKeys[0] ?? null;
+  const groups = useMemo(() => buildGroups(catalog?.entities ?? []), [catalog]);
+  const activeGroup = groupTab && groups.some((group) => group.key === groupTab) ? groupTab : groups[0]?.key ?? null;
+  const currentGroup = groups.find((group) => group.key === activeGroup) ?? null;
 
   const keyword = search.trim().toLowerCase();
   const filteredSubjects = subjects.filter((subject) => {
     if (!keyword) return true;
-    return [subject.name, subject.username, subject.role].some((value) =>
+    return [subject.name, subject.username, ROLE_LABEL[subject.role] ?? subject.role].some((value) =>
       (value ?? "").toLowerCase().includes(keyword),
     );
   });
 
   const renderLockCell = (entity: RbacEntity, action: (typeof ACTIONS)[number]) => {
     if (!entity.actions.includes(action.key)) {
-      return (
-        <span key={action.key} className={styles.none}>
-          —
-        </span>
-      );
+      return <span key={action.key} className={styles.none}>—</span>;
     }
     const cell = cellLookup.get(`${entity.type}|${entity.id}|${action.key}`);
     const allow = cell?.allow ?? false;
-    const overridden = cell?.source === "allow" || cell?.source === "deny";
+    const source = cell?.source ?? "role";
+    const overridden = source === "allow" || source === "deny";
     const gate = gateFor(entity, action.key);
     const disabled = readOnly || !gate || pending.has(`${entity.type}|${entity.id}|${action.key}`) || !matrix;
+    const title = !gate
+      ? "该成员的角色不具备此功能，资源授权不会生效"
+      : readOnly && !canWrite
+        ? "只有管理员可以调整权限"
+        : `${action.label}：${allow ? "允许" : "拒绝"}${overridden ? "（个人设置）" : "（角色默认）"}${readOnly ? "" : "，点击切换"}`;
+    const icon = allow ? <Lock size={15} /> : <Unlock size={15} />;
+    const color = !allow ? styles.lockDeny : overridden ? (source === "deny" ? styles.lockDeny : styles.lockGrant) : styles.lockOn;
+
     return (
       <span key={action.key} className={styles.cell}>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={allow}
-          aria-label={`${entity.label} · ${action.label}权限`}
-          title={
-            readOnly
-              ? "只有管理员可以调整权限"
-              : !gate
-                ? "该成员的角色不具备此功能，资源授权不会生效"
-                : `${action.label}：${allow ? "允许" : "拒绝"}${overridden ? "（个人设置）" : "（角色默认）"}，点击切换`
-          }
-          disabled={disabled}
-          onClick={() => toggleCell(entity, action.key, cell)}
-          className={`${styles.lock}${allow ? ` ${styles.lockOn}` : ""}`}
-        >
-          {allow ? <Unlock size={13} /> : <Lock size={13} />}
-          {overridden && <span className={styles.overrideDot} />}
-        </button>
-        {overridden && !readOnly && (
-          <button
-            type="button"
-            title="恢复角色默认"
-            aria-label={`${entity.label} · ${action.label} · 恢复角色默认`}
-            onClick={(event) => {
-              event.stopPropagation();
-              void setEffect(entity, action.key, null);
-            }}
-            className={styles.cellReset}
-          >
-            <RotateCcw size={8} />
-          </button>
+        {readOnly ? (
+          <span title={title} aria-label={`${entity.label} · ${action.label}权限`} className={`${styles.lock} ${styles.lockStatic} ${color}${!gate ? ` ${styles.lockGated}` : ""}`}>
+            {icon}
+          </span>
+        ) : (
+          <>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={allow}
+              aria-label={`${entity.label} · ${action.label}权限`}
+              title={title}
+              disabled={disabled}
+              onClick={() => toggleCell(entity, action.key, cell)}
+              className={`${styles.lock} ${color}`}
+            >
+              {icon}
+              {overridden && <span className={styles.overrideDot} />}
+            </button>
+            {overridden && (
+              <button
+                type="button"
+                title="恢复角色默认"
+                aria-label={`${entity.label} · ${action.label} · 恢复角色默认`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void setEffect(entity, action.key, null);
+                }}
+                className={styles.cellReset}
+              >
+                <RotateCcw size={8} />
+              </button>
+            )}
+          </>
         )}
       </span>
     );
   };
 
+  /* ---------- 表格行 ---------- */
+
+  const renderRows = (): ReactElement[] => {
+    if (!currentGroup) return [];
+    const kw = entitySearch.trim().toLowerCase();
+    const match = (entity: RbacEntity) => !kw || entity.label.toLowerCase().includes(kw);
+    const rows: ReactElement[] = [];
+
+    const nameCell = (entity: RbacEntity, depth: number, caret?: ReactNode) => (
+      <span className={styles.name} style={{ paddingLeft: depth ? 14 + depth * 22 : 10 }}>
+        {caret ?? <span className={styles.caretSpace} />}
+        <span className={`${styles.nameText}${depth === 0 && currentGroup.key === "datasource" ? ` ${styles.nameParent}` : ""}`} title={entity.label}>
+          {entity.label}
+        </span>
+      </span>
+    );
+
+    if (currentGroup.key === "datasource") {
+      for (const parent of currentGroup.entities) {
+        const children = (currentGroup.children.get(parent.id) ?? []).filter(match);
+        if (!match(parent) && children.length === 0) continue;
+        const open = children.length > 0 && (!collapsed.has(parent.id) || Boolean(kw));
+        const caret =
+          children.length > 0 ? (
+            <button
+              type="button"
+              aria-label={`${open ? "收起" : "展开"} ${parent.label}`}
+              aria-expanded={open}
+              onClick={() =>
+                setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(parent.id)) next.delete(parent.id);
+                  else next.add(parent.id);
+                  return next;
+                })
+              }
+              className={`${styles.caret}${open ? ` ${styles.caretOpen}` : ""}`}
+            >
+              <ChevronRight size={12} />
+            </button>
+          ) : (
+            <span className={styles.caretSpace} />
+          );
+        rows.push(
+          <div key={`${parent.type}:${parent.id}`} className={styles.row}>
+            <span className={styles.name}>
+              {caret}
+              <span className={`${styles.nameText} ${styles.nameParent}`} title={parent.label}>{parent.label}</span>
+              {children.length > 0 && <span className={styles.tag}>{children.length} 项</span>}
+            </span>
+            {ACTIONS.map((action) => renderLockCell(parent, action))}
+          </div>,
+        );
+        if (open) {
+          for (const child of children) {
+            rows.push(
+              <div key={`${child.type}:${child.id}`} className={styles.row}>
+                {nameCell(child, 1)}
+                {ACTIONS.map((action) => renderLockCell(child, action))}
+              </div>,
+            );
+          }
+        }
+      }
+      return rows;
+    }
+
+    for (const entity of currentGroup.entities) {
+      if (!match(entity)) continue;
+      rows.push(
+        <div key={`${entity.type}:${entity.id}`} className={styles.row}>
+          {nameCell(entity, 0)}
+          {ACTIONS.map((action) => renderLockCell(entity, action))}
+        </div>,
+      );
+    }
+    return rows;
+  };
+
+  const tableRows = renderRows();
+  const activeSubject = matrix?.subject ?? subjects.find((subject) => subject.id === selectedId);
+
   /* ---------- 渲染 ---------- */
 
   return (
-    <>
-      <Topbar
-        title="权限管理"
-        subtitle="左侧选择成员，右侧用锁开关调整各权限实体的查看、编辑与管理权限"
-      />
-      <div className="dm-admin-content dm-settings-page">
-        {notice && (
-          <div className={`${styles.notice} ${notice.type === "success" ? styles.noticeSuccess : styles.noticeError}`}>
-            {notice.type === "success" ? <Check size={14} /> : <AlertCircle size={14} />}
-            {notice.message}
-          </div>
-        )}
-        {loadError ? (
-          <div className={styles.empty}>{loadError}</div>
-        ) : !catalog ? (
-          <div className={styles.empty}>正在加载权限…</div>
-        ) : (
-          <div className={styles.layout}>
-            {/* 左：成员 */}
-            <aside className={styles.people}>
-              <SearchInput
-                placeholder="搜索成员"
-                aria-label="搜索成员"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-              <div className={styles.peopleList}>
-                {filteredSubjects.length === 0 && (
-                  <div className={styles.empty}>
-                    {subjects.length === 0 ? "该系统中还没有成员" : "没有匹配的成员"}
-                  </div>
-                )}
-                {filteredSubjects.map((subject) => {
-                  const active = subject.id === selectedId;
-                  const role = subject.role || subject.roles?.[0] || "user";
-                  return (
-                    <button
-                      key={subject.id}
-                      type="button"
-                      onClick={() => selectSubject(subject.id)}
-                      className={`${styles.person}${active ? ` ${styles.personActive}` : ""}`}
-                    >
-                      <span className={`${styles.avatar}${active ? ` ${styles.avatarActive}` : ""}`}>
-                        {(subject.name || subject.username || "?").charAt(0).toUpperCase()}
-                      </span>
-                      <span className={styles.personMain}>
-                        <span className={styles.personName}>{subject.name || subject.username}</span>
-                        <span className={styles.personMeta}>{subject.username}</span>
-                      </span>
-                      <Badge tone={role === "tenant_admin" || role === "tenant_owner" ? "info" : "neutral"}>
-                        {ROLE_LABEL[role] ?? role}
-                      </Badge>
-                      <span
-                        title={subject.status === "active" ? "正常" : "已停用"}
-                        className={`${styles.status}${subject.status === "active" ? "" : ` ${styles.statusOff}`}`}
-                      />
-                    </button>
-                  );
-                })}
-              </div>
-              <div className={styles.peopleFoot}>
-                共 {subjects.length} 人{search ? `，匹配 ${filteredSubjects.length} 人` : ""}
-              </div>
-            </aside>
+    <div className={`dm-admin-content ${styles.page}`}>
+      {notice && (
+        <div className={`${styles.notice} ${notice.type === "success" ? styles.noticeSuccess : styles.noticeError}`}>
+          {notice.type === "success" ? <Check size={14} /> : <AlertCircle size={14} />}
+          {notice.message}
+        </div>
+      )}
 
-            {/* 右：权限明细 */}
-            <section className={styles.detail}>
+      {/* 顶部模式栏 */}
+      <div className={styles.modeBar}>
+        <div className={styles.modes} role="tablist" aria-label="权限查看模式">
+          {[
+            { key: "quick" as const, label: "权限快速配置" },
+            { key: "final" as const, label: "用户最终权限" },
+          ].map((item) => (
+            <button
+              key={item.key}
+              type="button"
+              role="tab"
+              aria-selected={mode === item.key}
+              onClick={() => setMode(item.key)}
+              className={`${styles.mode}${mode === item.key ? ` ${styles.modeActive}` : ""}`}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
+        <div className={styles.dim}>
+          <span>当前查看维度：</span>
+          <span className={styles.dimValue}>人员维度</span>
+          {activeSubject && (
+            <>
+              <span className={styles.dimSep}>·</span>
+              <span className={styles.dimSubject}>{activeSubject.name || activeSubject.username}</span>
+            </>
+          )}
+          {mode === "quick" && matrix && canWrite && (
+            <button type="button" onClick={() => void resetAll()} className={styles.link}>
+              <RotateCcw size={11} />
+              全部恢复默认
+            </button>
+          )}
+        </div>
+      </div>
+
+      {loadError ? (
+        <div className={styles.empty}>{loadError}</div>
+      ) : (
+        <div className={styles.body}>
+          {/* 左：人员名单 */}
+          <aside className={styles.people}>
+            <div className={styles.peopleHead}>
+              <div className={styles.peopleTitle}>
+                <span>人员</span>
+                <span className={styles.peopleCount}>{subjects.length}</span>
+              </div>
+              <div className={styles.search}>
+                <Search size={13} />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="搜索人员"
+                  aria-label="搜索人员"
+                  className={styles.input}
+                />
+              </div>
+            </div>
+            <div className={styles.peopleList} role="listbox" aria-label="人员名单">
+              {filteredSubjects.length === 0 && (
+                <div className={styles.emptyLine}>
+                  {subjects.length === 0 ? "该系统中还没有成员" : "没有匹配的人员"}
+                </div>
+              )}
+              {filteredSubjects.map((subject) => {
+                const active = subject.id === selectedId;
+                const role = subject.role || subject.roles?.[0] || "user";
+                return (
+                  <button
+                    key={subject.id}
+                    type="button"
+                    role="option"
+                    aria-selected={active}
+                    onClick={() => selectSubject(subject.id)}
+                    title={`${subject.name || subject.username} · ${subject.username} · ${ROLE_LABEL[role] ?? role}`}
+                    className={`${styles.person}${active ? ` ${styles.personActive}` : ""}`}
+                  >
+                    <span className={styles.avatar}>{(subject.name || subject.username || "?").charAt(0).toUpperCase()}</span>
+                    <span className={styles.personName}>{subject.name || subject.username}</span>
+                    <span className={styles.role}>{ROLE_LABEL[role] ?? role}</span>
+                    <span
+                      title={subject.status === "active" ? "正常" : "已停用"}
+                      className={`${styles.status}${subject.status === "active" ? "" : ` ${styles.statusOff}`}`}
+                    />
+                  </button>
+                );
+              })}
+            </div>
+            <div className={styles.peopleFoot}>
+              共 {subjects.length} 人{search ? `，匹配 ${filteredSubjects.length} 人` : ""}
+            </div>
+          </aside>
+
+          {/* 右：目录权限 */}
+          <section className={styles.main}>
+            <div className={styles.toolbar}>
+              <div className={styles.groups} role="tablist" aria-label="权限分组">
+                {groups.map((group) => (
+                  <button
+                    key={group.key}
+                    type="button"
+                    role="tab"
+                    aria-selected={group.key === activeGroup}
+                    onClick={() => setGroupTab(group.key)}
+                    className={`${styles.group}${group.key === activeGroup ? ` ${styles.groupActive}` : ""}`}
+                  >
+                    {group.label}
+                    <span className={styles.groupCount}>{group.count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className={styles.toolSearch}>
+                <Search size={13} />
+                <input
+                  type="search"
+                  value={entitySearch}
+                  onChange={(event) => setEntitySearch(event.target.value)}
+                  placeholder="搜索权限项"
+                  aria-label="搜索权限项"
+                  className={styles.input}
+                />
+              </div>
+            </div>
+
+            <div className={styles.table}>
               {!matrix ? (
-                <div className={styles.empty}>{selectedId ? "正在加载权限…" : "请选择左侧成员"}</div>
+                <div className={styles.empty}>{selectedId ? "正在加载权限…" : "请选择左侧人员"}</div>
               ) : (
                 <>
-                  <div className={styles.detailHead}>
-                    <div className={styles.detailTitle}>
-                      <span className={styles.detailName}>{matrix.subject.name || matrix.subject.username}</span>
-                      <span className={styles.detailSub}>
-                        {matrix.subject.username} · {matrix.baseline_label}
-                        {matrix.subject.managed === false ? " · 仅本系统账号" : ""}
-                      </span>
-                    </div>
-                    {!readOnly && (
-                      <Button variant="secondary" icon={<RotateCcw size={12} />} onClick={() => void resetAll()}>
-                        全部恢复默认
-                      </Button>
-                    )}
+                  <div className={styles.thead}>
+                    <span className={styles.colName}>所有权限项</span>
+                    {ACTIONS.map((action) => (
+                      <span key={action.key} className={styles.colAct}>{action.label}</span>
+                    ))}
                   </div>
-
-                  <Segmented
-                    className={styles.types}
-                    options={groupKeys.map((key) => ({
-                      value: key,
-                      label: `${groupLabel(key, catalog)} ${grouped.get(key)?.length ?? 0}`,
-                    }))}
-                    value={activeGroup ?? ""}
-                    onChange={(key) => setGroupTab(key)}
-                  />
-
-                  {activeGroup && (
-                    <div className={styles.table}>
-                      <div className={styles.tableHead}>
-                        <span className={styles.colName}>名称</span>
-                        {ACTIONS.map((action) => (
-                          <span key={action.key} className={styles.colHead}>
-                            {action.label}
-                          </span>
-                        ))}
-                      </div>
-                      {(grouped.get(activeGroup) ?? []).map((entity) => (
-                        <div key={`${entity.type}:${entity.id}`} className={styles.row}>
-                          <span
-                            className={styles.entity}
-                            style={{ paddingLeft: activeGroup.startsWith("table:") ? 14 : 0 }}
-                          >
-                            <span className={styles.entityName} title={entity.label}>
-                              {entity.label}
-                            </span>
-                            {entity.type === "feature" && <span className={styles.entityTag}>功能</span>}
-                          </span>
-                          {ACTIONS.map((action) => renderLockCell(entity, action))}
-                        </div>
-                      ))}
-                    </div>
+                  {tableRows}
+                  {tableRows.length === 0 && (
+                    <div className={styles.emptyLine}>{entitySearch ? "没有匹配的权限项" : "暂无权限项"}</div>
                   )}
                 </>
               )}
-            </section>
-          </div>
-        )}
-      </div>
-    </>
+            </div>
+
+            <div className={styles.legend}>
+              {mode === "final" && <span className={styles.finalHint}>只读视图：角色默认 + 个人设置后的最终结果</span>}
+              <span><Lock size={12} />已授权</span>
+              <span><Unlock size={12} />未授权</span>
+              <span><i className={styles.legendDot} />个人设置（蓝=额外授权，红=单独拒绝）</span>
+              <span>— 该角色不支持此动作</span>
+            </div>
+          </section>
+        </div>
+      )}
+    </div>
   );
 }

@@ -206,14 +206,8 @@ else
 fi
 rerank_api_url="${rerank_api_url:-https://dashscope.aliyuncs.com/api/v1/services/rerank/text-rerank/text-rerank}"
 rerank_api_key="${rerank_api_key:-$llm_api_key}"
-rag_rewrite_model="$(remote_env_value RAG_REWRITE_MODEL)"
-rag_rewrite_model="${rag_rewrite_model:-qwen-turbo}"
 rag_verify_consensus="$(remote_env_value RAG_VERIFY_CONSENSUS)"
 rag_verify_consensus="${rag_verify_consensus:-false}"
-agent_reasoning_model="$(remote_env_value AGENT_REASONING_MODEL)"
-if [[ -z "$agent_reasoning_model" || "$agent_reasoning_model" == "$llm_model" ]]; then
-  agent_reasoning_model="$rag_rewrite_model"
-fi
 if [[ -f .env ]]; then
   local_llm_api_key="$(grep -E '^LLM_API_KEY=' .env | tail -1 | cut -d= -f2- || true)"
   local_llm_api="$(grep -E '^LLM_API=' .env | tail -1 | cut -d= -f2- || true)"
@@ -318,7 +312,6 @@ LOG_FORMAT=json
 
 RAG_REWRITE_ENABLED=true
 RAG_HYDE_ENABLED=true
-RAG_REWRITE_MODEL=$rag_rewrite_model
 RAG_DENSE_TOP_K=100
 RAG_BM25_TOP_K=100
 RAG_RRF_TOP_K=20
@@ -343,7 +336,6 @@ LLM_TEMPERATURE=0.2
 LLM_MAX_OUTPUT_TOKENS=1200
 
 AGENT_DEFAULT_TONE=concise_warm
-AGENT_REASONING_MODEL=$agent_reasoning_model
 AGENT_PROACTIVE_FOLLOWUP=true
 AGENT_MAX_FOLLOWUP_SUGGESTIONS=2
 AGENT_ALLOW_ANALYST_MODE=true
@@ -428,6 +420,15 @@ ensure_env_var() {
 }
 
 
+drop_env_var() {
+  local key="\$1"
+  local temp_file
+  temp_file="\$(mktemp)"
+  grep -vE "^\${key}=" "\$remote_env" > "\$temp_file" || true
+  cat "\$temp_file" > "\$remote_env"
+  rm -f "\$temp_file"
+}
+
 upsert_env_var() {
   local key="\$1"
   local value="\$2"
@@ -457,6 +458,8 @@ upsert_env_var ENTERPRISE_ADMIN_PASSWORD '$enterprise_admin_password'
 upsert_env_var ENTERPRISE_ADMIN_ALLOW_WEAK '$enterprise_admin_allow_weak'
 upsert_env_var STANDARD_USER_EMAIL '$standard_user_email'
 upsert_env_var STANDARD_USER_PASSWORD '$standard_user_password'
+drop_env_var RAG_REWRITE_MODEL
+drop_env_var AGENT_REASONING_MODEL
 seed_password="\$(grep -E '^SUPER_ADMIN_PASSWORD=' "\$remote_env" | tail -1 | cut -d= -f2-)"
 seed_allow_weak="\$(grep -E '^SUPER_ADMIN_ALLOW_WEAK=' "\$remote_env" | tail -1 | cut -d= -f2-)"
 if [[ "\$seed_allow_weak" != "1" ]] && [[ \${#seed_password} -lt 16 || "\$seed_password" == "1" ]]; then
@@ -470,8 +473,8 @@ release_env_value() {
 
 for required_key in \
   RAG_RERANK_ENABLED RAG_RERANK_PROVIDER RAG_RERANK_MODEL \
-  RAG_RERANK_API_URL RAG_RERANK_API_KEY RAG_REWRITE_MODEL \
-  RAG_VERIFY_CLAIMS RAG_VERIFY_CONSENSUS AGENT_REASONING_MODEL \
+  RAG_RERANK_API_URL RAG_RERANK_API_KEY \
+  RAG_VERIFY_CLAIMS RAG_VERIFY_CONSENSUS \
   AGENT_MAX_REACT_STEPS AGENT_MAX_REPAIR_ATTEMPTS AGENT_TOTAL_TIMEOUT_SECONDS; do
   upsert_env_var "\$required_key" "\$(release_env_value "\$required_key")"
 done

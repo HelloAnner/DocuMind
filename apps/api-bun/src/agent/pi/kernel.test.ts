@@ -105,12 +105,31 @@ function harness(responses: ReturnType<typeof fauxAssistantMessage>[], withChunk
     reranker: new PassingReranker(),
     contextAssembler: new SimpleContextAssembler(),
     promptRegistry: new BuiltinPromptRegistry(),
-    answerFinalizer: new GroundedAnswerFinalizer(new PassingVerifier()),
+    answerFinalizerFor: () => new GroundedAnswerFinalizer(new PassingVerifier()),
   });
   return { kernel: kernel, retriever: retriever, requests: requests };
 }
 
 describe('pi agent kernel', () => {
+  test('answer verifier follows this run model settings', () => {
+    const seen: string[] = [];
+    const kernel = new PiAgentKernel({
+      settings: { ...TEST_SETTINGS, model: 'user-chosen-model' },
+      streamFn: (() => { throw new Error('unused stream'); }) as unknown as StreamFn,
+      retriever: new RecordingRetriever(true),
+      reranker: new PassingReranker(),
+      contextAssembler: new SimpleContextAssembler(),
+      promptRegistry: new BuiltinPromptRegistry(),
+      answerFinalizerFor: (settings) => {
+        seen.push(settings.model);
+        return new GroundedAnswerFinalizer(new PassingVerifier());
+      },
+    });
+
+    expect(kernel.answerFinalizer.componentName()).toBe('passing-verifier');
+    expect(seen).toEqual(['user-chosen-model']);
+  });
+
   test('direct_greeting_finishes_without_tools', async () => {
     const h = harness([fauxAssistantMessage('你好！有什么我可以帮你的吗？')]);
     const run = await h.kernel.run(request('你好'));
