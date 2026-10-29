@@ -233,6 +233,10 @@ documind kb delete <kb-id> --force
 documind documents list --kb <kb-id> --status failed --query 合同 --page 1 --page-size 25
 documind documents show <document-id> --json
 documind documents preview <document-id>
+documind documents preview-file <document-id> --json
+# 先用 agent-browser 在真实服务器打开 PDF/Word 原文预览，再执行交互断言：
+documind documents preview-ui --browser-session default
+# 检查默认不超过 100%、上下连续滚动、页码跟随、远页释放及缩放后位置保留。
 documind documents blocks <document-id> --json
 documind documents cleaned-blocks <document-id> --json
 documind documents chunks <document-id>

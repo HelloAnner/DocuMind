@@ -5060,9 +5060,9 @@ body > .hiddenCanvasElement {
   background: color-mix(in srgb, var(--surface-panel) 94%, transparent);
   border-bottom: 1px solid var(--border-muted);
   display: flex;
-  flex: 0 0 42px;
+  flex: 0 0 36px;
   justify-content: space-between;
-  padding: 5px 10px;
+  padding: 3px 10px;
 }
 
 .dm-pdf-page-controls,
@@ -5118,22 +5118,42 @@ body > .hiddenCanvasElement {
 }
 
 .dm-pdf-viewer {
-  align-items: flex-start;
+  position: relative;
   display: flex;
   flex: 1;
-  justify-content: center;
   min-height: 0;
   overflow: auto;
-  padding: 16px 16px 32px;
+  padding: 16px;
 }
+
+.dm-pdf-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 100%;
+  height: max-content;
+}
+
+.dm-pdf-scroll-hint { margin-left: 8px; }
+.dm-pdf-toolbar button:focus-visible { outline: 2px solid var(--text-primary); outline-offset: 1px; }
+.dm-pdf-toolbar button { cursor: pointer; }
 
 .dm-pdf-page {
   background: #ffffff;
-  border-radius: 4px;
-  box-shadow: 0 6px 22px rgba(15, 23, 42, 0.14);
+  outline: 1px solid var(--border-muted);
   flex: 0 0 auto;
+  margin: 0 auto;
   overflow: hidden;
   position: relative;
+}
+
+.dm-pdf-page-placeholder {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text-muted);
+  font-size: 12px;
 }
 
 .dm-pdf-page canvas {

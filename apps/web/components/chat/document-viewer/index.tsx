@@ -1,7 +1,8 @@
 "use client";
 
 import { Download, FileWarning } from "lucide-react";
-import { PdfViewer } from "./pdf-viewer";
+import dynamic from "next/dynamic";
+const PdfViewer = dynamic(() => import("./pdf-viewer").then(module => module.PdfViewer), { ssr: false });
 import { ImageViewer } from "./image-viewer";
 import { TextViewer } from "./text-viewer";
 

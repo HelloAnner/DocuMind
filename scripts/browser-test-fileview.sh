@@ -205,11 +205,12 @@ const result = {
   overlayChildren: Array.from(document.querySelectorAll(".dm-pdf-anchor-overlay")).map((node) => node.children.length),
   renderedPages: document.querySelectorAll(".dm-pdf-page[data-page]").length,
 };
-if (!result.hasExactStatus || result.pdfCanvas !== 1 || result.overlay !== 1 || !result.overlayChildren.some((count) => count > 0) || result.renderedPages !== 1) {
+if (!result.hasExactStatus || result.pdfCanvas < 1 || result.overlay < 1 || !result.overlayChildren.some((count) => count > 0) || result.renderedPages < 1) {
   throw new Error(JSON.stringify(result));
 }
 JSON.stringify(result);
 '
 
+bun cli/src/index.ts documents preview-ui
 agent-browser screenshot "$SCREENSHOT_PATH"
 echo "browser FileView smoke passed: screenshot=$SCREENSHOT_PATH"

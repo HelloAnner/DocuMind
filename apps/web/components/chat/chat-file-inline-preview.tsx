@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import dynamic from "next/dynamic";
+const PdfViewer = dynamic(() => import("./document-viewer/pdf-viewer").then(module => module.PdfViewer), { ssr: false });
 import { Download, FileText, RefreshCw } from "lucide-react";
 import {
   apiErrorMessage,
@@ -184,12 +186,7 @@ export function ChatFileInlinePreview({ file }: { file: ChatFile }) {
 
       {state.status === "ready" && state.kind === "pdf" ? (
         <>
-          <iframe
-            className="dm-file-preview-frame"
-            sandbox=""
-            src={state.blobUrl}
-            title={`${file.name} PDF 预览`}
-          />
+          <PdfViewer blobUrl={state.blobUrl} fileName={file.name} />
           {downloadFooter}
         </>
       ) : null}

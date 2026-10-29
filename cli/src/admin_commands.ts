@@ -9,6 +9,7 @@ import {
   stringOption,
 } from "./args.ts";
 import { CliError } from "./errors.ts";
+import { checkContinuousPreview } from "./preview_check.ts";
 import { printDocuments, printJson, printKnowledgeBases } from "./render.ts";
 import type {
   AdminDocument,
@@ -80,6 +81,7 @@ export async function documentCommand(
     return showDocumentSection(args, api, json, subcommand);
   }
   if (subcommand === "preview-file") return showFilePreviewTransport(args, api, json);
+  if (subcommand === "preview-ui") return checkContinuousPreview(stringOption(args, "browser-session") ?? "default");
   if (subcommand === "upload" || subcommand === "upload-batch") return uploadDocument(args, api, json);
   if (subcommand === "jobs") return listDocumentJobs(args, api, json);
   if (subcommand === "job" || subcommand === "job-wait") return showDocumentJob(args, api, json, subcommand === "job-wait");
