@@ -455,7 +455,7 @@ export interface FilePreviewTransport {
   preview: JsonObject;
   manifest: JsonObject;
   signed: JsonObject;
-  full: { status: number; content_disposition: string; content_length: number };
+  full: { status: number; content_disposition: string; content_length: number | null };
   range: FilePreviewRange;
 }
 

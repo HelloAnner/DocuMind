@@ -126,10 +126,10 @@ export function PdfViewer({ docId, blobUrl, conversationId, initialPage, anchorB
         let low = 0, high = pages.children.length - 1;
         while (low < high) {
           const mid = Math.ceil((low + high) / 2);
-          if ((pages.children[mid] as HTMLElement).offsetTop <= container.scrollTop + 40) low = mid; else high = mid - 1;
+          if ((pages.children[mid] as HTMLElement).offsetTop <= container.scrollTop + container.clientHeight / 2) low = mid; else high = mid - 1;
         }
         const element = pages.children[low] as HTMLElement;
-        location.current = { page: low + 1, offset: Math.max(0, (container.scrollTop - element.offsetTop + 16) / element.offsetHeight) };
+        location.current = { page: low + 1, offset: (container.scrollTop - element.offsetTop + 16) / element.offsetHeight };
         setPageNumber(low + 1);
       });
     };

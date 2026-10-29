@@ -24,6 +24,8 @@ function transport(range: Partial<FilePreviewTransport["range"]> = {}): FilePrev
 describe("assertRangedPreview", () => {
   test("accepts a full ranged PDF response", () => {
     expect(() => assertRangedPreview(transport())).not.toThrow();
+    const streamed = transport(); streamed.full.content_length = null;
+    expect(() => assertRangedPreview(streamed)).not.toThrow();
   });
 
   test("rejects a broken full response even when byte ranges work", () => {

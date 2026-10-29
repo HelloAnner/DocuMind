@@ -666,7 +666,7 @@ export class ApiClient {
     const full = {
       status: fullResponse.status,
       content_disposition: fullResponse.headers.get("content-disposition") ?? "",
-      content_length: Number(fullResponse.headers.get("content-length") ?? 0),
+      content_length: fullResponse.headers.has("content-length") ? Number(fullResponse.headers.get("content-length")) : null,
     };
     await fullResponse.body?.cancel();
     return {
