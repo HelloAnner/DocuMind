@@ -54,7 +54,7 @@ export function defaultAgentRuntimeOptions(): AgentRuntimeOptions {
 
 export interface GenerationOptions { model: string; temperature: number; max_output_tokens: number; }
 export function defaultGenerationOptions(): GenerationOptions {
-  return { model: 'qwen-turbo', temperature: 0.2, max_output_tokens: 1200 };
+  return { model: 'deepseek-v4.1-flash', temperature: 0.2, max_output_tokens: 1200 };
 }
 
 export interface RetrievalRuntimeOptions {

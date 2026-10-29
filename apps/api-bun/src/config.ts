@@ -172,7 +172,7 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
       enabled: envBool('EMBED_ENABLED', true),
     },
     generation: {
-      model: envStr('LLM_MODEL') ?? 'qwen-turbo',
+      model: envStr('LLM_MODEL') ?? 'deepseek-v4.1-flash',
       baseUrl: envStr('LLM_BASE_URL') ?? 'http://localhost:11434/v1',
       apiKey: envStr('LLM_API_KEY', 'LLM_API') ?? 'ollama',
       useRealLlm: (() => { const raw = envStr('USE_REAL_LLM'); if (raw === undefined) return false; return ['1', 'true', 'yes', 'on'].includes(raw.trim().toLowerCase()) || raw === 'true'; })(),
