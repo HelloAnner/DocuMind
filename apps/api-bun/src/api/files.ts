@@ -3,6 +3,7 @@ import { Hono, type Context } from 'hono';
 import type { Sql } from 'postgres';
 import { requirePermission } from '../auth/permissions.ts';
 import { AppError } from '../errors.ts';
+import { contentDisposition } from '../http/content_disposition.ts';
 import { requireScope } from './external_api.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { FileScope } from '../models/user_file.ts';
@@ -134,7 +135,7 @@ async function downloadFile(c: Context<AppEnv>): Promise<Response> {
     headers: {
       'Content-Type': file.mime_type,
       'Content-Length': String(bytes.byteLength),
-      'Content-Disposition': downloadDisposition(file.name),
+      'Content-Disposition': contentDisposition(file.name),
     },
   });
 }
@@ -222,13 +223,6 @@ export async function boundedMultipartFormData(
 function uploadRequestTooLarge(): AppError {
   return AppError.payloadTooLarge('UPLOAD_REQUEST_TOO_LARGE', '上传请求体超过限制');
 }
-function downloadDisposition(name: string): string {
-  const fallback = name.replace(/[^\x20-\x7e]|["\\]/gu, '_');
-  const encoded = encodeURIComponent(name)
-    .replace(/['()*]/gu, (value) => `%${value.charCodeAt(0).toString(16).toUpperCase()}`);
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`;
-}
-
 function requireFileAccess(actor: Context<AppEnv>['var']['actor'], write: boolean): void {
   requirePermission(actor, 'chat.ask');
   if (actor.api_client_id !== null) {

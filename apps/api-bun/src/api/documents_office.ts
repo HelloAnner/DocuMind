@@ -3,11 +3,11 @@ import { existsSync } from 'node:fs';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { AppError } from '../errors.ts';
+import { contentDisposition } from '../http/content_disposition.ts';
 import { withObjectStorageTimeout } from '../files/service.ts';
 import type { AppState } from '../state.ts';
 import {
   isOfficePreviewType, mimeTypeForDocument, parseByteRange, rangeNotSatisfiable,
-  sanitizeFileName,
 } from './documents_support.ts';
 import { OFFICE_CONVERSION_TIMEOUT_SECONDS } from './documents_types.ts';
 import type { DocumentRecord } from './documents_types.ts';
@@ -172,7 +172,7 @@ export async function downloadOfficePreviewPdf(
       'Accept-Ranges': 'bytes',
       'Content-Length': String(totalSize),
       'Cache-Control': 'private, max-age=86400',
-      'Content-Disposition': `inline; filename="${sanitizeFileName(doc.title)}.pdf"`,
+      'Content-Disposition': contentDisposition(`${doc.title}.pdf`, 'inline'),
     },
   });
 }
@@ -217,7 +217,7 @@ export async function downloadDocumentContent(
   const headers = new Headers({
     'Content-Type': contentType,
     'Accept-Ranges': 'bytes',
-    'Content-Disposition': `${disposition}; filename="${sanitizeFileName(doc.file_name)}"`,
+    'Content-Disposition': contentDisposition(doc.file_name, disposition),
     'Content-Length': String(totalSize),
   });
   return new Response(bodyOf(bytes), { status: 200, headers });

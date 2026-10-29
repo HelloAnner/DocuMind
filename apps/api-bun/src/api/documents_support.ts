@@ -198,14 +198,6 @@ export function uuidListFromMetadata(metadata: unknown, key: string): string[] {
     .filter((value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value));
 }
 
-export function sanitizeFileName(value: string): string {
-  const cleaned = Array.from(value)
-    .filter((ch) => ch !== '/' && ch !== '\\' && ch !== '\u0000' && !/\p{Cc}/u.test(ch))
-    .join('')
-    .trim();
-  return cleaned.length === 0 ? 'document.bin' : cleaned;
-}
-
 /** Rust: Path::file_stem —— 失败时返回 null（调用方决定默认值） */
 function rustFileStem(fileName: string): string | null {
   let trimmed = fileName;

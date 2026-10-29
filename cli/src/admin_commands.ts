@@ -144,6 +144,9 @@ async function showDocumentSection(
 
 /** 原文预览传输契约：完整 PDF 必须支持字节范围，PDF.js 才能按需翻页。 */
 export function assertRangedPreview(transport: FilePreviewTransport): void {
+  if (transport.full.status !== 200 || transport.full.content_length <= 0 || !transport.full.content_disposition.includes("filename*=UTF-8''")) {
+    throw new CliError("原文完整响应无效（状态、长度或中文文件名响应头）", 1);
+  }
   const { status, accept_ranges, content_range, byte_length } = transport.range;
   if (status !== 206 || !accept_ranges.toLowerCase().includes("bytes") || !content_range.startsWith("bytes 0-")) {
     throw new CliError(

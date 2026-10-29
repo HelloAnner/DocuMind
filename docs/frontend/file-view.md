@@ -251,6 +251,10 @@ interface FileViewState {
 
 ## 9. 错误处理
 
+完整预览和下载响应头必须使用 ASCII fallback + RFC 5987 `filename*=UTF-8''...`，
+不能把中文标题直接写入 `filename`。CLI `documents preview-file` 同时验证完整 GET 和
+Range 206，避免只测字节范围漏掉完整响应的 500。
+
 | 错误 | 处理 |
 |---|---|
 | manifest 加载失败 | 显示“预览信息加载失败”，提供重试 |

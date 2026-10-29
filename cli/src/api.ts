@@ -661,10 +661,19 @@ export class ApiClient {
       headers: { Accept: "*/*", Range: `bytes=0-${rangeBytes - 1}` },
     });
     const bytes = new Uint8Array(await response.arrayBuffer());
+    // PDF.js starts with a normal GET before negotiating ranges. Check both paths.
+    const fullResponse = await this.request(`${base}/preview/content`, { headers: { Accept: "*/*" } });
+    const full = {
+      status: fullResponse.status,
+      content_disposition: fullResponse.headers.get("content-disposition") ?? "",
+      content_length: Number(fullResponse.headers.get("content-length") ?? 0),
+    };
+    await fullResponse.body?.cancel();
     return {
       preview,
       manifest,
       signed,
+      full,
       range: {
         status: response.status,
         content_type: response.headers.get("content-type") ?? "",

@@ -1,6 +1,7 @@
 // 移植自 apps/api-rs/src/api/documents.rs —— 原文下载与文件预览路由
 import type { Context } from 'hono';
 import { AppError } from '../errors.ts';
+import { contentDisposition } from '../http/content_disposition.ts';
 import type { AppEnv } from '../http/types.ts';
 import { requirePermission } from '../auth/permissions.ts';
 import { withObjectStorageTimeout } from '../files/service.ts';
@@ -11,7 +12,7 @@ import {
 import { downloadDocumentContent, downloadOfficePreviewPdf, ensureOfficePreviewPdf } from './documents_office.ts';
 import {
   isOfficePreviewType, parseByteRange, pathParam, previewTypeFor, rangeNotSatisfiable,
-  sanitizeFileName, sourceStatusFor,
+  sourceStatusFor,
 } from './documents_support.ts';
 import { toRfc3339 } from '../infra/time.ts';
 import type {
@@ -84,7 +85,7 @@ export async function downloadOriginal(c: Context<AppEnv>): Promise<Response> {
   const headers = new Headers({
     'Content-Type': 'application/octet-stream',
     'Accept-Ranges': 'bytes',
-    'Content-Disposition': `attachment; filename="${sanitizeFileName(fileName)}"`,
+    'Content-Disposition': contentDisposition(fileName),
     'Content-Length': String(totalSize),
   });
   return new Response(bodyOf(bytes), { status: 200, headers });

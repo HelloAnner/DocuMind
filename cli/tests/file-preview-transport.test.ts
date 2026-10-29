@@ -8,6 +8,7 @@ function transport(range: Partial<FilePreviewTransport["range"]> = {}): FilePrev
     preview: {},
     manifest: {},
     signed: {},
+    full: { status: 200, content_length: 9915, content_disposition: "inline; filename*=UTF-8''report.pdf" },
     range: {
       status: 206,
       content_type: "application/pdf",
@@ -23,6 +24,14 @@ function transport(range: Partial<FilePreviewTransport["range"]> = {}): FilePrev
 describe("assertRangedPreview", () => {
   test("accepts a full ranged PDF response", () => {
     expect(() => assertRangedPreview(transport())).not.toThrow();
+  });
+
+  test("rejects a broken full response even when byte ranges work", () => {
+    const broken = transport();
+    broken.full.status = 500;
+    expect(() => assertRangedPreview(broken)).toThrow(CliError);
+    broken.full.status = 200; broken.full.content_disposition = "";
+    expect(() => assertRangedPreview(broken)).toThrow(CliError);
   });
 
   test("rejects responses that cannot serve byte ranges", () => {
