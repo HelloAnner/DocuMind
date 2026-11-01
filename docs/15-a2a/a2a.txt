@@ -59,12 +59,19 @@ DocuMind A2A 服务端
   response.stage           -> status-update(working, 阶段文案)
   agent.query_understood   -> status-update(working, 正在理解问题)
   response.delta           -> artifact-update(answer, 增量文本)
-  response.replace         -> artifact-update(answer, 未发送后缀)
+  response.replace         -> artifact-update(answer, append=false 覆盖正文)
   sources.reported         -> 累计 sources (完成前一次性下发)
   response.completed       -> artifact-update(sources) + completed
   execution.completed      -> completed (兜底)
   execution.failed         -> event: error (JSON-RPC error)
-  其余(thinking.delta/tool.call.*/usage.reported/conversation.title.updated) 忽略
+  tool.call.started/result/failed -> status-update + metadata.process_step
+  其余(thinking.delta/usage.reported/conversation.title.updated) 忽略
+
+  process_step={id,kind:"tool",tool,text,detail?,result?,status,started_at,ended_at?}。
+  同一次调用保留相同 ID，开始与完成更新同一行。detail 为真实检索词、Shell 命令或技能名；
+  result 仅含证据条数、退出码等简短结果，不传原始工具返回、日志或隐藏思考。
+  字符串限长并隐藏密码、Token 与连接凭据；运行工具时不再插入重复的通用阶段文案。
+  CLI a2a ask --json 的 process_steps 保留合并后的行动详情与最终状态。
 
 六、错误
   账号未关联: HTTP 409

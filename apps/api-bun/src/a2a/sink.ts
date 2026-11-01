@@ -9,6 +9,7 @@
 //   error           {jsonrpc,id,error:{code,message,data:{reason}}}
 import type { SSEStreamingApi } from 'hono/streaming';
 import type { EventSink, OutboundSseEvent } from '../api/conversations_sse.ts';
+import { mapToolActivity, type ActivityStep } from './activity.ts';
 
 export interface A2AMeta {
   rpcId: string | number | null;
@@ -48,6 +49,7 @@ export class A2AFrameMapper {
   private readonly sources: A2ASource[] = [];
   private readonly sourceKeys = new Set<string>();
   private terminal = false;
+  private readonly tools = new Map<string, ActivityStep>();
 
   constructor(private readonly meta: A2AMeta) {}
 
@@ -62,8 +64,15 @@ export class A2AFrameMapper {
           status: { state: 'submitted' },
         }), this.statusFrame('正在检索文档')];
       case 'response.stage': {
+        if ([...this.tools.values()].some(step => step.status === 'running')) return [];
         const message = STAGE_MESSAGES[stringField(payload, 'stage') ?? ''];
         return message === undefined ? [] : [this.statusFrame(message)];
+      }
+      case 'tool.call.started':
+      case 'tool.call.result':
+      case 'tool.call.failed': {
+        const step = mapToolActivity(eventType, payload, this.tools);
+        return step ? [this.statusFrame(step.text, step)] : [];
       }
       case 'agent.query_understood':
         return [this.statusFrame('正在理解问题')];
@@ -135,10 +144,11 @@ export class A2AFrameMapper {
     });
   }
 
-  private statusFrame(message: string): A2AFrame {
+  private statusFrame(message: string, step?: ActivityStep): A2AFrame {
     return this.result('status-update', {
       kind: 'status-update', taskId: this.meta.taskId, contextId: this.meta.contextId,
       final: false, status: { state: 'working', message },
+      ...(step ? { metadata: { process_step: step } } : {}),
     });
   }
 

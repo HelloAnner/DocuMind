@@ -156,14 +156,39 @@ describe('A2A sink 事件映射', () => {
     expect(error.error.data.reason).toBe('pipeline_error');
   });
 
-  test('thinking.delta / tool.call.* 不产生 A2A 帧', async () => {
+  test('公开检索词与工具状态，开始完成同 ID，隐藏思考与原始结果不透传', async () => {
     const { ctx, frames, sink } = recordingContext();
-    sendProgressEvent(ctx, 'msg-1', { type: 'thinking_delta', delta: '想' });
+    sendProgressEvent(ctx, 'msg-1', { type: 'thinking_delta', delta: '隐藏思考不得公开' });
     sendProgressEvent(ctx, 'msg-1', {
-      type: 'tool_call_started', tool_call_id: 'c1', name: 'knowledge_search', arguments: {},
+      type: 'tool_call_started', tool_call_id: 'c1', name: 'knowledge_search',
+      arguments: { queries: ['差旅报销标准', '合同审批流程'], api_key: 'private-key' },
+    });
+    sendProgressEvent(ctx, 'msg-1', { type: 'status_updated', status: 'retrieving' });
+    sendProgressEvent(ctx, 'msg-1', {
+      type: 'tool_call_completed', tool_call_id: 'c1', name: 'knowledge_search',
+      result: { retrieved_chunk_count: 3, rows: ['原始结果不得公开'] },
     });
     await sink.flush();
-    expect(frames).toEqual([]);
+    expect(frames).toHaveLength(2);
+    const start = payload(frames[0]!).result.metadata.process_step;
+    const end = payload(frames[1]!).result.metadata.process_step;
+    expect(start).toMatchObject({ id: 'c1', tool: 'knowledge_search', status: 'running', detail: '差旅报销标准\n合同审批流程' });
+    expect(end).toMatchObject({ id: 'c1', status: 'completed', detail: start.detail, result: '找到 3 条证据' });
+    expect(end.started_at).toBe(start.started_at);
+    for (const secret of ['隐藏思考不得公开', '原始结果不得公开', 'private-key']) expect(JSON.stringify(frames)).not.toContain(secret);
+  });
+
+  test('Shell 命令受控展开，非零退出码与异常均为失败', async () => {
+    const { ctx, frames, sink } = recordingContext();
+    sendProgressEvent(ctx, 'msg-1', { type: 'tool_call_started', tool_call_id: 'b1', name: 'bash', arguments: { command: 'python3 check.py --token "private-token"' } });
+    sendProgressEvent(ctx, 'msg-1', { type: 'tool_call_completed', tool_call_id: 'b1', name: 'bash', result: { exit_code: 2, stdout: '不透传日志' } });
+    sendProgressEvent(ctx, 'msg-1', { type: 'tool_call_started', tool_call_id: 'b2', name: 'bash', arguments: { command: 'printf done' } });
+    sendProgressEvent(ctx, 'msg-1', { type: 'tool_call_failed', tool_call_id: 'b2', name: 'bash', error: 'Permission denied' });
+    await sink.flush();
+    expect(payload(frames[1]!).result.metadata.process_step).toMatchObject({ id: 'b1', detail: 'python3 check.py --token [已隐藏]', status: 'failed', result: '退出码 2' });
+    expect(payload(frames[3]!).result.metadata.process_step).toMatchObject({ id: 'b2', status: 'failed', result: 'Permission denied' });
+    expect(JSON.stringify(frames)).not.toContain('private-token');
+    expect(JSON.stringify(frames)).not.toContain('不透传日志');
   });
 });
 

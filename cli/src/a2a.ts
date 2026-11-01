@@ -28,6 +28,7 @@ export interface A2ARunReport {
   context_id: string;
   task_id: string | null;
   statuses: string[];
+  process_steps: Record<string, unknown>[];
   text: string;
   sources: unknown[];
   frame_count: number;
@@ -87,6 +88,7 @@ export class A2AClient {
     let taskId: string | null = null;
     let frameCount = 0;
     const statuses: string[] = [];
+    const steps = new Map<string, Record<string, unknown>>();
 
     for await (const frame of readSse(response)) {
       frameCount += 1;
@@ -108,9 +110,12 @@ export class A2AClient {
       if (typeof result.taskId === "string") taskId = result.taskId;
       if (kind === "status-update") {
         const status = result.status as { message?: unknown } | undefined;
+        const step = (result.metadata as { process_step?: Record<string, unknown> } | undefined)?.process_step;
+        if (step && typeof step.id === "string") steps.set(step.id, { ...steps.get(step.id), ...step });
         if (typeof status?.message === "string" && status.message !== "") {
           statuses.push(status.message);
-          options.onStatus?.(status.message);
+          const detail = typeof step?.detail === "string" ? step.detail.replace(/\s+/g, " ").slice(0, 180) : "";
+          options.onStatus?.(status.message + (detail ? ` · ${detail}` : ""));
         }
         continue;
       }
@@ -132,6 +137,7 @@ export class A2AClient {
       context_id: options.contextId,
       task_id: taskId,
       statuses,
+      process_steps: [...steps.values()],
       text,
       sources,
       frame_count: frameCount,
