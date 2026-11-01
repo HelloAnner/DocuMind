@@ -43,7 +43,8 @@ export function mapToolActivity(event: string, payload: unknown, steps: Map<stri
     if (step.status === 'failed') step.result = publicText(data.error, 240);
     else {
       const result = data.result ?? {};
-      if (typeof result.retrieved_chunk_count === 'number') step.result = `找到 ${result.retrieved_chunk_count} 条证据`;
+      const evidenceCount = Array.isArray(result.accepted_evidence_ids) ? result.accepted_evidence_ids.length : undefined;
+      if (typeof evidenceCount === 'number') step.result = `找到 ${evidenceCount} 条证据`;
       else if (typeof result.exit_code === 'number') {
         step.result = `退出码 ${result.exit_code}${Array.isArray(result.files) && result.files.length ? ` · ${result.files.length} 个文件` : ''}`;
         if (result.exit_code !== 0) step.status = 'failed';

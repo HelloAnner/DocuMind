@@ -166,7 +166,7 @@ describe('A2A sink 事件映射', () => {
     sendProgressEvent(ctx, 'msg-1', { type: 'status_updated', status: 'retrieving' });
     sendProgressEvent(ctx, 'msg-1', {
       type: 'tool_call_completed', tool_call_id: 'c1', name: 'knowledge_search',
-      result: { retrieved_chunk_count: 3, rows: ['原始结果不得公开'] },
+      result: { accepted_evidence_ids: [1, 2, 3], accumulated_evidence_count: 5, rows: ['原始结果不得公开'] },
     });
     await sink.flush();
     expect(frames).toHaveLength(2);
