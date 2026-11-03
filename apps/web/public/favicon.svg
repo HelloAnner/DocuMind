@@ -1,12 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" data-brand="documind">
-  <title>DocuMind</title>
-  <defs>
-    <linearGradient id="tile" x1="8" y1="4" x2="56" y2="64" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#139980"/>
-      <stop offset="1" stop-color="#087563"/>
-    </linearGradient>
-  </defs>
-  <rect width="64" height="64" rx="17" fill="url(#tile)"/>
-  <path d="M15 19c6-2 11-1 15 3v25c-4-4-9-5-15-3V19Z" fill="#fff"/>
-  <path d="M34 22c4-4 9-5 15-3v25c-6-2-11-1-15 3V22Z" fill="#A9F0D9"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" data-brand="documind"><title>DocuMind</title>
+<defs><linearGradient id="g" x1="10" y1="6" x2="54" y2="58" gradientUnits="userSpaceOnUse"><stop stop-color="#2FD39A"/><stop offset="1" stop-color="#0A9468"/></linearGradient></defs>
+<path fill="url(#g)" d="M37 4c3 1 4 5 6 8 6 5 13 13 13 24 0 14-11 23-24 23C19 59 8 50 8 37 8 24 26 0 37 4Z"/>
+<g transform="rotate(-24 30 24)"><rect x="21" y="15" width="6.5" height="12" rx="3.25" fill="#fff"/><rect x="32" y="12" width="5.5" height="9" rx="2.75" fill="#fff" opacity=".88"/></g>
 </svg>
