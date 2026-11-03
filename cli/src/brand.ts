@@ -16,5 +16,17 @@ export async function checkBrand(base: string, code: string, fetcher: typeof fet
       !svg.includes(`data-brand="${code}"`) || !svg.includes('viewBox="0 0 64 64"') || /<script|<image|<foreignObject|\bon\w+\s*=/i.test(svg)) {
     throw new Error(`Invalid ${code} SVG favicon`);
   }
-  return { ok: true, system: code, icon: iconUrl.href, sha256: createHash("sha256").update(svg).digest("hex") };
+  return { ok: true, system: code, icon: iconUrl.href, sha256: createHash("sha256").update(svg).digest("hex"), tabTitle: await checkTabTitle(html, pageUrl, fetcher) };
+}
+
+/** 浏览器标签标题是客户端拼的，只能检查构建产物里确实带了模板：租户名 - 系统名。 */
+async function checkTabTitle(html: string, pageUrl: URL, fetcher: typeof fetch): Promise<string> {
+  const template = " - 文档问答系统";
+  let bundle = "";
+  for (const src of [...html.matchAll(/<script\b[^>]*\bsrc=["']([^"']+)["']/gi)].map((m) => m[1]!)) {
+    const res = await fetcher(new URL(src, pageUrl), { redirect: "error", signal: AbortSignal.timeout(30_000) });
+    if (res.ok) bundle += await res.text();
+  }
+  if (!bundle.includes(template)) throw new Error(`Missing tab title template: 租户名${template}`);
+  return `租户名${template}`;
 }

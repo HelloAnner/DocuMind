@@ -58,6 +58,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("storage", reloadForTenantSwitch);
   }, []);
 
+  // 浏览器标签标题跟随租户：租户名 - 文档问答系统。
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const tenant = me?.tenant?.name?.trim();
+    document.title = tenant ? `${tenant} - 文档问答系统` : "DocuMind";
+  }, [me?.tenant?.name]);
+
 
   const finishAuthentication = useCallback((data: MeResponse) => {
     setMe(data);
