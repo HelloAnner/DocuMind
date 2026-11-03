@@ -108,8 +108,14 @@
   font-weight: 500;
 }
 
-.inviteResult code {
-  color: var(--text-tertiary);
+.inviteResult input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   overflow-wrap: anywhere;

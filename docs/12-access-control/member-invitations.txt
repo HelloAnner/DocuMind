@@ -1,0 +1,14 @@
+成员与邀请闭环
+==============
+/admin/members 与 /tenant/members 复用同一个成员与邀请页面，不再保留只读假入口。
+邀请已注册账号 -> 生成链接 -> 尝试复制 -> 对方登录并确认加入。
+复制结果必须按 copyToClipboard 的布尔返回值反馈，禁止失败时声称已复制。
+重发时重新打开邀请抽屉，始终回显新链接；失败时保留可选中输入框与手动复制按钮。
+过期/撤销邀请可以重发，已接受的不可重发；重发使旧令牌失效。
+过期 pending 记录在创建新邀请的事务中标记为 expired，不阻塞再次邀请。
+普通用户加入后需要在权限管理中显式授权知识库，不默认扩大权限。
+
+CLI：invitation create|list|validate|resend|revoke|accept
+     admin members|member-update|member-remove
+检查：bun test（apps/api-bun）；bun test tests/member-invitations.test.ts（cli）。
+真实环境：仅使用独立测试账号与测试租户验证生成、重发、旧链接失效、接受、角色/状态变更和移除。

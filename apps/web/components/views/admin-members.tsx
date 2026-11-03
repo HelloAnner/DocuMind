@@ -111,10 +111,10 @@ export function AdminMembers() {
       });
       const url = absoluteUrl(invitation.invite_url ?? "");
       setLatestInviteUrl(url);
-      await copyToClipboard(url);
-      await reload();
+      const copied = await copyToClipboard(url);
+      setMessage(copied ? "邀请已创建，链接已复制。" : "邀请已创建，但自动复制失败，请在下方手动复制链接。");
       setInviteEmail("");
-      setMessage("邀请已创建，链接已复制。链接只会在创建或重发时展示。");
+      await reload();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "邀请失败");
     } finally {
@@ -176,9 +176,10 @@ export function AdminMembers() {
       const next = await resendTenantInvitation(invitation.id);
       const url = absoluteUrl(next.invite_url ?? "");
       setLatestInviteUrl(url);
-      await copyToClipboard(url);
+      setDrawerOpen(true);
+      const copied = await copyToClipboard(url);
+      setMessage(copied ? "新邀请链接已复制，旧链接已失效，有效期 7 天。" : "重发成功，但自动复制失败，请在下方手动复制新链接；旧链接已失效。");
       await reload();
-      setMessage("邀请链接已刷新并复制，有效期重新计算为 7 天");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "重发失败");
     } finally {
@@ -201,12 +202,12 @@ export function AdminMembers() {
     }
   };
 
-  const copyInvite = async (invitation: TenantInvitation) => {
-    if (!invitation.invite_url) return;
-    const ok = await copyToClipboard(absoluteUrl(invitation.invite_url));
+  const copyInvite = async (url: string, id = "latest") => {
+    const ok = await copyToClipboard(url);
+    setMessage(ok ? "邀请链接已复制" : "复制失败，请选中链接手动复制");
     if (ok) {
-      setCopiedId(invitation.id);
-      setTimeout(() => setCopiedId((current) => (current === invitation.id ? null : current)), 1500);
+      setCopiedId(id);
+      setTimeout(() => setCopiedId((current) => (current === id ? null : current)), 1500);
     }
   };
 
@@ -311,13 +312,13 @@ export function AdminMembers() {
                 {invitation.invite_url ? (
                   <IconButton
                     aria-label="复制邀请链接"
-                    onClick={() => copyInvite(invitation)}
+                    onClick={() => copyInvite(absoluteUrl(invitation.invite_url!), invitation.id)}
                     title="复制邀请链接"
                   >
                     {copiedId === invitation.id ? <Check size={14} /> : <Copy size={14} />}
                   </IconButton>
                 ) : null}
-                <button disabled={busy === invitation.id || invitation.status !== "pending"} onClick={() => resend(invitation)} type="button">
+                <button disabled={busy !== null || invitation.kind !== "targeted" || invitation.status === "accepted"} onClick={() => resend(invitation)} type="button">
                   <RotateCw size={13} /> 重发
                 </button>
                 <button className="danger" disabled={busy === invitation.id || invitation.status !== "pending"} onClick={() => revoke(invitation)} type="button">
@@ -341,7 +342,8 @@ export function AdminMembers() {
               </div>
               <button aria-label="关闭" onClick={() => setDrawerOpen(false)} type="button"><X size={18} /></button>
             </div>
-            <p className={styles.drawerIntro}>租户管理员可管理成员与全部知识库；普通用户只能访问明确授权的知识库并进行问答。</p>
+            <p className={styles.drawerIntro}>受邀人须先注册账号。租户管理员可管理成员与全部知识库；普通用户加入后需在权限管理中授权知识库。</p>
+            {message ? <p role="status" aria-live="polite">{message}</p> : null}
             <label className={styles.field}>
               <span>受邀账号 *</span>
               <input
@@ -372,21 +374,22 @@ export function AdminMembers() {
             {latestInviteUrl ? (
               <div className={styles.inviteResult}>
                 <span>新邀请链接</span>
-                <code>{latestInviteUrl}</code>
-                <button onClick={() => copyToClipboard(latestInviteUrl)} type="button">
-                  <Copy size={14} /> 复制链接
+                <input aria-label="邀请链接" readOnly value={latestInviteUrl} onClick={(event) => event.currentTarget.select()} />
+                <button onClick={() => copyInvite(latestInviteUrl)} type="button">
+                  {copiedId === "latest" ? <Check size={14} /> : <Copy size={14} />} 复制链接
                 </button>
+                <small>链接仅在创建或重发时展示；重发后旧链接失效。</small>
               </div>
             ) : null}
             <div className={styles.drawerActions}>
               <button onClick={() => setDrawerOpen(false)} type="button">取消</button>
               <button
                 className={styles.primary}
-                disabled={busy === "create" || !inviteEmail.trim()}
+                disabled={busy !== null || !inviteEmail.trim()}
                 onClick={createInvite}
                 type="button"
               >
-                {busy === "create" ? "生成中…" : "生成邀请链接"}
+                {busy === "create" ? "生成中…" : "生成并复制邀请链接"}
               </button>
             </div>
           </aside>

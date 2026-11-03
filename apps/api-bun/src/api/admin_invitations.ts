@@ -82,6 +82,10 @@ async function createInvitation(c: Context<AppEnv>) {
         account.status === 'active' ? '该账号已是租户成员' : '该账号成员状态不可通过邀请恢复',
       );
     }
+    await tx`
+      UPDATE tenant_invitation SET status = 'expired', updated_at = NOW()
+      WHERE tenant_id = ${actor.tenant_id} AND status = 'pending' AND expires_at <= NOW()
+    `;
     const existing = await tx`
       SELECT id FROM tenant_invitation
       WHERE tenant_id = ${actor.tenant_id}
