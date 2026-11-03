@@ -8211,6 +8211,9 @@ body > .hiddenCanvasElement {
 .dm-brand-icon.busy > svg { animation: brand-busy-sway 2.4s ease-in-out infinite; }
 .brand-hero > svg { animation: brand-hero-swing 3.6s ease-in-out infinite; transform-origin: 50% 64%; }
 .brand-hero .eyes { animation: brand-hero-peek 3.6s ease-in-out infinite; }
+
+/* 眼睛跟鼠标：hero/busy 实例把 idle 的 peek 动画让给 --eye-x/--eye-y（元素内联变量由 JS 写入）。 */
+.dm-brand-icon.eye-tracking .eyes { animation: none; transform: translate(var(--eye-x, 0px), var(--eye-y, 0px)); transition: transform 90ms linear; }
 @keyframes brand-busy-look {
   0%, 14%, 100% { transform: translateX(0); }
   30%, 46% { transform: translateX(-3.4px) translateY(.6px); }

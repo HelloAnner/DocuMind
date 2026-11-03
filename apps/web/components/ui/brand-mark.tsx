@@ -1,6 +1,19 @@
+"use client";
+
 import { clsx } from "clsx";
+import { useEffect, useRef } from "react";
 
 export const BRAND_ICON_URL = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/favicon.svg?v=2`;
+
+// 眼睛跟随指针：把指针方向归一化后乘到最大位移上。4 个 viewBox 单位 ≈ idle peek 摆动幅度，
+// 两者视觉重量一致；90px 外就到满幅，近处则缓缓偏过去。
+function eyeAim(clientX: number, clientY: number, rect: DOMRect) {
+  const dx = clientX - (rect.left + rect.width / 2);
+  const dy = clientY - (rect.top + rect.height / 2);
+  const dist = Math.hypot(dx, dy) || 1;
+  const reach = Math.min(dist / 90, 1) * 4;
+  return { x: (dx / dist) * reach, y: (dy / dist) * reach };
+}
 
 // Grok 风格 blob，与 public/favicon.svg 同形同色；内联渲染以便 hero/busy 时 CSS 驱动眼睛与摆动动画。
 const EYES =
@@ -14,8 +27,45 @@ const BLOB_SVG =
   "</svg>";
 
 export function BrandIcon({ size = 32, className, decorative = false, hero = false, busy = false }: { size?: number; className?: string; decorative?: boolean; hero?: boolean; busy?: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  // 只给 hero / busy 这类会被注视的大眼睛挂监听，侧边栏徽标这种小图标不参与，
+  // 不然每帧几十次 getBoundingClientRect 白花钱。
+  const tracking = hero || busy;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || !tracking) return;
+    let frame = 0;
+    const reset = () => {
+      el.classList.remove("eye-tracking");
+      el.style.removeProperty("--eye-x");
+      el.style.removeProperty("--eye-y");
+    };
+    const onMove = (event: PointerEvent) => {
+      const { clientX, clientY } = event;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const { x, y } = eyeAim(clientX, clientY, el.getBoundingClientRect());
+        el.style.setProperty("--eye-x", `${x.toFixed(2)}px`);
+        el.style.setProperty("--eye-y", `${y.toFixed(2)}px`);
+        el.classList.add("eye-tracking");
+      });
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    window.addEventListener("blur", reset);
+    document.documentElement.addEventListener("pointerleave", reset);
+    return () => {
+      cancelAnimationFrame(frame);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("blur", reset);
+      document.documentElement.removeEventListener("pointerleave", reset);
+    };
+  }, [tracking]);
+
   return (
     <span
+      ref={ref}
       className={clsx("dm-brand-icon", hero && "brand-hero", busy && "busy", className)}
       style={{ display: "block", flexShrink: 0, width: size, height: size }}
       role={decorative ? undefined : "img"}
