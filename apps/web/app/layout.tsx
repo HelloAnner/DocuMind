@@ -5,6 +5,7 @@ import "./globals.css";
 import "./product-theme.css";
 import "./density.css";
 import { AuthProvider } from "@/components/providers/auth-provider";
+import { ThemeProvider, THEME_INIT_SCRIPT } from "@/lib/theme";
 
 
 export const metadata: Metadata = {
@@ -24,19 +25,8 @@ export default function RootLayout({
   return (
     <html data-theme="light" lang="zh-CN" suppressHydrationWarning>
       <head>
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `(() => {
-              const media = matchMedia("(prefers-color-scheme: dark)");
-              document.documentElement.dataset.theme =
-                localStorage.getItem("documind-theme") || (media.matches ? "dark" : "light");
-              media.addEventListener("change", () => {
-                document.documentElement.dataset.theme =
-                  localStorage.getItem("documind-theme") || (media.matches ? "dark" : "light");
-              });
-            })();`,
-          }}
-        />
+        <meta content="light dark" name="color-scheme" />
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -45,7 +35,9 @@ export default function RootLayout({
         />
       </head>
       <body>
-        <AuthProvider>{children}</AuthProvider>
+        <ThemeProvider>
+          <AuthProvider>{children}</AuthProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

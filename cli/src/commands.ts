@@ -2,6 +2,7 @@ import { createInterface } from "node:readline/promises";
 import { readFile, writeFile } from "node:fs/promises";
 import { ApiClient } from "./api.ts";
 import { checkBrand } from "./brand.ts";
+import { checkTheme } from "./theme.ts";
 import {
   booleanOption,
   listOption,
@@ -65,6 +66,11 @@ export async function dispatch(args: ParsedArgs): Promise<number> {
     case "brand": {
       if (args.positionals[1] && args.positionals[1] !== "check") throw new CliError("用法: documind brand check", 2);
       printJson(await checkBrand(api.baseUrl, "documind"));
+      return 0;
+    }
+    case "theme": {
+      if (args.positionals[1] && args.positionals[1] !== "check") throw new CliError("用法: documind theme check", 2);
+      printJson(await checkTheme(api.baseUrl));
       return 0;
     }
     case "doctor": return doctorCommand(api, json);

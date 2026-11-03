@@ -1,10 +1,12 @@
 "use client";
 
-import { Bell, Building2, CheckCheck, Compass, Heart, LogOut, MessageSquare, Moon, Settings, Sparkles, Sun, UserRound, X } from "lucide-react";
+import { Bell, Building2, CheckCheck, Compass, Heart, LogOut, MessageSquare, Settings, Sparkles, UserRound, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
+import { ThemeOptions } from "./theme-options";
+import { ThemeToggle } from "./theme-toggle";
 import styles from "./user-account-menu.module.css";
 
 const UPDATES = [
@@ -22,7 +24,6 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
   const [readUpdates, setReadUpdates] = useState<Set<string>>(new Set());
   const [windowPage, setWindowPage] = useState<{ href: string; title: string } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
-  const [isDark, setIsDark] = useState(false);
   const updatesRef = useRef<HTMLElement>(null);
   const [updatesLeft, setUpdatesLeft] = useState(312);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -47,10 +48,6 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
 
   useEffect(() => setAvatarFailed(false), [me?.user.avatar_url]);
 
-  useEffect(() => {
-    setIsDark(document.documentElement.dataset.theme === "dark");
-  }, []);
-
   if (!me) return null;
   const displayName = me.user.name || me.user.login_id;
   const initials = displayName.trim().slice(0, 1).toUpperCase();
@@ -61,12 +58,6 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
     setWindowPage({ href, title });
   };
 
-  const toggleTheme = () => {
-    const next = !isDark;
-    document.documentElement.dataset.theme = next ? "dark" : "light";
-    localStorage.setItem("documind-theme", next ? "dark" : "light");
-    setIsDark(next);
-  };
   const visibleUpdates = unreadOnly
     ? UPDATES.filter((update) => !readUpdates.has(update.id))
     : UPDATES;
@@ -102,10 +93,7 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
             </button>
           ) : null}
           
-          <button onClick={toggleTheme} type="button">
-            {isDark ? <Sun size={16} /> : <Moon size={16} />}
-            {isDark ? "切换亮色" : "切换暗色"}
-          </button>
+          <ThemeOptions />
           <div className={styles.divider} />
           <button className={styles.danger} onClick={logout} type="button">
             <LogOut size={16} />
@@ -199,6 +187,7 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
             <span>{roleLabel}</span>
           </span>
         </button>
+        <ThemeToggle />
         <button
           aria-label="探索"
           className={`${styles.bell} dm-user-explore`}
