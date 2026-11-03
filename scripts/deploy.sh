@@ -369,11 +369,11 @@ copy_to_remote "$TMP_ENV" "$REMOTE_RELEASE/.env.default"
 
 if [[ "$DEPLOY_LOCAL_SERVER" == "1" ]]; then
   COPYFILE_DISABLE=1 tar -czf - \
-    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner \
+    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner scripts/prune-releases.sh \
     | tar -xzf - -C "$REMOTE_RELEASE"
 else
   COPYFILE_DISABLE=1 tar -czf - \
-    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner \
+    apps/api-bun/migrations apps/api-bun/src/skills/scripts deploy/bash-runner scripts/prune-releases.sh \
     | ssh "$DEPLOY_HOST" "mkdir -p '$REMOTE_RELEASE' && tar -xzf - -C '$REMOTE_RELEASE'"
 fi
 
@@ -713,6 +713,7 @@ for _ in \$(seq 1 45); do
     echo "DocuMind is running on port \$deploy_port"
     curl -fsS "http://127.0.0.1:\$deploy_port/api/health"
     echo
+    bash "\$remote_release/scripts/prune-releases.sh" '$REMOTE_ROOT' "\$previous_release"
     exit 0
   fi
   sleep 1
