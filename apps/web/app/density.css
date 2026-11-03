@@ -10,41 +10,86 @@ body {
 }
 
 /* ---------- 对话侧栏 ---------- */
-.dm-new-session-button {
+/* 用 .dm-chat-sidebar 前缀提高优先级，确保压住 globals/product-theme 中的旧宽松规则 */
+.dm-chat-sidebar .dm-chat-sidebar-header {
+  height: 56px;
+  padding: 12px 16px;
+}
+
+.dm-chat-sidebar .dm-chat-workspace-switcher {
+  padding: 5px 0;
+}
+
+.dm-chat-sidebar .dm-chat-primary-actions {
+  padding: 10px 16px 6px;
+}
+
+.dm-chat-sidebar .dm-new-session-button {
   font-size: 13px;
   gap: 8px;
   height: 34px;
   padding: 0 10px;
 }
 
-.dm-chat-history {
+.dm-chat-sidebar .dm-chat-management {
+  gap: 2px;
+  padding: 4px 16px 0;
+}
+
+.dm-chat-sidebar .dm-chat-management button {
+  font-size: 13px;
+  gap: 8px;
+  height: 34px;
+}
+
+.dm-chat-sidebar .dm-chat-history {
   padding: 0 10px 10px;
 }
 
-.dm-history-group-title {
+.dm-chat-sidebar .dm-history-group {
+  margin-bottom: 12px;
+}
+
+.dm-chat-sidebar .dm-history-group-title {
   font-size: 11px;
   font-weight: 500;
   padding: 8px 6px 4px;
 }
 
-.dm-history-item {
-  height: 34px;
+.dm-chat-sidebar .dm-history-item {
+  height: 32px;
+  margin-bottom: 1px;
 }
 
-.dm-history-item-main {
+.dm-chat-sidebar .dm-history-item-main {
   font-size: 13px;
-  height: 34px;
+  gap: 6px;
+  height: 32px;
   padding: 0 10px;
 }
 
-.dm-history-menu button {
+.dm-chat-sidebar .dm-history-item-time {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  font-size: 11px;
+  transition: opacity var(--transition-fast);
+  white-space: nowrap;
+}
+
+/* hover/菜单打开时让位给操作按钮 */
+.dm-chat-sidebar .dm-history-item:hover .dm-history-item-time,
+.dm-chat-sidebar .dm-history-item.menu-open .dm-history-item-time {
+  opacity: 0;
+}
+
+.dm-chat-sidebar .dm-history-menu button {
   font-size: 12.5px;
   height: 30px;
 }
 
-.dm-chat-history-toolbar {
+.dm-chat-sidebar .dm-chat-history-toolbar {
   font-size: 11.5px;
-  padding: 10px 14px 4px;
+  padding: 8px 16px 2px;
 }
 
 .dm-chat-session-title .dm-chat-agent-name {
@@ -136,10 +181,69 @@ body {
   padding: 4px 10px;
 }
 
+/* ---------- 引用来源 ---------- */
+/* 去掉“盒中盒”：分组不套卡片，标题一行 + 轻量 chip */
+.dm-answer-citations {
+  gap: 4px;
+}
+
+.dm-citation-source-group {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  gap: 5px;
+  padding: 4px 2px 2px;
+}
+
+.dm-citation-source-heading {
+  gap: 5px;
+}
+
+.dm-citation-source-heading strong {
+  color: var(--text-secondary);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.dm-citation-source-heading > span {
+  font-size: 11px;
+}
+
+.dm-citation-source-heading > span::before {
+  content: "· ";
+}
+
+.dm-answer-citations-row {
+  gap: 6px;
+}
+
 .dm-citation-chip {
   font-size: 11.5px;
   height: 26px;
   padding: 0 9px;
+}
+
+.dm-citation-chip.compact {
+  background: var(--hover-bg);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  gap: 5px;
+  height: 24px;
+  min-height: 24px;
+  padding: 0 8px;
+}
+
+.dm-citation-chip.compact:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--accent-action) 12%, transparent);
+  border-color: transparent;
+}
+
+/* chip 内的定位徽标弱化为纯文字，不再套胶囊底 */
+.dm-citation-chip.compact .dm-location-badge {
+  background: transparent;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 0;
 }
 
 /* ---------- Markdown ---------- */

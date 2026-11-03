@@ -80,7 +80,7 @@ function CitationChip({
   );
 }
 
-function formatRelativeTime(value: string) {
+export function formatRelativeTime(value: string) {
   const timestamp = new Date(value).getTime();
   if (!Number.isFinite(timestamp)) return "";
   const elapsed = Math.max(0, Date.now() - timestamp);

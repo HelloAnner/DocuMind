@@ -24,6 +24,7 @@ import type { Conversation } from "@/lib/types";
 import { AppWindow, UserAccountMenu } from "./user-account-menu";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
 import { ConfirmDialog } from "./confirm-dialog";
+import { formatRelativeTime } from "../chat/message-row";
 import { TenantSwitcher } from "./tenant-switcher";
 import { BrandMark } from "./brand-mark";
 
@@ -243,7 +244,12 @@ export function ChatSidebar() {
               onClick={(e) => e.stopPropagation()}
             />
           ) : (
-            <span className="dm-history-item-title">{displayTitle(conv)}</span>
+            <>
+              <span className="dm-history-item-title">{displayTitle(conv)}</span>
+              <time className="dm-history-item-time" dateTime={conv.updated_at}>
+                {formatRelativeTime(conv.updated_at)}
+              </time>
+            </>
           )}
         </button>
 
