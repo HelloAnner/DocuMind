@@ -670,7 +670,7 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
   const renderEmpty = () => (
     <div className="dm-chat-empty">
       <div className="dm-chat-empty-orb-wrap">
-        <AgentOrb size="large" />
+        <AgentOrb size="large" hero />
       </div>
       <span className="dm-chat-empty-eyebrow">企业知识智能体</span>
       <p className="dm-chat-empty-greeting">{timeGreeting()}，{userName}</p>

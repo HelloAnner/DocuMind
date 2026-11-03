@@ -131,10 +131,12 @@ function AgentMeta({
   message,
   hasCitations,
   deletedAll,
+  busy = false,
 }: {
   message: Message;
   hasCitations: boolean;
   deletedAll: boolean;
+  busy?: boolean;
 }) {
   const meta = [
     hasCitations ? `基于 ${message.citations.length} 处原文` : "",
@@ -146,7 +148,7 @@ function AgentMeta({
   return (
     <div className="dm-answer-head">
       <span className="dm-answer-avatar">
-        <AgentOrb size="small" />
+        <AgentOrb size="small" busy={busy} />
       </span>
       <div className="dm-answer-head-copy">
         <div className="dm-message-identity">
@@ -319,6 +321,7 @@ export function MessageRow({
         message={{ ...message, citations: displayCitations }}
         hasCitations={hasDisplayCitations}
         deletedAll={deletedAll}
+        busy={isStreaming}
       />
 
 

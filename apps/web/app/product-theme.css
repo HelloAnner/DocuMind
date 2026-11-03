@@ -8259,3 +8259,37 @@ body > .hiddenCanvasElement {
     opacity: 1;
   }
 }
+
+/* ---------- 品牌 blob 动效：hero 大角度摇摆 / busy 处理中张望（4 系统一致设计） ---------- */
+.dm-brand-icon > svg { width: 100%; height: 100%; display: block; }
+.dm-brand-icon.busy .eyes { animation: brand-busy-look 2.4s ease-in-out infinite; }
+.dm-brand-icon.busy > svg { animation: brand-busy-sway 2.4s ease-in-out infinite; }
+.brand-hero > svg { animation: brand-hero-swing 3.6s ease-in-out infinite; transform-origin: 50% 64%; }
+.brand-hero .eyes { animation: brand-hero-peek 3.6s ease-in-out infinite; }
+@keyframes brand-busy-look {
+  0%, 14%, 100% { transform: translateX(0); }
+  30%, 46% { transform: translateX(-3.4px) translateY(.6px); }
+  64%, 80% { transform: translateX(3.4px) translateY(-.6px); }
+}
+@keyframes brand-busy-sway {
+  0%, 100% { transform: rotate(0deg); }
+  35% { transform: rotate(-3deg); }
+  70% { transform: rotate(3deg); }
+}
+@keyframes brand-hero-swing {
+  0%, 100% { transform: rotate(0deg) translateY(0) scale(1); }
+  18% { transform: rotate(-9deg) translateY(-2.5%) scale(1.04); }
+  40% { transform: rotate(7deg) translateY(0) scale(.97); }
+  62% { transform: rotate(-5deg) translateY(-1.5%) scale(1.02); }
+  82% { transform: rotate(3deg) translateY(0) scale(1); }
+}
+@keyframes brand-hero-peek {
+  0%, 12%, 100% { transform: translate(0, 0); }
+  26%, 40% { transform: translate(-4.2px, 1px); }
+  56%, 70% { transform: translate(4.6px, -1px); }
+  84% { transform: translate(-2.4px, .6px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dm-brand-icon.busy .eyes, .dm-brand-icon.busy > svg,
+  .brand-hero > svg, .brand-hero .eyes { animation: none; }
+}
