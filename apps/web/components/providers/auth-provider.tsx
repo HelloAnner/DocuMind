@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   AUTHENTICATED_HOME_PATH,
   getMe,
@@ -59,11 +59,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 浏览器标签标题跟随租户：租户名 - 文档问答系统。
+  // 带上 pathname：客户端路由切换会重新应用 layout metadata，必须每次导航后重写。
+  const pathname = usePathname();
   useEffect(() => {
     if (typeof document === "undefined") return;
     const tenant = me?.tenant?.name?.trim();
     document.title = tenant ? `${tenant} - 文档问答系统` : "DocuMind";
-  }, [me?.tenant?.name]);
+  }, [me?.tenant?.name, pathname]);
 
 
   const finishAuthentication = useCallback((data: MeResponse) => {
