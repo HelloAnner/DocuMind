@@ -43,7 +43,7 @@ import {
 import { useConversation } from "@/components/providers/conversation-provider";
 import type { ChatFile, Citation, Message } from "@/lib/types";
 import { useChatShell } from "@/components/providers/chat-shell-provider";
-import { AgentOrb } from "@/components/ui/brand-mark";
+import { BrandIcon } from "@/components/ui/brand-mark";
 import { useAuth } from "@/components/providers/auth-provider";
 import {
   createConversationShare,
@@ -669,25 +669,27 @@ export function ChatWorkspace({ initialInput = "" }: { initialInput?: string }) 
 
   const renderEmpty = () => (
     <div className="dm-chat-empty">
-      <div className="dm-chat-empty-orb-wrap">
-        <AgentOrb size="large" hero />
-      </div>
-      <span className="dm-chat-empty-eyebrow">企业知识智能体</span>
-      <p className="dm-chat-empty-greeting">{timeGreeting()}，{userName}</p>
-      <h2>今天想从知识中找到什么？</h2>
-      <p className="dm-chat-empty-description">从企业文档中检索事实、理解上下文，并保留每一处原文依据。</p>
-      <div className="dm-chat-capabilities" aria-label="问答能力">
-        <span className="active">知识问答</span>
-        <span>引用定位</span>
-        <span>跨库检索</span>
-      </div>
-      <div className="dm-chat-empty-suggestions">
-        {suggestions.map((text) => (
-          <button key={text} onClick={() => setInput(text)} type="button">
-            <span>{text}</span>
-            <ArrowUpRight size={13} aria-hidden="true" />
-          </button>
-        ))}
+      <BrandIcon size={120} hero decorative />
+      <div className="dm-chat-empty-copy">
+        <h2>{timeGreeting()}，{userName}</h2>
+        <p className="dm-chat-empty-description">从企业文档中检索事实、理解上下文，并保留每一处原文依据。</p>
+        <section className="dm-chat-empty-suggestions" aria-label="推荐问题">
+          <div className="dm-chat-empty-suggestions-head" aria-hidden="true">
+            <span className="dm-chat-empty-rule" />
+            <span className="dm-chat-empty-suggestions-label">
+              <Sparkles size={12} strokeWidth={1.8} />
+              试试这些问题
+            </span>
+            <span className="dm-chat-empty-rule" />
+          </div>
+          {suggestions.map((text) => (
+            <button key={text} onClick={() => setInput(text)} type="button">
+              <i className="dm-chat-empty-dot" aria-hidden="true" />
+              <span className="dm-chat-empty-suggestion-text">{text}</span>
+              <ArrowUpRight size={14} aria-hidden="true" />
+            </button>
+          ))}
+        </section>
       </div>
     </div>
   );

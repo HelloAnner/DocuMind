@@ -959,51 +959,6 @@ a {
   width: 32px;
 }
 
-/* Chat empty state */
-
-.dm-chat-empty {
-  align-items: center;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  justify-content: center;
-  padding: 24px;
-}
-
-.dm-chat-empty h2 {
-  color: var(--text-primary);
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0 0 8px;
-}
-
-.dm-chat-empty > p {
-  color: var(--text-tertiary);
-  font-size: 15px;
-  margin: 0 0 24px;
-}
-
-.dm-chat-empty-suggestions {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  margin-bottom: 24px;
-}
-
-.dm-chat-empty-suggestions button {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-subtle);
-  border-radius: 10px;
-  color: var(--text-secondary);
-  font-size: 14px;
-  padding: 12px 16px;
-  transition: background var(--transition-fast);
-}
-
-.dm-chat-empty-suggestions button:hover {
-  background: var(--hover-bg);
-}
-
 /* Right rail */
 
 .dm-right-rail {
