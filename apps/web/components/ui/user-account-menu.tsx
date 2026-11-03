@@ -5,7 +5,6 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from "re
 import { createPortal } from "react-dom";
 import { useAuth } from "@/components/providers/auth-provider";
 import { isSuperAdminRole, isTenantAdminRole } from "@/lib/auth";
-import { ThemeOptions } from "./theme-options";
 import { ThemeToggle } from "./theme-toggle";
 import styles from "./user-account-menu.module.css";
 
@@ -92,8 +91,6 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
               {isSuperAdmin ? "管理后台" : "企业控制台"}
             </button>
           ) : null}
-          
-          <ThemeOptions />
           <div className={styles.divider} />
           <button className={styles.danger} onClick={logout} type="button">
             <LogOut size={16} />
@@ -187,7 +184,6 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
             <span>{roleLabel}</span>
           </span>
         </button>
-        <ThemeToggle />
         <button
           aria-label="探索"
           className={`${styles.bell} dm-user-explore`}
@@ -217,6 +213,7 @@ export function UserAccountMenu({ onExplore }: { onExplore: () => void }) {
           <Bell size={18} />
           {hasUnreadUpdates ? <span /> : null}
         </button>
+        <ThemeToggle />
       </div>
       {windowPage ? <AppWindow {...windowPage} onClose={() => setWindowPage(null)} /> : null}
     </div>

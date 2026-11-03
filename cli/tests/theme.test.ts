@@ -2,8 +2,8 @@ import { expect, test } from "bun:test";
 import { checkTheme } from "../src/theme";
 
 const html = '<html lang="zh-CN" data-theme="light"><head><script>(function(){var s=localStorage.getItem("documind-theme");var p=s==="dark"||s==="light"?s:"system";var d=window.matchMedia("(prefers-color-scheme: dark)");})();</script><link rel="stylesheet" href="/_next/static/css/a.css"></head><body><script src="/_next/static/js/a.js"></script></body></html>';
-const css = ':root{--bg-primary:#faf9f7}[data-theme="dark"]{color-scheme:dark;--bg-primary:#0a0a0f}.theme-options{display:flex}.theme-toggle{width:26px}';
-const js = 'const T=[["system","跟随系统"],["light","亮色"],["dark","暗色"]];';
+const css = ':root{--bg-primary:#faf9f7}[data-theme="dark"]{color-scheme:dark;--bg-primary:#0a0a0f}.theme-toggle{width:26px}';
+const js = 'const t=(p)=>p==="system"?"跟随系统":p==="light"?"亮色":"暗色";const a=`外观：${t(p)}（点击切换到${t(n)}）`;';
 
 const fetcher = (page = html, sheet = css, script = js) => (async (url: string | URL | Request) => {
   const href = String(url);
@@ -25,6 +25,7 @@ test("theme check 覆盖亮暗 token、首屏脚本、默认跟随系统与统�
     fetcher(html, ':root{--bg-primary:#faf9f7}[data-theme="dark"]{--bg-primary:#0a0a0f}'),
     fetcher(html, css, 'const T=[];'),
     fetcher(html, css.replace(".theme-toggle{width:26px}", ""), js),
+    fetcher(html, css, js.replace("点击切换到", "点击")),
   ]) {
     await expect(checkTheme("https://example.test", "documind-theme", bad)).rejects.toThrow();
   }

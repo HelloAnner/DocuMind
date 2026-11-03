@@ -1,27 +1,31 @@
 "use client";
 
-import { Moon, Sun } from "lucide-react";
-import { useTheme } from "@/lib/theme";
+import { Monitor, Moon, Sun } from "lucide-react";
+import { nextThemePreference, themeLabel, useTheme } from "@/lib/theme";
 
 /**
- * 亮/暗小图标：放在侧栏账户行右侧（与另三套系统同位置）。
- * 点击按当前生效外观切到另一侧（即手动锁定），回到“跟随系统”走账户菜单的三段控件。
+ * 外观小图标：侧栏账户行最右侧的 26px 按钮，一步轮换 跟随系统 → 亮色 → 暗色。
+ * 三个系统（DocuMind / Northline / NexusFlow）同一个组件、同一份样式，Portal 用同名 class 实现。
  */
 export function ThemeToggle({ className = "" }: { className?: string }) {
-  const { theme, preference, toggleTheme } = useTheme();
-  const dark = theme === "dark";
-  const action = dark ? "切换到亮色" : "切换到暗色";
-  const current = preference === "system" ? "跟随系统" : preference === "light" ? "亮色" : "暗色";
+  const { preference, cycleTheme } = useTheme();
+  const title = `外观：${themeLabel(preference)}（点击切换到${themeLabel(nextThemePreference(preference))}）`;
 
   return (
     <button
-      aria-label={action}
+      aria-label={title}
       className={`theme-toggle ${className}`.trim()}
-      onClick={toggleTheme}
-      title={`${action}（当前：${current}）`}
+      onClick={cycleTheme}
+      title={title}
       type="button"
     >
-      {dark ? <Sun size={16} strokeWidth={1.7} /> : <Moon size={16} strokeWidth={1.7} />}
+      {preference === "system" ? (
+        <Monitor size={16} strokeWidth={1.7} />
+      ) : preference === "light" ? (
+        <Sun size={16} strokeWidth={1.7} />
+      ) : (
+        <Moon size={16} strokeWidth={1.7} />
+      )}
     </button>
   );
 }

@@ -48,8 +48,8 @@ export async function checkTheme(
   for (const label of THEME_LABELS) {
     if (!bundle.includes(label)) throw new Error(`外观控件缺少选项文案：${label}`);
   }
-  if (!bundle.includes("theme-options") || !bundle.includes("theme-toggle")) {
-    throw new Error("缺少统一外观控件（.theme-options / .theme-toggle）");
+  if (!bundle.includes("theme-toggle") || !bundle.includes("点击切换到")) {
+    throw new Error("缺少统一外观控件（.theme-toggle 小图标）");
   }
 
   return {

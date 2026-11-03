@@ -8,12 +8,16 @@ export type ThemePreference = "system" | "light" | "dark";
 
 const STORAGE_KEY = "documind-theme";
 
-/** 菜单三段控件的顺序与文案，四套系统一致。 */
-export const THEME_LABELS: [ThemePreference, string][] = [
-  ["system", "跟随系统"],
-  ["light", "亮色"],
-  ["dark", "暗色"],
-];
+/** 单个小图标按钮的轮换顺序：跟随系统 → 亮色 → 暗色 → 跟随系统。 */
+const THEME_ORDER: ThemePreference[] = ["system", "light", "dark"];
+
+export function themeLabel(preference: ThemePreference): string {
+  return preference === "system" ? "跟随系统" : preference === "light" ? "亮色" : "暗色";
+}
+
+export function nextThemePreference(preference: ThemePreference): ThemePreference {
+  return THEME_ORDER[(THEME_ORDER.indexOf(preference) + 1) % THEME_ORDER.length]!;
+}
 
 export function parseTheme(value: string | null): ThemePreference {
   return value === "light" || value === "dark" ? value : "system";
@@ -31,15 +35,15 @@ interface ThemeContextType {
   theme: Theme;
   preference: ThemePreference;
   setPreference: (preference: ThemePreference) => void;
-  /** 小图标按钮：按当前生效外观切到另一侧（即手动锁定）。 */
-  toggleTheme: () => void;
+  /** 小图标按钮：一步轮换 跟随系统 → 亮色 → 暗色。 */
+  cycleTheme: () => void;
 }
 
 const ThemeContext = createContext<ThemeContextType>({
   theme: "light",
   preference: "system",
   setPreference: () => {},
-  toggleTheme: () => {},
+  cycleTheme: () => {},
 });
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
@@ -90,7 +94,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
         theme,
         preference,
         setPreference,
-        toggleTheme: () => setPreference(theme === "dark" ? "light" : "dark"),
+        cycleTheme: () => setPreference(nextThemePreference(preference)),
       }}
     >
       {children}

@@ -8295,7 +8295,7 @@ body > .hiddenCanvasElement {
 }
 
 /* ===== 外观控件（四套系统同一外观，改动请同步另三套） =====
-   侧栏账户行右侧的 26px 小图标 + 账户菜单里的三段控件（跟随系统 / 亮色 / 暗色）。 */
+   侧栏账户行最右侧的 26px 小图标：跟随系统 → 亮色 → 暗色 循环。 */
 .theme-toggle {
   align-items: center; background: transparent; border: 0; border-radius: 6px;
   color: #86868f; cursor: pointer; display: flex; flex: none;
@@ -8303,17 +8303,5 @@ body > .hiddenCanvasElement {
 }
 .theme-toggle:hover { background: rgba(17, 17, 17, .045); color: #16161a; }
 .theme-toggle:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
-.theme-options { display: flex; gap: 2px; padding: 3px; border-radius: 6px; background: rgba(17, 17, 17, .05); }
-.theme-options > .theme-option {
-  background: transparent; border: 0; border-radius: 4px; color: #5c5c66; cursor: pointer;
-  flex: 1 1 0; font-family: inherit; font-size: 11.5px; font-weight: 500;
-  height: 24px; padding: 0 6px; white-space: nowrap;
-}
-.theme-options > .theme-option:hover { color: #16161a; }
-.theme-options > .theme-option[aria-pressed="true"] { background: #ffffff; color: #16161a; box-shadow: 0 1px 3px rgba(0, 0, 0, .09); }
 [data-theme="dark"] .theme-toggle { color: #a1a1aa; }
 [data-theme="dark"] .theme-toggle:hover { background: rgba(255, 255, 255, .06); color: #fafafa; }
-[data-theme="dark"] .theme-options { background: rgba(255, 255, 255, .06); }
-[data-theme="dark"] .theme-options > .theme-option { color: #a1a1aa; }
-[data-theme="dark"] .theme-options > .theme-option:hover { color: #fafafa; }
-[data-theme="dark"] .theme-options > .theme-option[aria-pressed="true"] { background: rgba(255, 255, 255, .14); box-shadow: none; color: #fafafa; }
