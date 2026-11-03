@@ -5,7 +5,7 @@ import type { TransactionSql } from 'postgres';
 import { AppError } from '../errors.ts';
 import type { AppEnv } from '../http/types.ts';
 import { recordAuditEvent } from '../auth/audit.ts';
-import { requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
+import { normalizeRole, requirePermission, requireTenantAdmin } from '../auth/permissions.ts';
 import { toRfc3339 } from '../infra/time.ts';
 
 interface UpdateMemberRequest { role?: string | null; status?: string | null; }
@@ -44,9 +44,9 @@ async function updateMember(c: Context<AppEnv>) {
     const currentRoles = (membership.roles as string[]) ?? [];
     const currentStatus = String(membership.status);
     const currentlyActiveAdmin = currentStatus === 'active'
-      && currentRoles.some((item) => item === 'tenant_admin');
+      && currentRoles.some((item) => normalizeRole(item) === 'tenant_admin');
     const effectiveStatus = status ?? currentStatus;
-    const effectiveRole = role ?? (currentRoles.some((item) => item === 'tenant_admin')
+    const effectiveRole = role ?? (currentRoles.some((item) => normalizeRole(item) === 'tenant_admin')
       ? 'tenant_admin' : 'end_user');
     const remainsActiveAdmin = effectiveStatus === 'active' && effectiveRole === 'tenant_admin';
     if (currentlyActiveAdmin && !remainsActiveAdmin) {
@@ -99,7 +99,7 @@ async function removeMember(c: Context<AppEnv>) {
     if (!membership) throw memberNotFound();
     const currentRoles = (membership.roles as string[]) ?? [];
     const currentStatus = String(membership.status);
-    if (currentStatus === 'active' && currentRoles.some((item) => item === 'tenant_admin')) {
+    if (currentStatus === 'active' && currentRoles.some((item) => normalizeRole(item) === 'tenant_admin')) {
       await ensureOtherActiveAdmin(tx, actor.tenant_id, userId);
     }
     await tx`
@@ -156,7 +156,7 @@ async function ensureOtherActiveAdmin(
     WHERE tenant_id = ${tenantId}
       AND user_id <> ${userId}
       AND status = 'active'
-      AND 'tenant_admin' = ANY(roles)
+      AND roles && ARRAY['tenant_admin', 'tenant_owner', 'enterprise_admin', 'team_admin', 'data_admin']::text[]
   `;
   if (Number(rows[0]?.count ?? 0) === 0) {
     throw AppError.conflictWith('LAST_TENANT_ADMIN', '租户必须至少保留一位启用中的租户管理员');

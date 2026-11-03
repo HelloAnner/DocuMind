@@ -15,6 +15,7 @@ import {
   type TenantInvitation,
 } from "@/lib/api";
 import { copyToClipboard } from "@/lib/clipboard";
+import { isTenantAdminRole } from "@/lib/auth";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -24,7 +25,7 @@ import { StatCard } from "@/components/ui/stat-card";
 import { Topbar } from "@/components/ui/topbar";
 import styles from "./admin-members.module.css";
 
-const roleLabel = (role: string) => (role === "tenant_admin" ? "租户管理员" : "普通用户");
+const roleLabel = (role: string) => (isTenantAdminRole([role]) ? "租户管理员" : "普通用户");
 
 const invitationStatusLabel: Record<string, string> = {
   pending: "待接受",
@@ -97,7 +98,7 @@ export function AdminMembers() {
   }, [members, query]);
 
   const activeMembers = members.filter((m) => m.status === "active");
-  const adminCount = activeMembers.filter((m) => m.roles.includes("tenant_admin")).length;
+  const adminCount = activeMembers.filter((m) => isTenantAdminRole(m.roles)).length;
   const pendingInvitations = invitations.filter((i) => i.status === "pending").length;
 
   const createInvite = async () => {
@@ -246,7 +247,7 @@ export function AdminMembers() {
           </div>
           {filtered.map((member) => {
             const currentUser = me?.user.id === member.id;
-            const role = member.roles.includes("tenant_admin") ? "tenant_admin" : "end_user";
+            const role = isTenantAdminRole(member.roles) ? "tenant_admin" : "end_user";
             return (
               <div className="dm-table-row dm-member-row" key={member.id}>
                 <div className="dm-user-cell">
