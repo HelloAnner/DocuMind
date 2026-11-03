@@ -6,6 +6,7 @@ import { timingSafeEqual } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import type { Sql } from 'postgres';
 import { AppError } from '../errors.ts';
+import { recordAuditEvent } from '../auth/audit.ts';
 import type { AppEnv } from '../http/types.ts';
 import type { AppState } from '../state.ts';
 
@@ -437,6 +438,56 @@ export function portalSyncRouter(): Hono<AppEnv> {
         revoked += await revokeUserSessions(state, localUserId);
       }
       return c.json({ portal_user_id: portalUserId, local_users_updated: updated, sessions_revoked: revoked });
+    } catch (error) {
+      return errorResponse(c, error);
+    }
+  });
+
+  // Portal 全局登出：把该门户账号在本系统的全部会话搒掉。
+  // 子系统不能自己判断“门户是不是已经退出”，只能由 Portal 下发这个事件。
+  router.post(`${PREFIX}/users/:portalUserId/sessions/revoke`, async (c) => {
+    try {
+      const state = requireToken(c);
+      const sql = requiredSql(state);
+      const portalUserId = c.req.param('portalUserId');
+      if (!/^[0-9a-f-]{36}$/i.test(portalUserId)) {
+        throw AppError.badRequest('INVALID_PORTAL_USER_ID', '无效的门户账号 ID');
+      }
+      const linked = await sql`
+        SELECT DISTINCT local_user_id FROM portal_identity_mapping WHERE portal_user_id=${portalUserId}
+      `;
+      if (!linked.length) throw AppError.notFound('LOCAL_USER_NOT_FOUND', '本地账号不存在');
+      let revoked = 0;
+      for (const link of linked) revoked += await revokeUserSessions(state, String(link.local_user_id));
+      await recordAuditEvent(sql, null, 'portal.session.revoke', 'auth_session', null, {
+        portal_user_id: portalUserId, local_users: linked.length, sessions_revoked: revoked,
+      }).catch(() => undefined);
+      return c.json({ portal_user_id: portalUserId, local_users: linked.length, sessions_revoked: revoked });
+    } catch (error) {
+      return errorResponse(c, error);
+    }
+  });
+
+  // Portal 全局登出：把该门户账号在本系统的全部会话搒掉。
+  // 子系统不能自己判断“门户是不是已经退出”，只能由 Portal 下发这个事件。
+  router.post(`${PREFIX}/users/:portalUserId/sessions/revoke`, async (c) => {
+    try {
+      const state = requireToken(c);
+      const sql = requiredSql(state);
+      const portalUserId = c.req.param('portalUserId');
+      if (!/^[0-9a-f-]{36}$/i.test(portalUserId)) {
+        throw AppError.badRequest('INVALID_PORTAL_USER_ID', '无效的门户账号 ID');
+      }
+      const linked = await sql`
+        SELECT DISTINCT local_user_id FROM portal_identity_mapping WHERE portal_user_id=${portalUserId}
+      `;
+      if (!linked.length) throw AppError.notFound('LOCAL_USER_NOT_FOUND', '本地账号不存在');
+      let revoked = 0;
+      for (const link of linked) revoked += await revokeUserSessions(state, String(link.local_user_id));
+      await recordAuditEvent(sql, null, 'portal.session.revoke', 'auth_session', null, {
+        portal_user_id: portalUserId, local_users: linked.length, sessions_revoked: revoked,
+      }).catch(() => undefined);
+      return c.json({ portal_user_id: portalUserId, local_users: linked.length, sessions_revoked: revoked });
     } catch (error) {
       return errorResponse(c, error);
     }

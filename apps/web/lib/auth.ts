@@ -109,6 +109,8 @@ export function getAuthHeaders(): Record<string, string> {
 
 export async function getMe(): Promise<MeResponse> {
   const res = await fetch(`${BASE}/api/v1/me`, { headers: getAuthHeaders() });
+  // 会话可能被门户全局登出撤销：401 立刻丢掉本地凭证，不留一个能骗过刷新页的残留 token。
+  if (res.status === 401) clearStoredAuth();
   if (!res.ok) throw new Error("获取当前用户失败");
   return res.json();
 }

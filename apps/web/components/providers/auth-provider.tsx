@@ -58,6 +58,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("storage", reloadForTenantSwitch);
   }, []);
 
+  // 门户全局登出（或另一个 tab 换号）会让本 tab 的会话失效。
+  // 定时 + 回到前台各确认一次，不用等到下一次报错才发现自己已经被踢。
+  const authenticated = Boolean(me);
+  useEffect(() => {
+    if (!authenticated) return;
+    const check = () => { void refresh(); };
+    const timer = window.setInterval(check, 30_000);
+    const onVisible = () => { if (document.visibilityState === "visible") check(); };
+    window.addEventListener("focus", check);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", check);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [authenticated, refresh]);
+
   // 浏览器标签标题跟随租户：租户名 - 文档问答系统。
   // 带上 pathname：客户端路由切换会重新应用 layout metadata，必须每次导航后重写。
   const pathname = usePathname();
