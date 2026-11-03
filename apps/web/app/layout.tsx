@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { BRAND_ICON_URL } from "@/components/ui/brand-mark";
+import { BRAND_ICON_URL } from "@/lib/brand-icon-url";
 import "streamdown/styles.css";
 import "./globals.css";
 import "./product-theme.css";

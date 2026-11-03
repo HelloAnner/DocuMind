@@ -3,8 +3,6 @@
 import { clsx } from "clsx";
 import { useEffect, useRef } from "react";
 
-export const BRAND_ICON_URL = `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/favicon.svg?v=2`;
-
 // 眼睛跟随指针：把指针方向归一化后乘到最大位移上。4 个 viewBox 单位 ≈ idle peek 摆动幅度，
 // 两者视觉重量一致；90px 外就到满幅，近处则缓缓偏过去。
 function eyeAim(clientX: number, clientY: number, rect: DOMRect) {
