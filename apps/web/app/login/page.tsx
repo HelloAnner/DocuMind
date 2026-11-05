@@ -110,7 +110,7 @@ function LoginForm({
       </button>
 
       <p className="dm-login-footnote">
-        还没有账号？<Link href="/register">立即注册</Link>
+        账号由企业管理员邀请开通 <Link href="/register">我有邀请链接</Link>
       </p>
     </form>
   );

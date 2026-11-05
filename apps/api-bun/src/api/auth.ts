@@ -746,6 +746,9 @@ async function identityLoginResponse(
 }
 
 async function registerHandler(c: import('hono').Context<AppEnv>) {
+  if ((process.env.REGISTRATION_MODE ?? 'invite_only') !== 'open') {
+    throw AppError.forbiddenWith('REGISTRATION_INVITE_ONLY', '账号由企业管理员邀请开通');
+  }
   const state = c.get('appState');
   const sql = state.sql;
   if (!sql) throw AppError.badRequest('DB_REQUIRED', '注册功能需要数据库');
