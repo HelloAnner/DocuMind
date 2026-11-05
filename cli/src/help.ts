@@ -66,7 +66,7 @@ const HELP = `DocuMind CLI ${VERSION} — 真实环境对话与检索诊断\n\n`
   `初始化与连接\n` +
   `  init                         创建 ~/.config/documind/config.toml\n` +
   `  config show|path             查看脱敏配置或配置路径\n` +
-  `  auth register|login [--platform]|whoami|logout  注册、登录、身份检查、退出\n` +
+  `  auth register|login [--platform]|whoami|logout  注册（默认关闭，需 REGISTRATION_MODE=open）、登录、身份检查、退出\n` +
   `  auth portal-login [--create]  一次性票据登录；新账号须明确 --create\n` +
   `  auth portal-link             用本地已验证会话关联历史账号（新票据）\n` +
   `  auth profile                查看展示名称与头像\n` +
