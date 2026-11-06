@@ -758,6 +758,9 @@ async function registerHandler(c: import('hono').Context<AppEnv>) {
   if (!username || !password) {
     throw AppError.badRequest('CREDENTIALS_REQUIRED', '请输入用户名和密码');
   }
+  if (username === state.config.superAdminEmail.trim().toLowerCase()) {
+    throw AppError.conflictWith('USERNAME_RESERVED', '该账号为平台管理员保留');
+  }
   if (new TextEncoder().encode(password).length > 72) {
     throw AppError.badRequest('PASSWORD_TOO_LONG', '密码不能超过 72 字节');
   }
